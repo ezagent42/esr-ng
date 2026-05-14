@@ -1,0 +1,2807 @@
+# ESR Kind Runtime — 架构设计 v0.4
+
+> **Status**: 架构骨架冻结,dev review **三轮**闭环(round-2 补 message_store.ex 缺口),可开始迁移实施
+> **Last updated**: 2026-05-14
+> **Owner**: Allen / ezagent42
+> **Changes from v0.3**: 顶层加"ESR 是 router 不是 req/resp app"framing;Resource Kind 加"shared referent needs identity"判定原则;Template 升级为双层模型(Class / Instance,Workspace 是 Instance 示范);加 reliability primitives 三件套(ReadyGate / PendingDelivery / Idempotency);RoutingRegistry 加 `put_new` 语义(unique-key only)+ `reverse_index` 反查;Matcher 边界按"读 core 数据 → core"画线;Plugin 判定原则显式化;5 个事故坑全部 design-in;LOC 校准 475/595 → ~870 → 920;feishu-cc 切片 4 张参考表入 spec;ES 从 deferred 改为已决不做;dev 两轮 review 闭环
+
+---
+
+## 1. 项目定位
+
+**ESR (Event-Sourcing Router) Kind Runtime** 是一个 Elixir/OTP-native 的 multi-channel → multi-agent 编排支撑系统。它把五件事正交拆开——**寻址 / 调用 / 执行 / 行为 / 权限**——然后用 Phoenix 的 transport 层作为外部入口,Registry 作为内部路由,把它们缝合。
+
+**系统形状是 IRC-style multi-tenant message bus over Phoenix transport**——actor 间通过 Message 通信,routing rules 决定每条 Message 的 receivers,Behavior 处理 Invocation 做出反应。Session = routing context owner(类似 IRC channel);Agent / User = Principal(类似 IRC nickname);Message = Entity-Entity 通信的 envelope。
+
+### 1.1 不是什么
+
+- **不是 framework** — 是一套约定 + 薄胶水(`esr_core` ≈ 920 LOC)+ Phoenix 的 transport 层
+- **不是 web 应用** — 但用 Phoenix 的 transport 子系统(Endpoint / Socket / Channel / Plug / PubSub / Presence)
+- **不是 fullstack Phoenix** — 不用 Controller / View;LiveView 用作早期内部 IM 前端 dogfood + 未来可选 admin dashboard
+- **不是 mixin 系统** — 一切扩展通过运行时 Registry
+- **部署形态** — **单文件 SQLite + 单 BEAM 节点 = 一个目录**,可部署到 Raspberry Pi 级边缘硬件。launchd / systemd 托管(v0);v0.x+ 支持 federation(独立节点 + cross-node 消息协议)
+
+### 1.2 跟 typical Phoenix app 的两条核心差异
+
+ESR 的多数特殊设计(投递保证、`put_new`、零匹配出口、幂等检查、稳定 `type_name`)都源自这两条:
+
+#### 差异 1: ESR 是 message router,不是 request/response web app
+
+普通 Phoenix app:请求进来 → handler 跑 → 响应出去。**调用方在等结果**——错误有天然的家(`{:error, _}` 一路冒泡回去),没人能忽略失败。
+
+ESR:消息进来 → 路由给 N 个 receiver → 各自反应 → 可能晚点从另一条路回复。**没有"在等结果的调用方"**。所以"消息到达零个 / 错误的 / 没 ready 的 receiver"是一条**合法代码路径,长得跟成功一模一样**——失败默认静默。
+
+**推论:ESR 必须人工制造可观测性**——普通 Phoenix app 免费得到的"错误冒泡",router 拿不到。每一处"消息没去到预期的地方"都必须显式变成 telemetry / DLQ / 大声 reject。**默认静默 = 默认有 bug**。
+
+这条差异是 4 个 P1/P2 设计动作的共同根:
+- PubSub 先发后订 → ReadyGate + PendingDelivery(§5.7)
+- 注册 shadowing → RoutingRegistry.put_new(§5.4)
+- 零匹配 → telemetry + DLQ unroutable(§5.5)
+- 幂等去重 → Esr.Idempotency(Appendix A step 2.7)
+
+#### 差异 2: 持久化层存了代码引用
+
+普通 Phoenix app 持久化的是数据,不是"哪个模块来处理"。**ESR 持久化层引用 Kind 模块身份**——`kind_snapshots` 表要知道"这条 state 是哪个 Kind 的"才能 rehydrate。
+
+如果直接存模块名字符串(`"Elixir.Esr.Entity.Agent"`),**代码身份和数据耦合**——rename 模块时旧 snapshot 行 orphan,`init/1` 时 `String.to_existing_atom` 会炸。
+
+**推论:用稳定的 `type_name` 作为间接层**(§10.1 schema 用 `kind_type`,KindRegistry 维护 `type_name → module` 映射)。模块改名时映射改一处,snapshot 行不动。
+
+### 1.3 名字债
+
+项目名 ESR = **Ezagent Session Router**(不是 Event-Sourcing Router)。"Event-Sourcing" 是历史误会,**v0 不做 ES**,改用 snapshot 持久化(详见 §10)。完整 ES 不在 v0.x roadmap 上——append-only Message stream 已经具备所有"ES 听起来很美"的优势,不需要承担 ES 复杂度(详见 Decision Log)。
+
+---
+
+## 2. 实现原则
+
+### 2.1 少发明,多装配
+
+整个系统真正属于"我们写的"代码约 920 行,集中在 `esr_core`。剩下全部装配 Phoenix / OTP / 生态库。判断标准:**新人加入项目时多懂几个东西还是少懂几个东西**——多记的拒绝,少记的接受。
+
+### 2.2 Plugin 判定原则 — 读什么数据,归哪里
+
+什么属于 `esr_core`,什么属于 plugin,**判定的核心是"这段代码读什么数据"**,而不是"它是基础设施还是业务":
+
+| 类别 | 归属 | 例子 |
+|---|---|---|
+| 读 core 数据(`%Invocation{}` / `%Message{}` / KindRegistry / RoutingRegistry) | **core** | Matcher 中 `mention`/`from`/`text_contains` 读 `%Message{}` 字段 |
+| 通用 invariants(注册一致性、投递保证、幂等) | **core** | `Esr.PendingDelivery` / `Esr.Idempotency` / `Esr.ReadyGate` |
+| 通用机制 infrastructure(DSL framework、registry 底座) | **core** | `Esr.Routing.Matcher` 的 DSL 宏 + 求值器 + `register/2` API |
+| 读 plugin 专属 payload | **plugin** | 假设 `feishu_card_type(:approval)` 读 Feishu 卡片结构 → 进 feishu plugin |
+| 业务概念(Identity、Chat 行为、Workspace 操作) | **plugin** | `esr_behavior_chat` / `esr_behavior_workspace` 等 |
+| 跟外部协议绑定 | **plugin** | `esr_plugin_feishu` / `esr_plugin_cc_channel` |
+| 可选 transport / UI | **plugin** | `esr_adapter_cli` / `esr_web_liveview` |
+
+**硬测试**:_plugin 作者应该专注业务,不应该被强迫做"我是不是要装 PendingDelivery plugin"这种基础设施决策_。
+
+**反例为什么这条原则重要**:Matcher 的 `from`/`mention` 类型,如果按"chat 业务边界"放进 `esr_behavior_chat`,那未来一个 `esr_behavior_audit` 或 `esr_behavior_workflow` 也路由 `%Message{}`,就要**依赖 chat plugin** 才能用 `from/1`——破坏 plugin 隔离。按"读 core 数据"原则,这些 matcher 直接在 core,任何 Message-router plugin 直接调用,**不依赖 chat**。
+
+### 2.3 Phoenix as transport, not fullstack
+
+Phoenix 在 ESR 里扮演 **transport framework** 角色,不是 fullstack framework。具体用与不用:
+
+| Phoenix 子系统 | 角色 | 是否核心 |
+|---|---|---|
+| `Phoenix.Endpoint` | HTTP/WS 监听入口 | ✅ 核心 |
+| `Phoenix.Socket` + `Channel` | WS 长连接 adapter | ✅ 核心 |
+| `Phoenix.PubSub` | actor 间消息总线 | ✅ 核心 |
+| `Phoenix.Presence` | 跨节点在线状态 | ✅ 核心 |
+| `Plug` | 同步 HTTP 入口(webhook、REST API) | ✅ 核心 |
+| `Phoenix.Router` | path → Channel/Plug 的 transport routing | ✅ 核心 |
+| **`Phoenix.LiveView`** | **server-rendered UI** | ✅ 早期内部 IM dogfood 前端 + 未来 admin |
+| `Phoenix.Controller` + `Phoenix.View` | 传统 HTML 渲染 | ❌ 不用 |
+| `Phoenix.HTML` form helpers | 同上 | ❌ 不用 |
+
+**LiveView 的两个用途**:
+
+1. **早期内部 IM 前端**(v0)— 在接外部 IM(Feishu/Slack)之前,先用 LiveView 写一个简陋的 IM-style 浏览器界面。**目的不是产品级 UI**,而是让我们尽早 dogfood ESR 的 IM-shape 概念(adapter pattern、Behavior schema、`@interface` 生成),验证它跟传统 IM 的差异。这部分代码放在独立 plugin `esr_web_liveview`,可独立装卸。
+2. **未来 admin dashboard**(v0.x)— 系统监控面板可用 LiveView 写;若选 Next.js 也行,两条路都保留。哪条最终主用,看 dogfood 结果。
+
+**Phoenix.Controller / View 仍然不用** — 我们的 HTTP 入口都是 Plug-level(Webhook / AdminAPI),不需要 MVC convention。
+
+### 2.4 Adapter pattern: protocol-specific code in adapters only
+
+所有外部入口(Feishu/Slack/CLI/MCP/HTTP/internal)都是 **Adapter**。Adapter 做两件事:
+
+1. 解析外部输入 → 构造 `%Invocation{}`
+2. 渲染结果回外部协议(通过 `ctx.reply`)
+
+**Adapter 不允许有业务语义**。判断硬标准:**这段代码能在 ExUnit 里直接 `Invocation.dispatch/1` 复现吗?** 不能 = 越界,拆。
+
+详见 §12。
+
+---
+
+## 3. 核心抽象
+
+```
+Kind        — URI-addressable actor type     (Session / Entity / Resource)
+              implementation: GenServer
+
+Behavior    — action module                  (the only invokable thing)
+              owns a state slice
+              declares @interface schema
+
+Plugin      — OTP application                (registers Kind / attaches Behavior)
+              naming: :esr_plugin_<name>
+
+Capability  — (Kind, Behavior, instance)     (CapBAC via ctx.caps)
+```
+
+四大概念。**v0.2 的 Process trait/impl 概念在 v0.3 删除**——执行机制就是 GenServer,没有第二种;v0.2 里 `os-process`/`pty`/`web` 三种 impl 实际是不同层的东西混在一起:
+
+- `web` → **Transport adapter**(顶层,§12)
+- `os-process` / `pty` → **Behavior 内部资源**(§6.3 标准 Behavior 库)
+
+### 3.1 Kind
+
+URI 可寻址的运行时类型。三个子类:
+
+| 子类 | 特征 | 例 |
+|---|---|---|
+| **Session** | 临时、有时限、绑定一组外部资源 | `Esr.Session.Feishu2CC`、`Esr.Session.CC` |
+| **Entity** | 长期存在、`@behaviour Principal`、持有 capability | `Esr.Entity.User`、`Esr.Entity.Agent` |
+| **Resource** | 操作对象,无 Principal | `Esr.Resource.Workspace`、`Esr.Resource.Path`、`Esr.Resource.ExternalChannel` |
+
+每个 Kind 类型有三个模块:
+
+```
+Esr.<Category>.<KindType>            — Kind 声明
+Esr.<Category>.<KindType>.Server     — 单实例 GenServer
+Esr.<Category>.<KindType>.Supervisor — 该 KindType 的 DynamicSupervisor
+```
+
+**Kind instance 的 URI 同时是它的 PubSub topic 前缀**:
+
+```
+agent://allen-小满              ← URI(寻址)+ topic(订阅 inbound)
+agent://allen-小满:events       ← outbound 事件流 topic
+agent://allen-小满:_internal    ← 内部 topic(plugin 自约定)
+```
+
+#### 3.1.1 Resource 子类 — "薄"形态 + Shared referent 判定原则
+
+Resource 是"操作对象,无 Principal"。它**可以是薄的**——没有消息流、没有外部进程、没有路由规则。它的 GenServer 不需要长期活跃,操作时存在、操作完落盘退出(`persistence: :on_terminate` 或 `:external` 都适合)。
+
+**判定一个概念该不该是独立 Resource Kind 的硬标准**:
+
+> **任何被多方指向的命名锚点都需要独立身份**(shared referent needs identity)
+
+具体来说:如果一个概念被 2 类以上的引用者按身份引用(cap subject、session bindings、user.default、其他 Resource 表、plugin 运行时配置 ...),它必须有稳定可寻址 URI,**不能展开成 tuple/字段集合分发到各引用者**——否则编辑就要 fan-out,变成 silent divergence 来源。
+
+Workspace 是这条原则的代表性应用(详见 §9.2 Template Instance):它被 5 类引用者指向(cap / session bindings / user.default_workspace_id / repo registry / plugin config),所以必须是独立 Resource Kind,不能展开成"folder URIs + agent_def + settings" tuple。
+
+#### 3.1.2 Kind 实例化策略默认值
+
+每种 Kind 子类的默认实例化模式:
+
+| 子类 | 默认实例化模式 | 默认 persistence | 例 |
+|---|---|---|---|
+| **Session** | 按需 spawn(template instantiate 时建,任务结束销毁) | `:on_terminate` | Feishu2CC 收到新 chat → 建一个 |
+| **Entity** | 显式 spawn(`/user:new` / `/agent:invite`,长期存在) | `:on_change` | 用户注册一次,长期使用 |
+| **Resource** | 按需 spawn,操作完可终止 | `:on_change` 或 `:on_terminate` | Workspace 用户创建一次,后续操作时短暂活跃 |
+
+Kind module 可在 `use Esr.Kind` 里 override 这些默认值。
+
+> **Implementation**:
+> - 单实例 → **`GenServer`**(OTP)
+> - Supervisor → **`DynamicSupervisor`**(OTP)
+> - URI → pid 寻址 → **`Registry`**(Elixir 标准库)
+> - PubSub topic → **`Phoenix.PubSub`**
+> - 跨节点 actor 寻址(v0.x+) → **`Horde.Registry`**
+> - 在线状态 → **`Phoenix.Presence`**
+
+### 3.2 Behavior
+
+**整个系统唯一可调用的东西。** Action 模块,owns 一个 state slice,**强制声明 `@interface` schema**。
+
+```elixir
+defmodule Esr.Behavior.Movable do
+  @behaviour Esr.Behavior
+
+  @interface %{
+    move: %{
+      args:    %{position: {:tuple, :integer, :integer}},
+      returns: %{position: {:tuple, :integer, :integer}},
+      errors:  [:out_of_bounds],
+      modes:   [:call]
+    },
+    stop: %{
+      args:    %{},
+      returns: %{ok: :boolean},
+      modes:   [:call, :cast]
+    }
+  }
+
+  def actions, do: [:move, :stop]
+  def state_slice, do: :movable
+  def init_slice(_args), do: %{position: {0, 0}, velocity: 0}
+
+  def invoke(:move, slice, args, _ctx),
+    do: {:ok, %{slice | position: args.position}}
+  def invoke(:stop, slice, _, _),
+    do: {:ok, %{slice | velocity: 0}}
+end
+```
+
+`@interface` 是 Behavior 的 schema(args / returns / errors / supported modes),所有 adapter(CLI、Slash、HTTP、MCP、LiveView)从这一份声明自动生成。这是 ESR 与 OpenAPI 类比的关键——**URI = operationId,`@interface` = schema**。
+
+> **Implementation**:`@behaviour` Erlang 内建 callback contract + 编译期 attribute(`@interface`);纯函数模块零依赖。
+
+### 3.3 Plugin
+
+OTP application,启动时向 Registry 注册 Kind 或 attach Behavior。详见 §8。
+
+> **Implementation**:**`Application`** + **`Supervisor`**(OTP);发现机制基于 `Application.spec/2` 元信息。
+
+### 3.4 Capability
+
+```elixir
+%Esr.Capability{
+  kind:       Esr.Entity.Agent,
+  behavior:   Esr.Behavior.Movable,
+  instance:   URI.t() | :any | {:within_session, URI.t()},
+  granted_by: URI.t(),
+  granted_at: DateTime.t()
+}
+```
+
+> **Implementation**:`MapSet` + struct;`Esr.Capability.matches?/2` 纯函数,~30 LOC。**不用第三方 ACL 库**——`Bodyguard`/`Canada` 是 RBAC,跟 CapBAC 不兼容。
+
+### 3.5 Message — Entity-Entity 通信的特化 envelope
+
+`%Esr.Invocation{}` 是 ESR 的 universal envelope(协议层)。`%Esr.Message{}` 是 Invocation 的一个**特化 args shape**,代表 Entity ↔ Entity 通信。
+
+```elixir
+%Esr.Message{
+  sender:      URI.t(),               # Entity URI(user://... 或 agent://...)
+  mentions:    [URI.t()],             # @-targets
+  body:        term(),                # text / structured map(attachments 等)
+  ref:         URI.t() | nil,         # ^reply-to(另一条 Message 的 URI)
+  inserted_at: DateTime.t()
+}
+```
+
+**何时是 Message,何时不是** — 判定标准是 **sender 跟 effective recipient 都是 Entity**:
+
+| 链路 | Message? |
+|---|---|
+| User → Agent | ✅ |
+| Agent → Agent(`@reviewer 看下`) | ✅ |
+| Agent → User(回复) | ✅ |
+| User → Session(`/set-default A`) | ❌ Entity → Session/Resource,管理操作 |
+| Agent → OSProcess(写 stdin) | ❌ Entity → Resource |
+| Session 中转给 receivers | ✅ Session 中转;`sender` 仍是源头 Entity |
+| pty 输出 → Agent | ❌ Resource → Entity,非 Entity-Entity |
+| Webhook ingest 第一跳 | ❌ adapter → Session,管理 |
+
+**Message identity invariant**:
+
+> 一条 Message 在系统内被任意次路由、转发、广播,其 `sender` / `ref` / `body` / `inserted_at` / `mentions` 字段**始终不变**。中转者(adapter / Session)**只创建携带该 Message 的新 Invocation**,从不修改 Message 本身。
+
+这条不变式是 Message stream 作为业务事实层(audit / replay)的基础。等价于 IRC `PRIVMSG` 在跨服务器中转时 source 字段不变。
+
+> **Implementation**:struct + helpers,**~25 LOC**(`Esr.Message.new/4`、`identity_match?/2`、`Jason.Encoder` impl)。Behavior 的 `@interface.args` 可以直接声明 `args: %Esr.Message{}` 作为 schema。
+
+---
+
+## 4. URI & Invocation
+
+### 4.1 URI as universal operationId
+
+URI 是 **system-wide operation identifier**,类比 OpenAPI 的 operationId。每个 invokable 操作有唯一 URI。
+
+```
+agent://allen-小满                          ← Kind instance(寻址 / subscribe)
+agent://allen-小满/behavior/movable         ← Behavior 引用(introspect / grant target)
+agent://allen-小满/behavior/movable/move    ← Action(invoke target)
+```
+
+URI 跟外部协议**完全解耦**——`slash://`、`feishu://`、`http://` 这种协议 ID **不进 URI**。协议事件在 Adapter 层翻译成内部 URI(详见 §12)。
+
+URI 的 scheme 决定 Kind 类型:`agent://`、`session://`、`user://`、`channel://` 等等,在 `Esr.URI.SchemeRegistry` 注册。
+
+> **Implementation**:Elixir 标准库 **`URI`** + `esr_core` 自写 ~25 行 scheme registry。
+
+### 4.2 Invocation = URI + Verb + Args + ctx
+
+```elixir
+%Esr.Invocation{
+  target: %URI{...},
+  mode:   :call | :cast | :call_stream | :subscribe | :introspect,
+  args:   map(),
+  ctx: %{
+    caller:      URI.t(),
+    caps:        MapSet<%Esr.Capability{}>,
+    trace_id:    String.t(),
+    deadline_ms: pos_integer(),
+    reply:       reply_target()           # ← 协议无关回复路由,见 §4.3
+  }
+}
+```
+
+**Mode 集合**(有限,不允许增长):
+
+| Mode | 实现 | 用途 |
+|---|---|---|
+| `:call` | `GenServer.call` | 同步 RPC,返回 `{:ok, value}` 或 `{:error, _}` |
+| `:cast` | `GenServer.cast` | fire-and-forget |
+| `:call_stream` | `GenServer.call` + Stream | 返回 `{:ok, Stream.t()}`,例:pty 输出、agent token 流 |
+| `:subscribe` | `Phoenix.PubSub.subscribe` | 建立订阅 |
+| `:introspect` | `GenServer.call` + 静态查询 | 查 schema / instance list / cap matrix(自指——对任意 URI 都可调) |
+
+`:introspect` 是 ESR 的 `/openapi.json` 等价物。`dispatch(agent://x, :introspect)` 返回该实例所有 Behavior + `@interface` 的合集。
+
+### 4.3 `ctx.reply` — 协议无关的回复路由
+
+Reply target 是 ctx 字段,**不是 URI 的一部分**。Behavior 完全不知道自己回的是 slash 还是 HTTP——它只返回结果,`Esr.Invocation.reply(ctx, result)` 根据 `ctx.reply` 路由回原协议。
+
+```elixir
+@type reply_target ::
+        {:phoenix_channel, topic :: String.t()}
+      | {:phoenix_pubsub, topic :: String.t()}
+      | {:plug_conn, conn :: Plug.Conn.t()}
+      | {:stdio_pipe, pid :: port()}
+      | {:mcp_response, request_id :: String.t()}
+      | {:caller_inbox, pid :: pid()}
+      | :ignore
+```
+
+Adapter 在构造 `%Invocation{}` 时填好 `ctx.reply`,所有 Behavior 共享一份 reply 协议。
+
+---
+
+## 5. Dispatch via Registry
+
+ESR 有三种 Registry 家族,各管一事:
+
+| Registry | 形态 | 用途 |
+|---|---|---|
+| **`KindRegistry`** (§5.1) | `URI → pid` | 寻址(Invocation 主路径) |
+| **`BehaviorRegistry`** (§5.2) | `{Kind, action} → Behavior module` | dispatch(Kind 内查 Behavior) |
+| **`RoutingRegistry`** (§5.4) | `external_key → URI(s)` | inbound / discovery / fan-out |
+
+### 5.1 KindRegistry
+
+```elixir
+Esr.KindRegistry.lookup(URI.parse("agent://allen-小满"))
+# → {:ok, #PID<0.234.0>}
+```
+
+每个 Kind instance 启动时注册自己的 URI。
+
+> **Implementation**:**`Registry`**(单节点)/ **`Horde.Registry`**(v0.2+ 集群)。`esr_core` ~30 行 wrapper。
+
+### 5.2 BehaviorRegistry
+
+Kind 声明时只是"列出"它支持的 Behavior:
+
+```elixir
+defmodule Esr.Entity.Agent do
+  use Esr.Kind,
+    behaviors: [
+      Esr.Behavior.Identity,
+      Esr.Behavior.Movable,
+      Esr.Behavior.Spawnable
+    ],
+    template: Esr.Entity.Agent.Template,
+    persistence: {:snapshot, :on_change}
+end
+```
+
+Plugin 在 `Application.start/2` 里把 Behavior 注册到 ETS:
+
+```elixir
+Esr.BehaviorRegistry.register(
+  kind: Esr.Entity.Agent,
+  behavior: Esr.Behavior.Movable
+)
+# ETS:
+#   {Esr.Entity.Agent, :move} → Esr.Behavior.Movable
+#   {Esr.Entity.Agent, :stop} → Esr.Behavior.Movable
+```
+
+> **Implementation**:**ETS**(微秒级 lookup)+ ~50 行 wrapper。
+
+### 5.3 Why dispatch over mixin
+
+| 维度 | Dispatch | Mixin (`use Behavior`) |
+|---|---|---|
+| Plugin 加 Behavior | ✅ Runtime register | ❌ 必须改 host 源码 + 重编译 |
+| 字段冲突 | ✅ Slice 隔离 | ❌ Macro hygiene 灾难 |
+| 编译期 / 运行期 | ✅ 一致 | ❌ 割裂 |
+| Dialyzer 校验 | ❌ Runtime check | ✅ 编译期可验 |
+
+代价:Dialyzer 不能验证"Kind 是否实现了它声明的 Behavior"。换用 `Application.start/2` 阶段的 fail-fast validation 弥补。**接受这个 trade-off**。
+
+### 5.4 RoutingRegistry — 第三种 Registry 家族
+
+#### 5.4.1 为什么需要
+
+n×n 网络的核心问题:**外部世界的 key 如何映射到 ESR URI**。例:
+
+```
+{chat_id: "oc_abc", app_id: "feishu_cli_x"}   → session://feishu-cc/cc-7f3a
+{feishu_user_id: "ou_xyz"}                    → user://allen
+{session_uri, role: :architect}               → [agent://arch-a, agent://arch-b]
+```
+
+任何 multi-channel adapter 都会遇到这种查询。如果不抽象,每个 plugin 各自建一个 ETS 表 + 自写注册/查询/崩溃恢复/集群同步代码——5 个 plugin 后就是 5 种风格的半成品(dev review 里 `chat_routing` / `ActorQuery` / `AdapterSocket.Registry` / multi-app routing 的现状)。
+
+**RoutingRegistry 是这类查询的统一抽象**——一组命名的 lookup 表,owner plugin 写,任何 plugin 读。
+
+#### 5.4.2 形态
+
+底层就是 **`Phoenix.Registry`**(支持 unique / duplicate keys,partition,value 任意 term)。RoutingRegistry 在它之上加一层**命名表 + owner-only-write 约束 + 写语义**。
+
+```elixir
+# Plugin Application.start 里声明表:
+defmodule EsrPluginFeishu.Application do
+  use Application
+
+  def start(_, _) do
+    Esr.RoutingRegistry.declare_table(
+      name: ChatRouting,
+      duplicate_keys: false,
+      owner: :esr_plugin_feishu
+    )
+    Esr.RoutingRegistry.declare_table(
+      name: PrincipalMapping,
+      duplicate_keys: false,
+      owner: :esr_plugin_feishu
+    )
+    Supervisor.start_link([], strategy: :one_for_one)
+  end
+end
+
+# 写(只允许 owner plugin):
+Esr.RoutingRegistry.put(ChatRouting, {chat_id, app_id}, session_uri)
+Esr.RoutingRegistry.put_new(ChatRouting, {chat_id, app_id}, session_uri)  # ← 新增
+
+# 读(任何 plugin):
+Esr.RoutingRegistry.lookup(ChatRouting, {chat_id, app_id})
+# → {:ok, session_uri} | :error
+
+Esr.RoutingRegistry.lookup_all(RoleIndex, {session_uri, :architect})
+# → [agent_a_uri, agent_b_uri]
+```
+
+##### `put` vs `put_new` — unique-key 表必须用 `put_new`
+
+`put` 是 last-writer-wins,**对 unique-key 表很危险**——会静默 shadow 已有 entry,后果是消息发给"错的那个 receiver"或"已死的连接",**无任何报错**(现有 esr 真实事故 `mcp-transport-orphan-session-hazard.md`)。
+
+```elixir
+def put_new(table, key, value) do
+  case lookup(table, key) do
+    {:ok, existing} ->
+      if alive?(existing),
+        do: {:error, {:already_registered, existing}},   # ← reject,不静默覆盖
+        else: put(table, key, value)                      # 旧的死了,可接管
+    :error -> put(table, key, value)
+  end
+end
+```
+
+**用法纪律**:
+
+| 表的 key 类型 | 用 `put` 还是 `put_new`? |
+|---|---|
+| `duplicate_keys: false`(unique-key,例 `ChatRouting`) | **`put_new`**——撞了 reject;`put` 只在"明知要覆盖"的场景用,且要有显式注释 |
+| `duplicate_keys: true`(duplicate-key,例 `SessionRules`) | **`put`**——本就是 append 语义,N 条 entry 是正常的 |
+
+`put` 在 unique-key 表上 **几乎永远不该用**。Linter 可加 warn:`Esr.RoutingRegistry.put` 调用 unique-key 表时提示用 `put_new`。
+
+#### 5.4.3 跟 KindRegistry 的关系——两段式 routing
+
+```
+        external_key             URI                    pid
+             │                    │                      │
+             │ RoutingRegistry    │ KindRegistry         │
+             ├───────────────────→├──────────────────────→│
+             │ external → URI     │ URI → pid             │
+             │ (plugin domain)    │ (esr_core domain)     │
+             ▼                    ▼                       ▼
+    "oc_abc + cli_x"      session://feishu-cc/cc-7f3a   #PID<0.512.0>
+```
+
+- **RoutingRegistry** = `external_key → URI`,plugin 域知识(Feishu 知道 chat_id,但 esr_core 不该懂)
+- **KindRegistry** = `URI → pid`,纯 esr_core 域,跟外部协议无关
+
+每次 inbound 流程**两个 Registry 配合**——adapter 用 RoutingRegistry 拿到 URI,然后 dispatch(内部用 KindRegistry 找 pid)。
+
+#### 5.4.4 责任分配:写入侧 vs 读取侧
+
+**写入侧(Phase 1: Session 创建)** — Session plugin 负责。Template instantiate 时把 `external_key → session_uri` 写入对应 table。
+
+```elixir
+defmodule Esr.Session.Feishu2CC.Template do
+  def instantiate(template_data, _opts) do
+    {:ok, session_uri} = start_session_genserver(...)
+    Esr.RoutingRegistry.put(ChatRouting,
+      {template_data.chat_id, template_data.app_id},
+      session_uri)
+    # ... 接着拉起 Pty 等
+    {:ok, session_uri}
+  end
+end
+```
+
+**读取侧(Phase 2: 消息到达)** — Adapter 负责。WebhookPlug / Channel 拿到外部协议事件 → 查 RoutingRegistry 拿 URI → 翻译 payload 成 `%Invocation{}` → dispatch。
+
+```elixir
+defmodule Esr.Web.WebhookPlug do
+  def handle_feishu_event(payload, conn) do
+    # 步骤 A — 查地址(RoutingRegistry)
+    {:ok, session_uri} = Esr.RoutingRegistry.lookup(ChatRouting,
+      {payload.chat_id, payload.app_id})
+    {:ok, user_uri} = Esr.RoutingRegistry.lookup(PrincipalMapping,
+      payload.user_id)
+
+    # 步骤 B — 翻译消息(adapter plugin 知识)
+    invocation = %Esr.Invocation{
+      target: URI.parse("#{session_uri}/behavior/chat_room/receive"),
+      mode: :call,
+      args: %{text: payload.text, sender: user_uri},
+      ctx: %{caller: user_uri, caps: ..., reply: {:plug_conn, conn}}
+    }
+
+    # 步骤 C — dispatch(esr_core)
+    Esr.Invocation.dispatch(invocation)
+  end
+end
+```
+
+**RoutingRegistry 完全不感知消息长什么样、怎么翻译**——它只是地址簿。
+
+#### 5.4.5 责任分配总表
+
+| 步骤 | 谁负责 | 做什么 |
+|---|---|---|
+| Phase 1: 注册 | **Session/Entity plugin** | `external_key → URI` 映射写入 RoutingRegistry |
+| Phase 2 步骤 A: 查地址 | **RoutingRegistry**(esr_core 服务) | `external_key → URI` |
+| Phase 2 步骤 B: 翻消息 | **Adapter plugin** | 外部 payload → `%Invocation{}` 结构 |
+| Phase 2 步骤 C: dispatch | **esr_core** | URI → pid → Behavior |
+
+#### 5.4.6 Core 不预定义任何 table
+
+`esr_core` 只提供 API(`declare_table` / `put` / `lookup` / `lookup_all` / `delete`),**不预定义任何具体 table**。理由:
+
+- core 不该懂 Feishu/Slack/MCP/CLI 这些协议
+- core 不该懂"role"这种业务概念
+- 每张 table 跟它的 owner plugin 同生共死
+
+典型 table 由 plugin 声明:
+
+| Table | Owner Plugin |
+|---|---|
+| `ChatRouting` | `esr_plugin_feishu` / `esr_plugin_slack`(各管自己) |
+| `PrincipalMapping` | 同上 |
+| `RoleIndex` | 谁定义 role 概念(通常 session orchestrator plugin) |
+| `SocketSession` | `esr_web`(WS connection → session URI) |
+| `SlashRoute` | `esr_adapter_slash` |
+| `AgentMention` | session plugin(@-mention 路由,见 §18.4) |
+
+#### 5.4.7 防 drift 的四条硬约束
+
+1. **URI 是寻址唯一入口**——"找 pid"必须最终回到 `KindRegistry.lookup(uri)`
+2. **Plugin 不准自建 ETS / Registry / Agent 做二级查询**;必须注册到 RoutingRegistry
+3. **Cross-session / cross-plugin 调用 = 普通 Invocation**;caller `ctx.caps` 必须含跨域 cap
+4. **每张 routing table 由一个 plugin owner-注册**;其他 plugin 只读不写
+
+#### 5.4.8 跨节点(v0.2+)
+
+`Phoenix.Registry` 单节点。集群时:
+- **KindRegistry** → 切到 **`Horde.Registry`**
+- **RoutingRegistry** → 切到 **`Horde.Registry`** 或 **`Phoenix.Tracker`**(底层都是 CRDT)
+- **`Phoenix.PubSub`** → 已经天然集群,不动
+
+迁移成本低,API 同型。
+
+> **Implementation**:**`Phoenix.Registry`**(底层)+ ~60 行 wrapper(owner check + table 注册 + put_new + helper)。
+>
+> **重要 framing 澄清**:这 ~60 行是**存储底座**,不代表 "routing 复杂度被解决了"。现有 esr 的 9 个 registry 共 1722 行,其中 prefix 匹配、overlay 分层、attach/detach 状态语义等业务逻辑 **没有消失,只是从"散落在 core"搬到了"各 owner plugin 内部"**。这符合 §5.4.6 "core 不预定义任何 table" 哲学,但读者不要因此低估总工作量——~1000 行 routing 业务逻辑会出现在 owner plugin 里(slash route plugin / chat routing plugin 等)。
+>
+> 不过这些 ~1000 行的迁移**不是 verbatim 移植**,大多数会**蒸发**——v0.4 的新模型(`@interface` 自动派生 slash routing、RoutingRegistry 通用存储、`put_new` 注册一致性)免费提供了相当一部分功能。迁移分诊规则详见 §17.2。
+
+### 5.5 Routing Rules — additive rules + matcher DSL
+
+RoutingRegistry 的一个特别重要的 use case 是 **session 内 message routing**——决定每条 Message 谁收。形态是**additive rules**:每条 rule `(matcher, receivers)` 独立可加,所有命中的 rule 的 receivers 取并集。不存在"谁覆盖谁",编辑路径就是 add/remove rule。
+
+#### 5.5.1 演化场景示例
+
+```
+Session 创建后,Feishu2CC Template 自带 1 条 rule:
+  Rule {matcher: from_external(:inbound), receivers: [pty_uri]}
+  // pty 永远收到所有 inbound,这是模板自带
+
+阶段 1: agent A 加入 → /invite 自动加:
+  Rule {matcher: mention("A"), receivers: [agent_a_uri]}
+
+阶段 2: /set-default A → 加 1 条:
+  Rule {matcher: always(), receivers: [agent_a_uri]}
+  // @A 进来同时命中两条,union 还是 [agent_a]
+
+阶段 3: agent B 加入:
+  Rule {matcher: mention("B"), receivers: [agent_b_uri]}
+  // @B 进来:命中 mention "B" → [B];命中 always → [A];union = [A, B]
+  // 这就是"mention B 时,A 也收到"——不需要特殊机制
+
+阶段 4: agent B 输出 @A:
+  // B 的输出经 Session 重新路由:命中 mention "A" → [agent_a];命中 always → [agent_a]
+  // union = [agent_a]
+```
+
+**整套 routing 函数 ~8 LOC**:
+
+```elixir
+def route(session_uri, message) do
+  Esr.RoutingRegistry.lookup_all(SessionRules, session_uri)
+  |> Enum.filter(fn {matcher, _} -> Matcher.match?(matcher, message) end)
+  |> Enum.flat_map(fn {_, receivers} -> receivers end)
+  |> Enum.uniq()
+end
+```
+
+#### 5.5.2 Matcher 是数据(DSL 编译期产),不是函数
+
+Plugin 作者写 DSL,编译期就是 AST 数据(类似 Ecto.Query):
+
+```elixir
+import Esr.Routing.Matcher
+
+# 用户写:
+rule always()              => [agent_a_uri]
+rule mention("B")          => [agent_b_uri, agent_a_uri]
+rule from_member(:pty)     => [external(:inbound_chat)]
+rule text_contains("deploy") and not from(agent_b_uri) => [deploy_agent_uri]
+
+# 编译/eval 后,RoutingRegistry 里存的:
+%{matcher: %{type: :always}, receivers: [agent_a_uri]}
+%{matcher: %{type: :mention, name: "B"}, receivers: [agent_b_uri, agent_a_uri]}
+%{matcher: %{type: :from_member, member: :pty}, receivers: [{:external, :inbound_chat}]}
+%{matcher: %{type: :and, ops: [
+  %{type: :text_contains, pattern: "deploy"},
+  %{type: :not, op: %{type: :from, uri: agent_b_uri}}
+]}, receivers: [deploy_agent_uri]}
+```
+
+`always/0`、`mention/1`、`from_member/1` 等不是函数调用,是**返回 matcher struct 的 constructor**——整个表达式 evaluate 出来是一棵数据树。所有下游消费(LiveView 显示、SQLite 存、跨节点同步、CLI `/route show`)都基于数据。
+
+#### 5.5.3 内建 matcher constructor — 全部在 core
+
+按 §2.2 Plugin 判定原则,**读 `%Message{}` / `%Invocation{}` 字段的 matcher 都在 core**——`%Message{}` 是 core 数据结构(§3.5,`message.ex` 在 §14 core 布局里),操作它的 matcher 是 core 数据上的逻辑。
+
+```
+组合子(纯逻辑):
+always()                        — 任何 message 都匹配
+and(matchers)
+or(matchers)
+not(matcher)
+
+Message-field matcher(读 %Message{} 字段):
+mention(name :: String.t())       — message.mentions 含 name 对应 Entity
+mention_uri(uri :: URI.t())       — message.mentions 含具体 URI
+from(uri :: URI.t())              — message.sender == uri
+from_member(role :: atom())       — sender 属于 session 内某 role
+from_external(direction :: atom()) — message 源自 ExternalChannel
+text_contains(pattern)            — body 文本含 pattern
+ref_to(uri :: URI.t())            — message.ref == uri(回复某条 message)
+```
+
+**为什么这些都在 core,不放 chat plugin**:Message routing **不是 chat 专属**。未来 `esr_behavior_audit` 或 `esr_behavior_workflow` 也会路由 `%Message{}`、也需要 `from`/`mention`。如果这些 matcher 在 `esr_behavior_chat`,audit plugin 要用就得**依赖 chat plugin** —— 违反 plugin 隔离北极星。
+
+这条规则的正向应用:**未来 plugin-专属 payload 的 matcher 才进 plugin**——例如假设的 `feishu_card_type(:approval)` 读 Feishu 专属卡片结构,进 `esr_plugin_feishu`;`slack_block_type(:section)` 读 Slack Block Kit,进 `esr_plugin_slack`。Core 不知道这些 plugin-专属结构。
+
+#### 5.5.4 Plugin 扩展新 matcher type
+
+```elixir
+# 在 plugin 的 Application.start 里注册:
+Esr.Routing.Matcher.register(
+  :feishu_card_type,
+  fn message, %{type: type} ->
+    case message.body do
+      %{__feishu_card__: %{type: ^type}} -> true
+      _ -> false
+    end
+  end
+)
+
+# 然后 rule 可以是:
+rule feishu_card_type(:approval) => [agent_a_uri]
+```
+
+注册的扩展 matcher **只在该 plugin 已加载时可用**,不影响其他 plugin。
+
+#### 5.5.5 路由函数 — 投递保证 + 零匹配出口
+
+```elixir
+defmodule Esr.Routing do
+  def route(session_uri, message) do
+    receivers =
+      Esr.RoutingRegistry.lookup_all(SessionRules, session_uri)
+      |> Enum.filter(fn {matcher, _} -> Matcher.match?(matcher, message) end)
+      |> Enum.flat_map(fn {_, receivers} -> receivers end)
+      |> Enum.uniq()
+
+    case receivers do
+      [] ->
+        # 零匹配:不能静默返回 [],必须显式可观测
+        :telemetry.execute(
+          [:esr, :routing, :unroutable],
+          %{count: 1},
+          %{session: session_uri, message_uri: message.uri}
+        )
+        Esr.DeadLetter.put(:unroutable, %{
+          session: session_uri,
+          message: message,
+          reason: :no_matching_rule
+        })
+        []
+
+      rs ->
+        # 有 receivers:逐个 dispatch Invocation(via dispatch 自动走 ReadyGate)
+        Enum.each(rs, fn receiver_uri ->
+          Esr.Invocation.dispatch(%Invocation{
+            target: build_target(receiver_uri, :chat, :receive),
+            args: message,
+            mode: :cast,
+            ctx: %{caller: message.sender}
+          })
+        end)
+        rs
+    end
+  end
+end
+```
+
+**为什么零匹配不能静默**:ESR 是 chat 系统(§1.2 差异 1),用户发的 message 到达零个 receiver **本身就是 bug**——用户期待"有人收到"。返回 `[]` 跟"正常工作"在代码上无法区分,bug 永远不会被发现。零匹配必须 → telemetry + DLQ unroutable,变成可观测事件。
+
+**投递保证**:`dispatch/1` 内部按 §5.7 reliability primitives 走——target ready 则 `KindRegistry.lookup + cast`,not-ready 则 `:cast` buffer / `:call` fail-fast。**plugin 作者只调 `dispatch/1`,投递保证自动生效**。
+
+#### 5.5.6 编辑就是普通 Invocation
+
+`/set-default A`、`/route mention B also-to A`、`/invite agent` 这些**不是特权 API**,而是 `Esr.Behavior.SessionRouting` 上的标准 actions。走完整 dispatch / CapBAC / audit / telemetry 链路——**编辑路径本身也有权限和审计**。
+
+```elixir
+defmodule Esr.Behavior.SessionRouting do
+  @behaviour Esr.Behavior
+
+  @interface %{
+    set_default:    %{args: %{agent: :string}, ...},
+    add_rule:       %{args: %{matcher: :map, receivers: {:list, :string}}, ...},
+    remove_rule:    %{args: %{rule_id: :string}, ...},
+    invite:         %{args: %{agent_template: :map}, ...},
+    kick:           %{args: %{agent: :string}, ...}
+  }
+  # ...
+end
+```
+
+> **Implementation**:`Esr.Routing.Matcher` 模块 **~85 LOC / cap 110**(组合子 + Message-field matcher + DSL 宏 + `match?/2` 递归 + `register/2` API + `to_string/1` 反向渲染)。整个 session routing 表逻辑 ~10 LOC,因为 RoutingRegistry 把存储和 lookup 接走了。
+
+### 5.6 三条 dispatch 不变式
+
+1. **Caller 永远不直接 import Behavior 模块** — 全部走 Registry,ACL/telemetry 钩点不可绕过
+2. **Behavior 只看自己 slice** — 跨 Behavior 协调走新 action,不偷看别的 slice
+3. **每次调用 `:start, :stop, :exception` 三事件** — 分布式追踪通过 OpenTelemetry handler 自动产出
+
+### 5.7 Reliability Primitives — 让正确性落在 core,不靠 plugin 作者纪律
+
+§1.2 差异 1(ESR 是 router 不是 req/resp)推论:必须人工造可观测性。落到 core 层就是三个 primitive,**plugin 作者根本无法绕过**——`use Esr.Kind` 宏自动接入,`Esr.Invocation.dispatch/1` 自动走对应路径。
+
+#### 5.7.1 ReadyGate — 标记 Kind 何时可投递
+
+```elixir
+defmodule Esr.ReadyGate do
+  # 三态:
+  #   :unknown   — URI 未在 KindRegistry,根本没启动
+  #   :not_ready — 已注册但 init/subscribe 还没完
+  #   :ready     — 已 mark_ready,可投递
+  
+  def mark_ready(uri) :: :ok
+  def status(uri) :: :unknown | :not_ready | :ready
+end
+```
+
+实现:ETS 表 `{uri, :ready | :not_ready}`,KindRegistry 注册时插 `:not_ready`,GenServer `handle_continue(:announce_ready, ...)` 后置 `:ready`。
+
+#### 5.7.2 PendingDelivery — not-ready 窗口的消息 buffer
+
+```elixir
+defmodule Esr.PendingDelivery do
+  # bounded per-URI buffer(默认 100/URI),溢出走 DLQ
+  def buffer(uri, message) :: :ok | {:error, :buffer_full}
+  
+  # ready 时主动 flush
+  def flush(uri) :: [message]
+end
+```
+
+实现:ETS 表 `{uri, [message]}`,GenServer `handle_continue(:announce_ready, ...)` 后调 `flush/1` 把 buffer 倒进 mailbox。
+
+#### 5.7.3 Idempotency — webhook 重试去重
+
+```elixir
+defmodule Esr.Idempotency do
+  # bounded ETS(默认 10k entry,LRU evict)
+  def seen?(key) :: boolean
+  def record(key) :: :ok
+end
+```
+
+由 adapter 在构造 Invocation 时填 `ctx.idempotency_key`(从外部协议 message_id derive),`dispatch/1` step 2.7 自动检查。
+
+**v0 语义:"收到即记",不是"成功才记"** — Appendix A step 2.7 `record(key)` 在 Behavior 执行**之前**完成。如果第一次 invocation 处理到 step 7 抛异常,key 已经记下;同一 message_id 的 webhook 重试会拿 `:duplicate_ignored`,**不会重试到成功**——失败路径走 DLQ 兜底。
+
+理由:更宽松的"成功才记"语义需要 invocation 全程事务化保护(record 写在 commit 阶段),会让 Idempotency 跟 Behavior 内部状态变更耦合,远超 v0 ~20 LOC 的复杂度预算。v0 接受这个 limitation,因为:
+
+- DLQ 已经捕获失败 invocation,运维可以查 + 重放
+- "幂等"在 webhook 协议层的本意是"provider 没收到 200 就重试",但 ESR 内部失败 ≠ provider 没收到——这两个失败模式应该分别处理(provider 没收到走 idempotency,内部失败走 DLQ),不该混在同一个 key 里
+- 真需要"重试到成功"的关键 invocation 应该用专门的 retry policy(future,§17 可加),不依赖 Idempotency
+
+显式标注这是 limitation,实施时不要"自然扩展"成事务化语义。
+
+#### 5.7.4 `use Esr.Kind` 宏自动生成的生命周期 — plugin 作者无法绕过
+
+```elixir
+# 宏展开出:
+def init(args) do
+  state = load_or_init(args)
+  :ok = Esr.KindRegistry.put_new(state.uri, self())   # 撞 key crash, let-it-crash
+  :ok = subscribe_own_topics(state.uri)
+  {:ok, state, {:continue, :announce_ready}}
+end
+
+def handle_continue(:announce_ready, state) do
+  Esr.ReadyGate.mark_ready(state.uri)
+  # 同时 flush 这段时间 buffer 的消息
+  Esr.PendingDelivery.flush(state.uri)
+  |> Enum.each(&handle_inbound(&1, state))
+  {:noreply, state}
+end
+```
+
+**保证次序**:`register → subscribe → mark_ready` 严格三步,plugin 作者改不了。这消除了"先发后订"race:
+
+- 注册前没人能 lookup 到 → 没人能 cast 进来
+- 注册后 subscribe 前的窗口里:**`dispatch/1` 路径被 ReadyGate 接住**(`put_new` 时 ReadyGate 就置 `:not_ready`,`:cast` 进 PendingDelivery buffer,`:call` fail-fast),所以 dispatch 来的 message 一条不丢
+- mark_ready 前 dispatch 来的消息 → PendingDelivery buffer,ready 时 flush
+
+**关键不变式**:这个窗口的正确性依赖 §5.7.6 的硬不变式(inbound 永远走 dispatch,**不**裸 `PubSub.broadcast` 到 inbound topic)。Phoenix.PubSub 对没有订阅者的 topic **不** buffer——裸 broadcast 进 inbound topic 在 register→subscribe 窗口里**会被丢**(这正是事故 2.1 的本来面貌)。
+
+#### 5.7.5 `Esr.Invocation.dispatch/1` 内置投递路径选择
+
+```elixir
+def dispatch(%Invocation{mode: mode, target: target} = inv) do
+  with :ok <- maybe_idempotency_check(inv),          # step 2.7
+       :ok <- validate_args(inv),                     # step 2.5
+       receiver_uri <- extract_receiver(target) do
+    
+    case {Esr.ReadyGate.status(receiver_uri), mode} do
+      {:ready, _} ->
+        # 标准路径:KindRegistry.lookup + cast/call
+        case Esr.KindRegistry.lookup(receiver_uri) do
+          {:ok, pid} -> deliver_to_pid(pid, mode, inv)
+          :error     -> {:error, :no_such_actor}
+        end
+      
+      {:not_ready, :cast} ->
+        # 异步可 buffer
+        Esr.PendingDelivery.buffer(receiver_uri, inv)
+      
+      {:not_ready, mode} when mode in [:call, :call_stream] ->
+        # 同步调用不能 buffer——caller 阻塞等结果会撞 deadline_ms,
+        # 必须 fail-fast 让 caller 自己决定重试
+        {:error, :not_ready}
+      
+      {:unknown, _} ->
+        {:error, :no_such_actor}
+    end
+  end
+end
+```
+
+**plugin 作者从此只调 `dispatch/1` 一个 API**——投递保证、ready gate、idempotency、cap check、telemetry **全部自动**。隐式正确性 > 显式选择。
+
+#### 5.7.6 何时用 `PubSub.broadcast` 而不是 dispatch — 硬不变式
+
+`dispatch/1` 路径用于"投递给确定 receiver"(routing 算出 N 个 receiver,逐个 dispatch)。**`Phoenix.PubSub.broadcast`** 仍然用于另一类场景:
+
+- **View 渲染**:Message 到达后,Chat Behavior 同时 broadcast 到 `<session_uri>:events` topic,View(LiveView / CLI / Feishu adapter)各自订阅渲染。**受众是不确定旁观者**,不需要 ready gate(view 没来就没渲染,语义上 OK)
+- **Telemetry events**:`:telemetry.execute` 内部走 broadcast pattern,handler 自由 attach
+
+**硬不变式(不是 guideline,是 §5.7.4 正确性依赖):inbound 消息永远走 `dispatch/1`,绝不允许裸 `PubSub.broadcast` 到 inbound topic**。
+
+理由:Phoenix.PubSub **不** buffer 没有订阅者的 topic 的消息。裸 broadcast 在 receiver 的 register→subscribe 窗口里**会被丢**——这正是事故 2.1 的根因。`dispatch/1` 通过 ReadyGate + PendingDelivery 接住这个窗口,broadcast 不行。
+
+判断规则的简化记法:**有特定 receiver → `dispatch/1`;广播给不确定旁观者 → `PubSub.broadcast`**。前者必须有投递保证,后者本来就接受"晚来没看到"。`code review` 时 grep `PubSub.broadcast` 出现在 inbound 路径上 = bug。
+
+> **Implementation**:三个 primitive 总共 ~65 LOC(ReadyGate ~20 / PendingDelivery ~25 / Idempotency ~20)。新增模块在 §14 LOC budget 反映。
+
+---
+
+## 6. Behavior
+
+### 6.1 Behavior contract
+
+```elixir
+defmodule Esr.Behavior do
+  @callback actions() :: [atom()]
+  @callback state_slice() :: atom()
+  @callback init_slice(args :: map()) :: map()
+  @callback invoke(action :: atom(), slice :: map(), args :: map(), ctx :: map()) ::
+              {:ok, new_slice :: map()}
+            | {:ok, new_slice :: map(), result :: term()}
+            | {:ok, new_slice :: map(), stream :: Stream.t()}   # :call_stream
+            | {:error, reason :: term()}
+end
+```
+
+### 6.2 `@interface` — 强制 schema 声明
+
+每个 Behavior **必须**声明 `@interface`:
+
+```elixir
+@interface %{
+  <action_atom> => %{
+    args:    %{ <field> => <type_spec> },
+    returns: %{ <field> => <type_spec> },
+    errors:  [<atom>],
+    modes:   [<mode>]
+  }
+}
+```
+
+Type spec 用 Elixir-style atom/tuple notation(`:string`、`:integer`、`{:tuple, :integer, :integer}`、`{:list, :string}`、`{:option, :string}`、`:map`、`%{<field> => <ty>}`)。v0 用 compile-time 简单 check;runtime 强校验 deferred 到 v0.2+。
+
+`@interface` 是所有 adapter 的生成源:
+
+| Adapter | 从 `@interface` 生成 |
+|---|---|
+| CLI(Optimus) | `$cli movable move --x 1 --y 2` parser |
+| Slash | `/move 1 2` parser + help text |
+| HTTP / REST | `POST /api/agents/{id}/behaviors/movable/actions/move` + OpenAPI yaml |
+| MCP | tool exposed to Claude Code / Python clients |
+| LiveView(未来) | form schema |
+| ExUnit | `mix esr.gen.test` 模板 |
+| Invocation.dispatch | args validation |
+
+`@command` tag 在 v0.2 描述过,v0.3 **删除**——它就是 `@interface.modes` 列表里有 `:call` 加上该 Behavior 出现在 CLI/Slash registry 里;不是新概念。
+
+### 6.3 Standard Behavior library
+
+`esr_core` 不强制依赖任何具体 Behavior。但 ESR 提供一组**标准 Behavior plugin**,作为独立 OTP app 分发,供常见场景直接挂载:
+
+| Plugin | Behavior | 用途 |
+|---|---|---|
+| `esr_behavior_identity` | `Esr.Behavior.Identity` | principal_id、display_name、自描述 |
+| `esr_behavior_os_process` | `Esr.Behavior.OSProcess` | 跑 sh/py/node 外部进程(底层 `:erlexec`) |
+| `esr_behavior_pty` | `Esr.Behavior.Pty` | 跑 PTY 子进程(底层 `:ex_pty`) |
+| `esr_behavior_chat` | `Esr.Behavior.Chat` | Entity-Entity Message 接收 + 路由(session 内消息流的主 Behavior) |
+| `esr_behavior_session_routing` | `Esr.Behavior.SessionRouting` | 编辑 session 的 routing rules(set-default / add-rule / invite 等) |
+| `esr_behavior_audit` | `Esr.Behavior.AuditLog` | Cross-cutting,可 attach 到任何 Kind |
+
+**OSProcess 的例子**(原 v0.2 `os-process` Process impl 的归位):
+
+```elixir
+defmodule Esr.Behavior.OSProcess do
+  @behaviour Esr.Behavior
+
+  @interface %{
+    spawn: %{
+      args:    %{cmd: :string, args: {:list, :string}, env: :map},
+      returns: %{pid: :integer},
+      modes:   [:call]
+    },
+    write_stdin: %{
+      args:    %{data: :string},
+      returns: %{},
+      modes:   [:cast]
+    },
+    kill:   %{args: %{signal: {:option, :atom}}, returns: %{}, modes: [:call]},
+    status: %{args: %{}, returns: %{running: :boolean, pid: :integer}, modes: [:call]}
+  }
+
+  def actions, do: [:spawn, :write_stdin, :kill, :status]
+  def state_slice, do: :os_process
+
+  def init_slice(_), do: %{erlexec_pid: nil, os_pid: nil, exit_code: nil}
+
+  def invoke(:spawn, slice, %{cmd: cmd, args: args, env: env}, ctx) do
+    {:ok, pid, os_pid} = :exec.run([cmd | args],
+      [:stdout, :stderr, :stdin, :monitor,
+       env: env |> Map.put("ESR_SPAWN_TOKEN", new_token())])
+    # stdout/stderr 经 erlexec message → Kind handle_info → PubSub broadcast
+    {:ok, %{slice | erlexec_pid: pid, os_pid: os_pid}, %{pid: os_pid}}
+  end
+end
+```
+
+**关键不变式**:外部进程的生命周期严格绑定 Kind GenServer。
+
+- Kind GenServer 是 erlexec port 的 owner
+- GenServer `terminate/2` **必须** kill 外部进程(否则孤儿)
+- erlexec 启动带 `:monitor` 选项,外部进程死了 GenServer 收到 `{'EXIT', os_pid, _}` → 决定重启或上报
+- `ESR_SPAWN_TOKEN` 注入子进程 env,防野生 worker 绑回
+- Per-boot orphan cleanup:`Application.start/2` 扫一次 `/tmp/esr-worker-*.pid` 杀掉残留
+
+`Esr.Behavior.Pty` 同构,只是底层是 `:ex_pty`。
+
+### 6.4 三条 Behavior 设计纪律
+
+1. **永远不依赖其他 Behavior** — 跨 Behavior 数据通过 `ctx` 传(典型:`ctx.caller`)
+2. **state_slice key 用 Behavior 模块名做命名空间** — 避免 plugin 之间偶然碰撞
+3. **不可读其他 slice** — 想要跨 Behavior 协调,定义新 Behavior + 新 action,显式编排
+
+---
+
+## 7. CapBAC
+
+### 7.1 模型
+
+- **粒度**:Behavior 级。持有 `cap(Kind, Behavior)` 即可调用该 Behavior 内所有 action
+- **携带方式**:Push。Caller 在 `ctx.caps` 装 `MapSet<Capability>`
+- **校验点**:Kind instance,Invocation flow step 5.5
+- **校验函数**:纯 MapSet 成员检查(`Esr.Capability.matches?/2`)
+
+> **Implementation**:`MapSet` + struct,~30 LOC。**不用第三方 ACL 库**。
+
+### 7.2 Scope 三档
+
+```elixir
+instance: URI.t()                       # 限定到具体实例
+instance: :any                          # 该 Kind 的所有实例
+instance: {:within_session, session_uri}  # 同 session 内的所有实例(n×n 友好)
+```
+
+n×n 场景:Session 内的 agents 默认互通,逐条 grant 太碎,用 `{:within_session, session_uri}` 一次性覆盖。跨 session / 跨域仍走显式 grant。
+
+### 7.3 默认 capability
+
+| 场景 | 默认 cap |
+|---|---|
+| Plugin 注册 KindType 时声明 default_caps | scope 必为 `:self`(最小权限) |
+| Creator 创建实例 | 自动获得该实例所有 Behavior 的 cap(全权) |
+| Session 内 agent 加入 | 自动获得 `{:within_session, session_uri}` 的标准 cap 集 |
+| 其他获取方式 | 必须显式 grant(v0 不支持 delegation) |
+
+`:self` 在 grant 时立即解析成具体 URI(**grant-time resolution**)——cap 内容凝固不变。
+
+### 7.4 Push → Token 迁移路径
+
+v0 Push;未来 Token(macaroon / biscuit / signed JWT)。**迁移成本极低**:
+
+```elixir
+# v0
+ctx.caps  :: MapSet<%Esr.Capability{}>
+# 验证: Enum.any?(ctx.caps, &Esr.Capability.matches?(&1, needed))
+
+# vN
+ctx.token :: %Esr.Token{}
+# 验证: Esr.Token.verify(ctx.token, needed, signing_key)
+```
+
+只换 step 5.5 的 verifier,Invocation flow / Behavior / Kind 全不动。
+
+### 7.5 不做(v0)
+
+- ❌ Delegation(持有者转授他人)
+- ❌ Attenuation(部分授权)
+- ❌ Revocation graph
+
+### 7.6 Admin principal — bootstrap + 不可 revoke
+
+ESR 的 cap 系统需要一个"种子 principal" — 系统首次启动时由谁创建其他 user / agent / 授 cap。**这个种子是 `user://admin`**:
+
+- BEAM 首次启动时,`Esr.Bootstrap` 检查 `users` 表为空 → 自动创建 `user://admin` 并授全部 cap(`%Capability{kind: :all, behavior: :all, instance: :all}`)
+- 后续启动 → 跳过(检查 `user://admin` 已存在)
+- Phase 1-3c 的 LiveView / CLI 在 authz stub 期默认 `ctx.caller = user://admin`(占位一致),Phase 3d 起 cap 真实化后 `user://admin` 仍持 all-caps
+
+**结构性不变式:`user://admin` 的 all-cap 不可 revoke**。`Esr.Capability.revoke/2` 在 step 1 检查:
+
+```elixir
+def revoke(subject, cap) do
+  if subject == "user://admin" and cap_is_all?(cap) do
+    {:error, :cannot_revoke_admin}
+  else
+    # normal revoke path
+  end
+end
+```
+
+**集中在 `revoke/2` 路径里检查,不允许调用方加 if 绕过**。理由:`user://admin` 是 bootstrap principal,revoke 它会让系统永远无法授权——自锁死。这个检查是**架构 invariant**,不是 policy(policy 可以变,invariant 不能)。
+
+未来多 user 场景:管理员通过 `user://admin` 创建普通 user,授予部分 cap;`user://admin` 自身不能被普通 user 影响(普通 user 没有 `cap(user://admin, ...)` 的修改权)。
+
+---
+
+## 8. Plugin 模型
+
+### 8.1 Plugin = OTP application(no DSL,纯 convention)
+
+Plugin 是一个标准 OTP app:
+
+```elixir
+# apps/esr_plugin_cc/mix.exs
+def application do
+  [
+    mod: {EsrPluginCC.Application, []},
+    env: [
+      esr_kinds:               [Esr.Session.CC],
+      esr_behaviors_attached:  []                # cross-cutting,见 §8.2
+    ]
+  ]
+end
+
+# apps/esr_plugin_cc/lib/esr_plugin_cc/application.ex
+defmodule EsrPluginCC.Application do
+  use Application
+
+  def start(_type, _args) do
+    Esr.KindRegistry.register_type(Esr.Session.CC, default_caps: [...])
+
+    Supervisor.start_link([Esr.Session.CC.Supervisor],
+      strategy: :one_for_one,
+      name: EsrPluginCC.Supervisor)
+  end
+
+  def stop(_state) do
+    Esr.Plugin.drain(:esr_plugin_cc)
+    :ok
+  end
+end
+```
+
+> **Implementation**:**`Application`** + **`Supervisor`**(OTP);drain 检查定时任务可走 **`Oban`**。
+
+### 8.2 两种 Plugin 模式
+
+**Mode A: Self-contained** — Plugin 注册自己的 Kind(例 `esr_plugin_cc` → `Esr.Session.CC`)
+
+**Mode B: Cross-cutting** — Plugin attach Behavior 到他人 Kind:
+
+```elixir
+def start(_, _) do
+  Esr.BehaviorRegistry.attach(
+    target_kind: Esr.Entity.Agent,
+    behavior:    Esr.Behavior.AuditLog,
+    on_attach:   :rehydrate
+  )
+  Supervisor.start_link([], strategy: :one_for_one)
+end
+```
+
+### 8.3 Plugin lifecycle 状态机
+
+| 操作 | Registry 动作 | 已运行 instance 影响 |
+|---|---|---|
+| `register_type` (Mode A) | 注册 KindType | 无 |
+| `attach` (Mode B) | 注册 `{kind, action} → behavior` | broadcast rehydrate |
+| `detach` (Mode B 卸载) | 移除 `{kind, action}` 映射 | 保留 slice,dormant |
+| `unregister_type` (Mode A 卸载) | 移除 KindType | DynamicSupervisor 整棵 drain → stop |
+
+**卸载语义**:drain till `instance_count == 0`,才允许 stop。Plugin Supervisor 状态多一个 `:draining`,期间 `start_child` 全部拒绝。
+
+> **Implementation**:rehydrate broadcast → **`Phoenix.PubSub`**;drain 状态机自写,基于 `DynamicSupervisor.which_children/1` 轮询。
+
+### 8.4 Plugin discovery
+
+**无中心化 registry**。`Esr.Plugin.discover/0` 扫 `Application.loaded_applications/0`,过滤出 `:env` 中带 `:esr_kinds` 或 `:esr_behaviors_attached` 的 application。
+
+> **Implementation**:**`Application.loaded_applications/0`** + **`Application.spec/2`**(OTP)。
+
+### 8.5 Cross-cutting attach 五条规则
+
+| Q | 答案 |
+|---|---|
+| 已存在实例 vs 新建实例 | 两者都覆盖,broadcast rehydrate |
+| 已存在 principal 自动 grant cap | 不自动;plugin 提供 migration 命令(`mix esr.plugin.grant <plugin>`) |
+| Action 名冲突 | Hard fail,plugin 启动报错 |
+| Behavior 之间能依赖吗 | 不能;跨 Behavior 数据通过 `ctx` |
+| Detach 时 slice 怎么办 | 保留作为 dormant data,重装后继续可读 |
+
+### 8.6 命名 convention
+
+```
+:esr_plugin_<name>   ↔  EsrPlugin<Name>  ↔  apps/esr_plugin_<name>/
+```
+
+---
+
+## 9. Templates — 双层模型(Class + Instance)
+
+V0.4 把 v0.3 单层 Template 升级为**双层模型**——区分"开发者写的 instantiate 代码"和"用户存的具体配置数据"。这条分离的发现来自 grill 现有 esr 的 Workspace 用法:`workspace://esr-dev` 是用户编辑的命名预设(folders/agent/settings/env),不是模块代码;但它需要被 `/session:new` 消费来 instantiate 实际 session。
+
+```
+┌──────────────────────────────────────────────────────────────────┐
+│  Template Class    (模块级,开发者写)                            │
+│    e.g. Esr.Session.Feishu2CC.Template                           │
+│    "这类 session 如何 instantiate" 的代码                        │
+└──────────────────────────────────────────────────────────────────┘
+                              │
+                              │  instantiate(data, opts)
+                              ▼
+┌──────────────────────────────────────────────────────────────────┐
+│  Template Instance (运行时 Resource Kind,用户创建)              │
+│    e.g. workspace://esr-dev                                      │
+│    携带具体预设数据(folders/agent/settings/env)                │
+│    用户编辑、命名、可寻址                                         │
+└──────────────────────────────────────────────────────────────────┘
+```
+
+### 9.1 Template Class — 模块级
+
+每个 Template Class 是个实现 `Esr.Kind.Template` behaviour 的模块:
+
+```elixir
+defmodule Esr.Kind.Template do
+  @callback validate(instance_data :: map()) :: :ok | {:error, [violation()]}
+  @callback instantiate(instance_data :: map(), opts :: keyword()) ::
+              {:ok, URI.t()} | {:error, term()}
+  @callback list_instances(class_id :: String.t()) :: [URI.t()]
+end
+
+defmodule Esr.Session.Feishu2CC.Template do
+  @behaviour Esr.Kind.Template
+  
+  def validate(%{folders: folders, agent: agent} = data) do
+    # 检查 instance_data 形状是否符合本 Class 的期待
+    cond do
+      not is_list(folders) or folders == [] -> {:error, [:folders_required]}
+      not is_binary(agent)                   -> {:error, [:agent_required]}
+      true                                   -> :ok
+    end
+  end
+
+  def instantiate(instance_data, opts) do
+    # 用 instance_data 起一个 Feishu2CC session
+    # ...
+  end
+end
+```
+
+### 9.2 Template Instance — 运行时 Resource Kind
+
+Template Instance 是用户创建的、命名的预设数据,**本质就是一个 Resource Kind 实例**(§3.1)。它没有 Principal、没有外部进程、没有消息流——它是"被指代的配置数据"。
+
+**Workspace 是 Template Instance 最重要的现存示例**:
+
+```elixir
+defmodule Esr.Resource.Workspace do
+  use Esr.Kind,
+    type_name: :workspace,
+    subclass: :resource,
+    persistence: {:snapshot, :on_change}
+  
+  # state slice 直接对应用户编辑的字段
+  defstruct [
+    :uri,        # workspace://esr-dev — 稳定身份
+    :name,       # "esr-dev" — 显示名(可改,不影响 URI)
+    :owner,      # user URI
+    :folders,    # [folder_uri] — 有序,folders[0] = canonical cwd
+    :agent,      # default agent_def
+    :settings,   # %{} — 点命名 config map
+    :env,        # %{} — 注入 session 的环境变量
+    :transient,  # bool
+    :location    # 存储位置
+  ]
+  
+  # 标准 Behavior 集:
+  # - Esr.Behavior.WorkspaceFolders  (add-folder / list-folders / remove-folder)
+  # - Esr.Behavior.WorkspaceMetadata (rename / edit / describe / set-default)
+  # - Esr.Behavior.WorkspaceBindings (bind-chat 通过 RoutingRegistry)
+  # - Esr.Behavior.WorkspaceRepos    (import-repo / forget-repo)
+end
+```
+
+#### 为什么 Workspace 必须是独立 Resource Kind,不能展开成 tuple
+
+按 §3.1.1 "shared referent needs identity" 原则,Workspace 被**至少 5 类引用者**按身份指向(每类都按 UUID 指,不是按 tuple 内容):
+
+1. **Cap 持有者** — `cap(workspace://esr-dev, ...)` 需要稳定 subject URI
+2. **运行中 session** — `SessionBindings` 维护 `(workspace_uri ↔ session_set)` 双向实时映射
+3. **User 默认值** — `user.default_workspace_uri`,resolve.ex 第 3 级 fallback
+4. **Repo 路径发现** — `RepoRegistry`:`repo_path → workspace` 映射
+5. **Plugin 运行时配置** — `Config.resolve("plugin_x", [:user_uri, :workspace_uri])` 按 workspace 分层
+
+把 Workspace 展开成 tuple `(folder_uris + agent_def + settings)` 意味着 5 类引用者各持一份 tuple 副本:
+- 编辑就要 fan-out 到所有副本——这是补发 1 描述的"静默 divergence" bug 类
+- 双向 `session ↔ workspace` 映射变成 `session ↔ tuple`,**反查不可能**("哪些 session 在用 esr-dev?"无法回答)
+
+**所以 Workspace 必须独立存在**,但它**很薄**——没有外部资源、没有消息流,GenServer 操作时短暂活跃,操作完 `:on_change` 落盘。这符合 §3.1.1 Resource 薄形态。
+
+### 9.3 `validate/1` 作为 instance data 的契约
+
+Template Instance 跟 Template Class 之间**不绑定**——同一个 `workspace://esr-dev` 可以被多个 Class 消费(`Esr.Session.Feishu2CC.Template` 起 Feishu session、`Esr.Session.CC.Template` 起本地 CC session,都消费同一份 workspace 数据)。
+
+衔接靠**契约**:任何 Class 想消费某个 Instance 的数据,**必须 `validate/1` 通过**——Class 通过 `validate/1` 声明"我接受什么形状的 instance data"。
+
+```elixir
+# /session:new 流程:
+def new_session(workspace_uri, class_module) do
+  with {:ok, instance_data} <- Esr.Resource.Workspace.read_state(workspace_uri),
+       :ok <- class_module.validate(instance_data),
+       {:ok, session_uri} <- class_module.instantiate(instance_data, ...) do
+    # session 起来了,session bindings 写入 RoutingRegistry
+    Esr.RoutingRegistry.put(SessionBindings, workspace_uri, session_uri)
+    {:ok, session_uri}
+  end
+end
+```
+
+`validate/1` 是 v0.3 已有的 callback,**双层 Template 没有引入新概念**,只是把它的角色明确成"instance data 契约"。Class 跟 Instance 独立存在,通过契约衔接——零新 mechanism。
+
+### 9.4 现存的双层混淆 case — `session_template` 子系统(833 LOC)
+
+现有 esr 的 `session_template/` 子系统(实测 833 行)**已经混淆了这两层**——它的 registry 支持 `register(name, template, source: :operator)`,`source: :operator` 意味着运营时能注册一个。也就是说现有 session template 里**一部分是代码定义的(Class)、一部分是运营注册的(Instance)**,挤在一个 registry 里。
+
+V0.4 双层模型正好把它们解耦:
+- 代码定义的 → Template Class(模块,装在 plugin 里)
+- 运营注册的 → Template Instance(Resource Kind 实例,SQLite 持久化)
+
+**这不是"未来扩展",是 v0 现在就该拆**——`session_template/` 子系统在迁 v0 时直接套用双层模型。
+
+### 9.5 Future extraction — Agent / Tool Preset
+
+**不假装它存在,但留 framing 口子**。现有 esr 里 agent 配置内嵌在 Workspace 的 `agent` + `settings` 字段(`agent: "cc"`, `settings: %{"cc.model" => ...}`),**还不是独立 Template Instance**。
+
+未来如果用户需要独立编辑、命名、跨 workspace 复用的 agent 预设(`agent_preset://my-claude-opus-config`),按双层模型扩展即可——再加一个 `Esr.Resource.AgentPreset` Kind 即可,Class 端各 agent 实现自己的 `validate/1`。Tool preset 同理。
+
+V0.4 spec **不创建** AgentPreset / ToolPreset Kind,仅留下 framing 兼容性——双层模型天然支持未来扩展。
+
+---
+
+## 10. 持久化分层
+
+四类东西,走不同机制,**不可混淆**:
+
+| 类型 | 内容 | v0 存储 | 未来升级 |
+|---|---|---|---|
+| **A. 配置 / 定义** | KindType 注册、Plugin 装载、Template Class 内容、**plugin 运行时配置** | Ecto + SQLite | 不变 |
+| **B. 实例存在性** | instance URI ↔ KindType 映射 | Ecto + SQLite | 不变 |
+| **C. 实例状态** | Kind GenServer state(`:caps`, slices,包含 Template Instance 数据如 Workspace) | **Snapshot 到 SQLite**(`:map` field) | 不变(append-only Message stream 已具备 ES 的好处,详见 §1.3) |
+| **D. 调用流水 / 审计** | 谁在何时调了什么 | Ecto append-only | 加 archival pipeline |
+| **E. 失败诊断队列** | 失败 case + **unroutable** 落地的 bounded FIFO | Ecto + OldestFirst evict | 不变 |
+| **F. Message stream** | append-only message log(业务事实层) | Ecto + SQLite(JSON via `:map` field) | 升 ES 后变成 event stream |
+| **G. 文件附件** | binary blobs(图片/文档/语音) | SQLite BLOB(<10MB)或 S3 | 不变 |
+| **H. Routing entries** | RoutingRegistry 持久化(见 §5.4.8) | Ecto + SQLite | 不变 |
+
+**Plugin 运行时配置归属 A 类**(详见 §10.5):Feishu app credentials、chat-to-workspace bindings 等,plugin 自己用 Ecto 读写,跟 KindType 注册同等级。
+
+> **Implementation 全部基于 Phoenix-adjacent 生态**:
+> - **`Ecto`** + **`Ecto.SQL`** + **`ecto_sqlite3`** — schema / migration / query / driver
+> - **BEAM 原生 timer**(`Process.send_after/3`)— snapshot 定时 / audit batch flush / DLQ evict;**不引入 Oban**
+
+
+### 10.1 C — Snapshot 策略(v0)
+
+```sql
+CREATE TABLE kind_snapshots (
+  uri          TEXT PRIMARY KEY,
+  kind_type    TEXT NOT NULL,         -- 稳定 type_name(:agent / :workspace 等)
+                                       -- 不存模块名字符串(避免改名 staleness)
+  state        TEXT NOT NULL,
+  version      INTEGER NOT NULL DEFAULT 0,
+  updated_at   TEXT NOT NULL
+);
+```
+
+**为什么用 `kind_type` 不存模块名字符串**(§1.2 差异 2 推论):
+
+模块名字符串(`"Elixir.Esr.Entity.Agent"`)在 rename 模块时变成 orphan 引用,下次 `init/1` 用 `String.to_existing_atom` 会炸——**代码身份和数据耦合**。
+
+用稳定 `type_name`(`:agent` / `:workspace` 等)作为间接层:
+- `KindRegistry` 维护 `type_name → current_module` 映射(plugin 启动时注册)
+- snapshot 写时存 `type_name`,读时 KindRegistry 查最新 module
+- 模块改名只需 plugin 的注册代码改一处,SQLite 数据不动
+
+```elixir
+# Plugin 注册时声明 type_name:
+defmodule Esr.Entity.Agent do
+  use Esr.Kind, type_name: :agent, ...
+end
+
+# KindRegistry 自动维护映射,plugin 作者不需要写额外代码
+```
+
+写时机三选一(Kind 自己声明):
+
+```elixir
+use Esr.Kind, persistence: {:snapshot, :on_change}              # 关键长期 entity
+use Esr.Kind, persistence: {:snapshot, periodic: 30_000}        # 高频可丢秒
+use Esr.Kind, persistence: {:snapshot, :on_terminate}           # Session 类
+use Esr.Kind, persistence: :ephemeral                            # 测试用
+use Esr.Kind, persistence: :external                             # 状态在外部
+```
+
+GenServer `init/1`:从 snapshot 表读最新 state,无记录则用 `init_slice` 初始化。
+
+**`:on_change` 的精确语义**:**slice 值真变了才写**,不是"invoke 后都写"。
+
+dispatch step 8(Appendix A)收到 `{:ok, new_slice, result}` 后,Kind GenServer 用 `new_slice != old_slice` 判断 dirty——变了才落 snapshot。理由:
+
+- BEAM map 是 immutable,值比较快(`==` 实际是 `=:=`,有 hash cache 时接近 O(1))
+- `:introspect` mode 的 read-only invoke 应该跳过 snapshot
+- Behavior 返回 `{:ok, slice}`(同 reference)或 `{:error, _}` 直接跳过
+- 用户写 Behavior 时不需要管 "dirty 标记",**纯函数 + 不可变数据自然给出正确语义**
+
+`:periodic` 是定时 flush(包含未变的 slice 也写——确认 timestamp);`:on_terminate` 是 GenServer terminate/2 时写一次(`:normal`/`:shutdown` 写,`:kill` 等可能丢)。
+
+### 10.2 D — Audit Log
+
+异步写,不阻塞 invoke。链路:
+
+```
+:telemetry.attach("esr-audit", [:esr, :invoke, :stop],
+  &Esr.Audit.handle_event/4, nil)
+
+  ↓ handler 只做:
+  GenServer.cast(Esr.Audit.Writer, {:write, audit_event})
+  ↓ ~微秒返回
+继续 invoke flow,不阻塞
+
+Esr.Audit.Writer (GenServer):
+  - 内部 batch 累积
+  - 每 100ms,或 batch ≥ 500,flush 一次到 SQLite invocations 表
+  - mailbox > 10k 时,后续 cast 自动 backpressure(改 sync call)
+```
+
+**实施细节**:
+
+- ~30 LOC GenServer,跟 `Esr.Scheduler` 共用一套 BEAM 原生 timer
+- 表索引:`(caller, target, inserted_at)` + `(target, inserted_at)`
+- BEAM crash 时 in-flight batch 丢——audit 不是关键路径,可接受
+- 归档(冷数据移 S3)v0 不做,落到 §17.8 deferred
+
+```sql
+CREATE TABLE invocations (
+  id            INTEGER PRIMARY KEY AUTOINCREMENT,
+  trace_id      TEXT,
+  caller        TEXT NOT NULL,
+  target        TEXT NOT NULL,
+  action        TEXT NOT NULL,
+  args          TEXT NOT NULL,    -- JSON
+  result        TEXT NOT NULL,    -- JSON
+  duration_us   INTEGER NOT NULL,
+  authz         TEXT NOT NULL,    -- granted | denied
+  exception     TEXT,             -- nil 或 exception info JSON
+  inserted_at   TEXT NOT NULL
+);
+CREATE INDEX ON invocations (caller, target, inserted_at);
+CREATE INDEX ON invocations (target, inserted_at);
+```
+
+### 10.3 E — Dead Letter Queue
+
+三种失败 case 落地:Behavior 异常、外部进程崩溃、Invocation 超时。bounded 10k,OldestFirst evict。供运维查询。**不混入 audit log**(D 是成功+失败的全量;E 只是失败的可重放队列)。
+
+### 10.4 F — Message stream
+
+每条 Message envelope(§3.5)进系统时,**写一次 `messages` 表**(append-only):
+
+```sql
+CREATE TABLE messages (
+  uri          TEXT PRIMARY KEY,              -- message URI(可被 ref 引用)
+  session_uri  TEXT NOT NULL,                 -- 所属 session
+  sender       TEXT NOT NULL,                 -- Entity URI
+  mentions     TEXT NOT NULL DEFAULT '[]',
+  body         TEXT NOT NULL,                -- {text, attachments, ...}
+  ref          TEXT,                          -- ^reply-to
+  inserted_at  TEXT NOT NULL
+);
+
+CREATE INDEX ON messages (session_uri, inserted_at);
+CREATE INDEX ON messages (sender);
+```
+
+**Message stream 跟 Invocation audit (D) 不混淆**:
+- D 记**所有 Invocation**(管理操作 + Message 投递),弱 schema,运维角度
+- F 记**Message 实体本身**,只在 Message identity-create 时写一次,中转转发不重复写,业务角度
+
+LiveView dogfood IM 渲染 message stream UI 时,SELECT from F;routing 内部转发用 F 的 URI 引用同一条 Message,不是复制。
+
+### 10.5 G — 文件附件
+
+外部 IM(Feishu/Slack)消息可含图片、文档、语音、视频。流程:
+
+```
+1. Feishu webhook 推 message,带 file_key
+2. Python feishu adapter 调 Feishu API 下载文件内容
+3. adapter 调 Esr.Behavior.FileStorage 的 :upload action,带 binary + metadata
+4. ESR 根据大小决定存储:
+   - <10MB → SQLite BLOB 存到 attachments 表
+   - >=10MB → S3-compatible(用 `req_s3`,跟已有 Req 同生态)
+5. FileStorage 返回 storage_uri(file://<id> 或 s3://<bucket>/<key>)
+6. adapter 构造 %Message{body: %{text: "...", attachments: [storage_uri]}}
+7. Message 在 ESR 内层层中转,attachments 字段只是 URI 引用,不重复 binary
+```
+
+```sql
+CREATE TABLE attachments (
+  uri          TEXT PRIMARY KEY,              -- file://<id>
+  storage      TEXT NOT NULL,                 -- 'postgres' | 's3'
+  content_type TEXT NOT NULL,
+  byte_size    INTEGER NOT NULL,
+  data         BLOB,                         -- 仅 storage='sqlite' 时使用
+  s3_key       TEXT,                          -- 仅 storage='s3' 时使用
+  meta         TEXT NOT NULL DEFAULT '{}',
+  inserted_at  TEXT NOT NULL
+);
+```
+
+> **Implementation 全部 Phoenix 生态**:
+> - 上传 HTTP 入口:`Plug.Upload` + multipart
+> - LiveView 上传(dogfood 期):`Phoenix.LiveView.Upload`(支持 external upload 直传 S3)
+> - 元数据 + 内容入库:`Ecto`
+> - S3 client(可选,只在 G 用):**`req_s3`**(跟 `Req` 同 author / 同生态)
+> - 标准 Behavior `Esr.Behavior.FileStorage` 由 `esr_behavior_file_storage` plugin 提供
+
+`req_s3` 是**唯一可能新增**的 dep,而且只在启用 S3 时引入。纯 SQLite BLOB 路径连这个也不需要。
+
+### 10.6 A 类 — Plugin 运行时配置
+
+属于持久化类型 A,**plugin 自己用 Ecto 管理**——core 不预定义 schema,plugin 在自己的 Application.start 里 `Ecto.Migrator.run/3` 加表。例:
+
+```elixir
+# esr_plugin_feishu 的 schema
+defmodule EsrPluginFeishu.AppConfig do
+  use Ecto.Schema
+  schema "feishu_app_configs" do
+    field :app_id,        :string
+    field :app_secret,    :string         # 加密存
+    field :webhook_token, :string
+    field :default_workspace_uri, :string
+    timestamps()
+  end
+end
+```
+
+运维通过 plugin 自己暴露的 admin Behavior 改这些配置(走完整 CapBAC + audit),不是直接改 SQLite。Hot-reload 由 plugin 自己实现(`Phoenix.PubSub.subscribe("config:updated")` 等模式)。
+
+**为什么不用 `Application.spec/2` env**:`:env` 是**编译期静态**——运维改 Feishu app credentials 时不可能 recompile + restart 全系统。类型 A 持久化提供运行时可变性。
+
+### 10.7 feishu-cc 切片参考表(v0 第一个垂直切片)
+
+v0 的第一个端到端验证场景是 feishu-cc 链路(Feishu 群聊 → ESR session → CC agent)。这条链路需要 **3 张 RoutingRegistry 表**作为参考实现——其他 plugin 可按同模式扩展:
+
+| Table | key 形状 | value 形状 | owner plugin | key 类型 | 写语义 |
+|---|---|---|---|---|---|
+| `ChatRouting` | `{chat_id, app_id}` | `session_uri` | `esr_plugin_feishu` | **unique** | `put_new`(撞 key reject) |
+| `PrincipalMapping` | `feishu_user_id` | `user_uri` | `esr_plugin_feishu` | **unique** | `put_new` |
+| `SessionRules` | `session_uri` | `{matcher_data, receivers}` | session orchestrator plugin | **duplicate** | `put`(append,一 session 多 rule) |
+| `SessionBindings` | `workspace_uri` | `session_uri` | session orchestrator plugin | **duplicate** | `put`(一 workspace 多 session) |
+
+**注意 `SessionRules` 和 `SessionBindings` 都是 duplicate-key** —— 一个 session 多条 rule、一个 workspace 多个 session 引用,所以用 `put` 不用 `put_new`(呼应 §5.4.2 的 unique vs duplicate-key 区分)。前两张是 unique-key,用 `put_new`。
+
+**关于反查**:`SessionBindings` 在使用上有反向查询需求(`session_uri → workspace_uri`,用于 "session 关闭时通知它绑定的 workspace")。RoutingRegistry 的单向 `key → value` 模型接不住——v0 解决方案是**显式声明反向索引表**:
+
+```elixir
+Esr.RoutingRegistry.declare_table(
+  name: SessionBindings,
+  duplicate_keys: true,
+  owner: :esr_session_orchestrator,
+  reverse_index: SessionBindingsReverse   # 自动维护 session_uri → workspace_uri
+)
+```
+
+`reverse_index` 是 `declare_table` 的可选参数。维护反向索引由 RoutingRegistry 自动做(每次 `put` 同时写两边),不依赖 plugin 作者纪律。如果某张表确实不需要反查,不声明 `reverse_index` 即可(零成本)。
+
+```elixir
+# Plugin declare:
+Esr.RoutingRegistry.declare_table(
+  name: ChatRouting,
+  duplicate_keys: false,         # unique key
+  owner: :esr_plugin_feishu
+)
+Esr.RoutingRegistry.declare_table(
+  name: SessionRules,
+  duplicate_keys: true,           # duplicate key
+  owner: :esr_session_orchestrator
+)
+
+# 用法:
+Esr.RoutingRegistry.put_new(ChatRouting, {chat_id, app_id}, session_uri)
+# → :ok | {:error, {:already_registered, existing_uri}}
+
+Esr.RoutingRegistry.put(SessionRules, session_uri, {matcher, receivers})
+# → :ok(append,N 条 rule 共存)
+```
+
+未来其他 plugin(Slack adapter 等)按同模式各自声明类似 `ChatRouting` 表(`{slack_channel, team_id} → session_uri`),互不干扰。
+
+---
+
+## 11. 可观测性
+
+三层独立,**不混用**:
+
+| 工具 | 用途 |
+|---|---|
+| **`:telemetry`** | 事件 / 指标 |
+| **`Logger`** | 文本日志 |
+| **`OpenTelemetry`** + **`opentelemetry_telemetry`** | 分布式追踪 |
+
+**事件命名 convention**:`[:esr, <area>, <event>]`,`<area>` ∈ `:invoke / :authz / :plugin / :lifecycle / :persistence`。
+
+Phoenix 框架本身就大量使用 `:telemetry`(`[:phoenix, :endpoint, ...]`、`[:phoenix, :channel_joined, ...]`),平行共存。开发期用 `Phoenix.LiveDashboard` 同时看两边(LiveDashboard 是开发依赖,不算"上 LiveView 做产品"——它是 Phoenix 内置工具)。
+
+---
+
+## 12. Transport Adapter Pattern
+
+**所有外部入口是 Adapter**。Adapter 做两件事:解析外部输入 → 构造 `%Invocation{}`;渲染结果回外部协议。Adapter **不允许有业务语义**。
+
+### 12.1 Phoenix transport stack
+
+```
+┌────────────────────────────────────────────────────────────┐
+│                   Phoenix.Endpoint                          │
+│                                                             │
+│   ┌──────────┐    ┌────────────────┐    ┌───────────────┐ │
+│   │  Plug    │    │ Phoenix.Socket │    │  custom Socket │ │
+│   │ (HTTP)   │    │      (WS)      │    │ (e.g. stdio)   │ │
+│   └────┬─────┘    └────────┬───────┘    └───────┬───────┘ │
+│        │                   │                     │         │
+│   ┌────▼──────────┐    ┌───▼─────────────────┐ ┌▼──────┐  │
+│   │ WebhookPlug   │    │  InvokeChannel      │ │ MCP   │  │
+│   │ AdminAPI Plug │    │  (agent: / session: │ │ Socket│  │
+│   └───┬───────────┘    │   / channel: ...)   │ └──┬────┘  │
+│       │                └────────┬─────────────┘    │       │
+└───────┼─────────────────────────┼─────────────────┼───────┘
+        │                         │                  │
+        └─────────────┬───────────┴──────────────────┘
+                      ▼
+              %Esr.Invocation{}
+                      ▼
+                  dispatch
+```
+
+### 12.2 两个 Phoenix Socket
+
+```elixir
+# esr_web/endpoint.ex
+socket "/socket", Esr.Web.UserSocket    # 通用 WS:Python adapter / 浏览器 / Next.js / CLI 长连接
+socket "/mcp",    Esr.Web.MCPSocket     # MCP 协议特化(framing 不同)
+```
+
+**不需要 5 个 Socket**(dev review 指出的 v0.2 leakage)。所有 WS client 用一个 `/socket`,通过 Channel topic 区分语义。
+
+### 12.3 Channel topic 命名约定
+
+| Topic | 语义 | 谁可订阅 |
+|---|---|---|
+| `agent:<id>` | Agent inbound | 有相应 cap 的 principal |
+| `session:<id>` | Session inbound | 同上 |
+| `channel:<id>` | ExternalChannel inbound | 同上 |
+| `<uri>:events` | Outbound 事件流(只读) | 有 subscribe cap |
+| `<uri>:_internal` | 内部 topic(plugin 自约定) | 同 OTP app 强约定 |
+| `presence:<kind>` | Phoenix.Presence | admin only |
+
+**Channel 业务逻辑模板**(`@interface` 自动生成):
+
+```elixir
+defmodule Esr.Web.InvokeChannel do
+  use EsrWeb, :channel
+
+  def join("agent:" <> id, _params, socket) do
+    case Esr.Invocation.dispatch(%Invocation{
+      target: URI.parse("agent://#{id}"),
+      mode: :subscribe,
+      ctx: socket_to_ctx(socket)
+    }) do
+      :ok -> {:ok, assign(socket, :uri, "agent://#{id}")}
+      {:error, :unauthorized} -> {:error, %{reason: "forbidden"}}
+    end
+  end
+
+  def handle_in(action, params, socket) do
+    result = Esr.Invocation.dispatch(%Invocation{
+      target: URI.parse(socket.assigns.uri <> "/behavior/.../#{action}"),
+      mode: :call,
+      args: params,
+      ctx: socket_to_ctx(socket)
+    })
+    {:reply, result, socket}
+  end
+
+  def handle_info({:esr_event, event}, socket) do
+    push(socket, event.name, event.payload)
+    {:noreply, socket}
+  end
+end
+```
+
+### 12.4 External adapter as subprocess — 两种 driver 关系
+
+ESR 的 transport adapter 在 subprocess 层有两种 driver 关系,**对称但不同**:
+
+#### A. ESR-driven(Feishu / Slack 等)
+
+ESR 主动通过 `Esr.Behavior.OSProcess` 拉起 subprocess。subprocess 启动后建立到 ESR 的 WS 连接,双向桥接外部协议。
+
+```
+[Feishu server]
+    │
+    │ WS(Feishu 协议)
+    ▼
+[Python feishu_adapter.py]   ← Esr.Behavior.OSProcess 拉起
+    │
+    │ WS to Esr.Web.UserSocket on /socket
+    ▼
+[InvokeChannel "session:feishu-cc/..."]
+    │
+    ▼
+%Esr.Invocation{}  ─→  dispatch
+    │
+    ▼
+[reply via ctx.reply = {:phoenix_channel, "session:..."}]
+    │
+    ▼ Python adapter 收到 push
+[Python adapter]
+    │
+    │ WS frame(Feishu 协议)
+    ▼
+[Feishu server]
+```
+
+适合场景:**ESR 知道要接入哪些外部 IM 服务**,启动时主动拉起对应 adapter。Feishu/Slack/WhatsApp 等等。
+
+#### B. External-driven(Claude Code Channel)
+
+ESR 被动接受外部驱动的 subprocess 连入。subprocess 由**别的 host 进程**(如 Claude Code)拉起,启动后 WS 连进 ESR。
+
+```
+[Claude Code (user 启动)]
+    │
+    │ --channels plugin:esr-channel
+    ▼
+[esr-channel (Python MCP server)]  ← Claude Code 拉起,stdio
+    │
+    │ WS to ESR /cc_channel(主动连接)
+    ▼
+[Esr.Web.CCChannelSocket]
+    │
+    ▼
+[绑定到 agent://cc-<instance>]
+```
+
+适合场景:**ESR 不知道何时何处会有 CC 实例启动**,被动等连入。Channels 协议要求 Bun/Python plugin 必须由 CC 用 `--channels` 启动,所以 ESR 不能 driver。
+
+#### 两种 driver 的 ESR-side 实现差异
+
+| 维度 | ESR-driven (Feishu) | External-driven (CC Channel) |
+|---|---|---|
+| Subprocess 由谁拉起 | ESR (`OSProcess.spawn`) | 外部 host(CC `--channels`) |
+| Subprocess 生命周期 | Kind GenServer 持有 erlexec port | 不归 ESR 管 |
+| WS 连接发起方 | subprocess → ESR | subprocess → ESR(同方向) |
+| Subprocess 重启 | ESR 监督 + 重拉 | 外部 host 决定 |
+| 身份验证 | OSProcess 启动时注入 token | WS connect 时验 token |
+
+WS 连接发起方都是 subprocess,**ESR 始终是 server side**——这是统一的。差异只在 subprocess 谁拉起。
+
+### 12.5 `ctx.reply` 路由表
+
+`Esr.Invocation.reply(ctx, result)` 根据 `ctx.reply` 字段路由:
+
+| reply 形式 | 渲染动作 |
+|---|---|
+| `{:phoenix_channel, topic}` | `Phoenix.Channel.broadcast` 到该 topic |
+| `{:phoenix_pubsub, topic}` | `Phoenix.PubSub.broadcast` |
+| `{:plug_conn, conn}` | `Plug.Conn.send_resp` JSON |
+| `{:stdio_pipe, port}` | 写 erlexec stdin 或 stdio framing |
+| `{:mcp_response, request_id}` | MCP response packet |
+| `{:caller_inbox, pid}` | `send(pid, {:esr_reply, ...})` — 内部 Elixir 调用回邮 |
+| `:ignore` | 不回复(`:cast` mode 用) |
+
+### 12.6 入口拒绝(不是所有 inbound 都变 Invocation)
+
+某些 raw 事件(健康检查 ping、OPTIONS、协议握手、签名校验失败)在 Plug/Channel **内部直接 200 OK 或拒绝**,不进 dispatch。判断标准:**这条入口对应到一个 URI 吗?** 不对应,就在 adapter 内部处理。
+
+### 12.7 View — Adapter 的对称面(outbound 渲染)
+
+Adapter 是 inbound(外部 → Invocation)。**View 是 outbound**(Invocation / Message → 外部协议渲染)。每个 transport 注册一个 View module。
+
+```elixir
+defmodule Esr.View do
+  @callback render(invocation :: %Esr.Invocation{}, ctx :: map()) :: iodata() | map() | nil
+end
+```
+
+**View 是通用 Invocation 渲染器,不只 Message**——任何 Invocation 都可以注册渲染。Message 是 default 走 message-bubble 渲染,其他 Invocation(`/set-default`、`/invite`)可以渲染成 inline button、command echo、系统消息卡片等等,**取决于 transport 的能力**。
+
+```elixir
+defmodule Esr.View.LiveView do
+  @behaviour Esr.View
+
+  # Message → 气泡
+  def render(%Invocation{args: %Esr.Message{} = m}, _), do: render_bubble(m)
+
+  # /set-default → inline button
+  def render(%Invocation{
+    target: %URI{path: "/behavior/session_routing/set_default"} = uri,
+    args: args
+  } = inv, _), do: render_routing_change(uri, args, inv.ctx)
+
+  # generic fallback → 系统通知小条
+  def render(%Invocation{} = inv, _), do: render_generic(inv)
+end
+```
+
+#### Render hint(可选)
+
+`@interface` 可声明 `render_hint`,提示各 View 用什么形态渲染:
+
+```elixir
+@interface %{
+  set_default: %{
+    args: %{agent: :string},
+    modes: [:call],
+    render_hint: %{
+      liveview: :inline_button,
+      cli:      :command_echo,
+      feishu:   :system_card
+    }
+  }
+}
+```
+
+View 实现可以读 hint 决定渲染策略;没读到也行(fallback to generic)。**hint 是建议,不是强制**。
+
+#### View 跟 routing 不耦合
+
+Chat Behavior 收到 message 后做两件事(独立):
+1. 用 routing rules 算出 receivers,逐个 dispatch Invocation
+2. PubSub.broadcast 到 `<session_uri>:events`,触发各 transport 的 View 渲染
+
+**View 不感知 routing,routing 不感知 View**——它们都从 `<session_uri>:events` 这个 PubSub topic 拿数据,各自独立处理。
+
+> **Implementation**:`Esr.View` behaviour 定义 + view registry + render dispatch 总共 **~30 LOC**。各 transport 自己实现 View module(在自己 plugin 内,不进 esr_core)。
+
+### 12.8 Claude Code Channel adapter — 唯一的 MCP 集成
+
+ESR **不**内置通用 MCP server——内嵌 BEAM agent 直接调 Elixir API,Python/Bun adapter 走 WS,都不需要 MCP。**唯一的 MCP 集成**是 Claude Code Channel adapter,因为 Channels 是 Anthropic 给 Claude Code 的官方"外部事件 push"机制,**是 ESR 跟运行中 CC session 通信的唯一可靠方式**(pty stdin、文件 watch、CLAUDE.md 都太脆弱)。
+
+#### 12.8.1 Channel 是反向 MCP
+
+| 普通 MCP | Channels |
+|---|---|
+| Claude 主动调 tool(pull) | 外部 push event 进 session |
+| 一次性 request/response | 长连接,事件流 |
+| Tool 暴露给 LLM 用 | 在 LLM context 出现 `<channel source="xxx">` |
+| 用于"赋予 LLM 能力" | 用于"通知 LLM 外部发生了什么" |
+
+Channels 是双向的:CC 通过 channel 的 `reply` tool 回复,reply 走回原协议。这是一个完整的 chat-style transport。
+
+参考:<https://code.claude.com/docs/en/channels>
+
+#### 12.8.2 Plugin 形态——单 plugin 两侧组件
+
+整个 CC Channel 集成是**一个 plugin deliverable**:`esr_plugin_cc_channel`。代码库结构:
+
+```
+esr_plugin_cc_channel/                      ← 一个 git repo / release
+  ├── elixir/                               ← ESR side(OTP app)
+  │   ├── lib/esr_plugin_cc_channel/
+  │   │   ├── application.ex
+  │   │   ├── channel_socket.ex             (Phoenix.Socket)
+  │   │   ├── channel_bridge.ex             (Cross-cutting Behavior)
+  │   │   └── instance_registry.ex          (CCInstanceConnection table)
+  │   └── mix.exs
+  ├── python/                               ← CC side(MCP channel server)
+  │   ├── esr_channel/
+  │   │   ├── __init__.py
+  │   │   ├── channel_server.py             (MCP stdio + channels protocol)
+  │   │   ├── ws_client.py                  (连 ESR /cc_channel)
+  │   │   └── config.py                     (读 ESR endpoint + token)
+  │   └── pyproject.toml
+  └── README.md
+```
+
+**实现语言:Python 优先**(可复用现有 esr 的 Python channel 实现);Bun 也可,但 Python 跟 `esr_plugin_feishu` 一致,运维心智更统一。
+
+#### 12.8.3 数据流
+
+**方向 1: ESR → CC**(向 Claude Code 推 message)
+
+```
+[ESR routing 算出 receiver = agent://cc-allen-小满]
+    │
+    │ dispatch Invocation
+    │   target: agent://cc-allen-小满/behavior/chat/receive
+    │   args:   %Message{sender, body, mentions, ref}
+    ▼
+[CCChannelBridge Behavior (cross-cutting attached to Agent Kind)]
+    │
+    │ PubSub.broadcast("cc:allen-小满:outbound", message)
+    ▼
+[Esr.Web.CCChannelSocket — 对应 channel pid]
+    │
+    │ Phoenix.Channel.push("event", payload)
+    ▼
+[esr-channel Python plugin]
+    │
+    │ channels protocol: emit channel event via stdio MCP
+    ▼
+[Claude Code session]
+    ← <channel source="esr-channel">message_data</channel>
+```
+
+**方向 2: CC → ESR**(Claude 回复)
+
+```
+[Claude Code session]
+    → 调 esr-channel 的 reply tool
+    ▼
+[esr-channel Python plugin]
+    │
+    │ WS to ESR /cc_channel: send invocation
+    ▼
+[Esr.Web.CCChannelSocket]
+    │
+    │ build %Invocation{
+    │   target: <原 session URI>/behavior/chat/receive,
+    │   args:   %Message{sender: agent://cc-allen-小满, body, ref: <原 message URI>},
+    │   ctx:    %{caller: agent://cc-allen-小满, caps, ...}
+    │ }
+    │ dispatch
+    ▼
+[ESR Message routing — 走标准 §5.5 路径]
+```
+
+整套路径里 "channel 是反向 MCP" 的语义被完全 wrap 在 plugin 内,**ESR core 不感知**——它只看到 `agent://cc-xxx` 这个 Entity 通过某种 transport 接入,跟 Feishu user 接入同形。
+
+#### 12.8.4 身份验证——单层鉴权,不用 channels sender allowlist
+
+Channels 协议默认的 sender allowlist + pairing flow(`/telegram:access pair <code>`)**完全不用**。理由:ESR 已经有 CapBAC 系统,不需要重复鉴权。
+
+**单层鉴权**:
+
+1. **WS connect 时**:Phoenix.Socket.connect/3 验 token(ESR 配置 + CC 实例 ID),通过则把 socket 绑定到 `agent://cc-<instance>` URI
+2. **每条 Invocation**:走 §5.5 step 5.5 cap check——`ctx.caller` 是否持有 `cap(agent://cc-<instance>, Behavior.Chat)` 等
+
+esr-channel(Python)启动时读配置文件拿 ESR endpoint + token,WS 连接里把 token 带过去:
+
+```python
+# esr_channel/config.py
+{
+  "esr_url": "wss://esr.local/cc_channel",
+  "esr_token": "<secret>",
+  "cc_instance_id": "allen-小满"
+}
+```
+
+ESR 这边:
+
+```elixir
+defmodule Esr.Plugin.CCChannel.ChannelSocket do
+  use Phoenix.Socket
+  channel "cc:*", Esr.Plugin.CCChannel.Channel
+
+  def connect(%{"token" => token, "cc_instance" => instance_id}, socket, _conn_info) do
+    with {:ok, agent_uri} <- verify_token(token, instance_id),
+         :ok <- Esr.RoutingRegistry.put_new(CCInstanceConnection, instance_id, agent_uri) do
+      {:ok, assign(socket, %{agent_uri: agent_uri})}
+    else
+      {:error, {:already_registered, existing}} ->
+        # 撞 key——同一个 instance_id 已经有活连接(可能是孤儿/重连/配错)
+        # 显式 reject,不静默 shadow(防 §1.2 差异 1 描述的 silent bug)
+        Logger.warning("CC channel connect rejected: #{instance_id} already connected as #{inspect(existing)}")
+        :error
+      _ ->
+        :error
+    end
+  end
+end
+```
+
+**为什么 `put_new` 而不是 `put`**:`put` 是 last-writer-wins,在 unique-key 表上会静默 shadow——第二个 connect 覆盖第一个,旧连接的 PING/PONG 还正常但 ESR 不再路由给它,**用户看得到系统输出但发的东西全部蒸发**(现有 esr 真实事故 `mcp-transport-orphan-session-hazard.md`)。
+
+`put_new` 撞 key 显式 reject,让重复连接**大声失败**而不是静默接管。如果旧的真死了,KindRegistry 的 monitor 会清掉它,新连接重试即可。
+
+**Channels 协议要求的 sender allowlist / pairing 流程,esr-channel 故意不实现**——它信任 WS 连接已建立的事实。
+
+#### 12.8.5 多 CC 实例
+
+一个 ESR 节点可同时连多个 CC 实例(Allen 的工作流:一个 worktree 一个 CC,5 个并行)。每个 CC 各自带 `--channels plugin:esr-channel`,各自 esr-channel 连同一 ESR:
+
+```
+[CC instance allen-小满]  ─stdio─> [esr-channel #1] ─WS─┐
+[CC instance feature-a]   ─stdio─> [esr-channel #2] ─WS─┼─→ [ESR /cc_channel]
+[CC instance feature-b]   ─stdio─> [esr-channel #3] ─WS─┘
+```
+
+`CCInstanceConnection` 表(由 `esr_plugin_cc_channel` 在 `RoutingRegistry` 注册):
+
+```
+{cc_instance_id: "allen-小满"} → agent://cc-allen-小满
+{cc_instance_id: "feature-a"}  → agent://cc-feature-a
+```
+
+ESR 推 message 给 `agent://cc-allen-小满` 时,通过这张表找到对应连接,push 进去。
+
+#### 12.8.6 跟 `esr_plugin_cc_pty` 的关系
+
+ESR 有两种 "CC 接入方式":
+
+| Plugin | 接入方式 | 适用 |
+|---|---|---|
+| `esr_plugin_cc_pty` | 本地 pty 拉起 claude binary | ESR 节点本机跑 CC,纯本地 |
+| `esr_plugin_cc_channel` | Channel 桥接外部 CC session | 跨机器接入(开发者笔记本上的 CC) |
+
+**两者独立 plugin**,可同时装。生产部署常见两种都开——内部 dogfood 用 pty,远程开发者通过 channel 接入。
+
+---
+
+## 13. 命名约定
+
+```
+Esr.<Category>.<KindType>            — Kind 声明
+Esr.<Category>.<KindType>.Server     — 单实例 GenServer
+Esr.<Category>.<KindType>.Supervisor — DynamicSupervisor
+
+Esr.Behavior.<Name>                  — Behavior 模块
+
+:esr_plugin_<name>                   — OTP app atom
+EsrPlugin<Name>                      — Plugin 模块前缀
+apps/esr_plugin_<name>/              — Umbrella 目录
+
+:esr_behavior_<name>                 — 标准 Behavior 单 plugin(注册一个 Behavior)
+:esr_adapter_<name>                  — 单侧 transport adapter(例:esr_adapter_cli)
+:esr_plugin_<name>                   — 复合 plugin,可能含多组件(例:esr_plugin_cc_channel 含 Elixir + Python 两侧)
+:esr_web_<name>                      — Phoenix 入口 plugin(例:esr_web_liveview)
+```
+
+### 13.1 Plugin 示例区分
+
+实际 plugin 集的命名样例:
+
+| Plugin | 类型 | 内容 |
+|---|---|---|
+| `esr_behavior_identity` | 单 Behavior | 注册 `Esr.Behavior.Identity` |
+| `esr_behavior_os_process` | 单 Behavior | 注册 `Esr.Behavior.OSProcess`(底层 `:erlexec`) |
+| `esr_behavior_pty` | 单 Behavior | 注册 `Esr.Behavior.Pty`(底层 `:ex_pty`) |
+| `esr_behavior_chat` | 单 Behavior | 注册 `Esr.Behavior.Chat` |
+| `esr_adapter_cli` | 单侧 adapter | CLI 工具,从 BehaviorRegistry 自动生成命令 |
+| `esr_web_liveview` | Phoenix 入口 | LiveView IM(v0 dogfood + 未来产品) |
+| `esr_plugin_cc_pty` | 复合 plugin | 注册 `Esr.Session.CC`,通过本地 pty 拉 claude binary |
+| `esr_plugin_cc_channel` | 复合 plugin | 含 Elixir adapter + Python channel server 两侧,桥接外部 CC |
+| `esr_plugin_feishu` | 复合 plugin | 含 Elixir adapter + Python feishu bot |
+
+---
+
+## 14. esr_core 模块布局
+
+```
+esr_core/
+└── lib/
+    ├── esr/
+    │   ├── uri.ex                # URI parser + scheme registry          (~25 LOC,cap 35)
+    │   ├── invocation.ex         # %Invocation{} + dispatch + reply      (~95 LOC,cap 120)
+    │   ├── interface_validator.ex # @interface schema 递归校验器          (~35 LOC,cap 50)
+    │   ├── idempotency.ex        # bounded ETS dedup(LRU)               (~20 LOC,cap 35)
+    │   ├── message.ex            # %Message{} struct + identity helpers  (~25 LOC,cap 35)
+    │   ├── message_store.ex      # append-only Message persistence + 7-dim query (~50 LOC,cap 70)
+    │   ├── capability.ex         # %Capability{} + matcher               (~30 LOC,cap 40)
+    │   ├── behavior.ex           # @callback contract                    (~15 LOC,cap 25)
+    │   ├── kind.ex               # `use Esr.Kind` macro                  (~90 LOC,cap 130)
+    │   ├── kind_registry.ex      # URI → pid + type_name → module        (~40 LOC,cap 55)
+    │   ├── behavior_registry.ex  # {Kind, action} → Behavior             (~50 LOC,cap 70)
+    │   ├── routing_registry.ex   # external_key → URI(s) + put_new       (~60 LOC,cap 80)
+    │   ├── ready_gate.ex         # ETS 三态 ready 表                     (~20 LOC,cap 30)
+    │   ├── pending_delivery.ex   # not-ready 窗口 buffer + flush         (~25 LOC,cap 40)
+    │   ├── routing/
+    │   │   └── matcher.ex        # 组合子 + Message-field matcher + DSL   (~85 LOC,cap 110)
+    │   ├── view.ex               # View behaviour + render dispatch      (~30 LOC,cap 40)
+    │   ├── kind/
+    │   │   ├── template.ex       # @callback contract                    (~15 LOC,cap 25)
+    │   │   └── snapshot.ex       # snapshot load/save (kind_type-keyed)  (~40 LOC,cap 55)
+    │   ├── plugin.ex             # discover/0 + drain/1 + attach/1       (~80 LOC,cap 110)
+    │   ├── telemetry.ex          # event helpers                         (~20 LOC,cap 30)
+    │   ├── audit/
+    │   │   └── writer.ex         # async batch flush GenServer           (~30 LOC,cap 45)
+    │   └── scheduler.ex          # Process.send_after wrapper            (~40 LOC,cap 55)
+    └── esr_core.ex
+```
+
+### LOC budget
+
+| 指标 | 数值 |
+|---|---|
+| Target 总和 | **~920 LOC**(v0.4 round-2 review:`message_store.ex` 之前漏在 §14 清单外,补进来 +50 LOC;原 870 是不含它算出的) |
+| Hard ceiling per module | 列在每行 `cap` 后(target + 40% buffer) |
+| 复杂度警戒线 | 任何模块超过 cap,触发**设计 review**——大概率是漏抽象,不是逻辑必要 |
+| 全局警戒线 | 总和超过 **1150 LOC**(实测合计,而非各模块 cap 之和),触发架构 review:看是不是该把某些功能 spin off 成 plugin |
+
+**关于 "各模块 cap 之和 > red line" 的说明**:每模块 cap 的总和会超过 1150(实际约 1285),这是**预期的**——cap 和 red line 是两个独立信号:
+
+- **每模块 cap** = "单个模块的复杂度异常天花板"(防止某个模块膨胀到吞掉整个系统的认知负担)
+- **red line** = "整个 esr_core 实测合计的集合触发器"(防止整体超出 thin glue 定位)
+
+所有模块同时用满 cap 不太可能(意味着每个都达到异常上限);更常见的形态是大部分模块在 target 附近,少数偶尔触 cap,合计在 920 ± 100 范围。**实测合计**才是 red line 的指标。
+
+**为什么 v0.4 比 v0.3 多 ~325 LOC**:
+- `invocation.ex` 70→95(arg validation + 7-case reply 表实测)
+- `kind.ex` 40→90(`use Esr.Kind` 宏生成完整 GenServer + snapshot 集成 + ReadyGate 接入)
+- `matcher.ex` 50→85(11 个 constructor + 递归求值器 + DSL + plugin register + `to_string/1`)
+- 新模块 `interface_validator` / `ready_gate` / `pending_delivery` / `idempotency` / `audit/writer` 共 ~130 LOC
+- `message_store.ex` ~50 LOC(v0.3 漏列;v0.4 round-2 review 工程师发现的缺口)
+
+**dev review 的 LOC 实测论证扎实**:现有 esr `handler_router + handler` 116 行只覆盖了 dispatch 的"调 Python worker"一条窄路径,不含 arg validation、不含 7-case reply 表;9 个 registry 共 1722 行也佐证了核心模块的真实复杂度。v0.3 的 475/595 是欠校准,v0.4 round-1 校准到 870 但仍漏 `message_store.ex`,round-2 补足到 920。
+
+**为什么强调 LOC budget**:`esr_core` 的承诺是 "thin convention layer + glue"。一旦 core 膨胀,plugin 边界会模糊,新人也得读大量 core 才能写第一个 plugin。**保持 core 小 = 保持心智成本可控**。920 LOC 还在"几个工程师一天能通读"的范围,red line 1150 是真实 ceiling。
+
+Plugin 不在此 budget 内——plugin 想多大都行,但应该自己有内部模块边界纪律。
+
+---
+
+## 15. Dependencies (mix.exs)
+
+```elixir
+defp deps do
+  [
+    # Phoenix transport layer (核心)
+    {:phoenix,                "~> 1.8"},
+    {:phoenix_pubsub,         "~> 2.1"},
+    {:bandit,                 "~> 1.5"},
+    {:plug,                   "~> 1.16"},
+
+    # 数据 (核心) — SQLite for edge-deployable single-file storage
+    {:ecto_sql,               "~> 3.12"},
+    {:ecto_sqlite3,           "~> 0.17"},
+
+    # 观测
+    {:telemetry,              "~> 1.3"},
+    {:telemetry_metrics,      "~> 1.0"},
+    {:opentelemetry,          "~> 1.5"},
+    {:opentelemetry_telemetry,"~> 1.1"},
+
+    # HTTP client(plugin 调外部 API)
+    {:req,                    "~> 0.5"},
+
+    # JSON
+    {:jason,                  "~> 1.4"}
+  ]
+end
+```
+
+**12 个生效依赖**(v0.2 是 16,v0.3 早期版本是 13)。
+
+### 15.1 为什么 SQLite 而非 Postgres
+
+| 维度 | SQLite | Postgres |
+|---|---|---|
+| 单文件部署 | ✅ `priv/esr.db` 跟 BEAM release 一起 | ❌ 独立进程 + 配置 |
+| 边缘硬件(Raspberry Pi 级) | ✅ ~5MB | ⚠️ 100MB+ RSS |
+| Docker image | 小,无外部依赖 | 大(需 postgres image) |
+| 备份 | `cp esr.db backup.db` | `pg_dump` + 恢复流程 |
+| 故障恢复 | 跟 BEAM 同生死 | DB 进程独立维护 |
+| Federation 形态 | 每节点一 DB,share-nothing | 共享 DB,集群范式 |
+| 写并发(WAL 模式) | ~10k writes/sec,够 ESR 边缘场景 | 高并发 MVCC |
+
+**ESR 的定位是 federated edge nodes**——每个节点是个完整自治的 ESR,跟其他节点通过协议通信。SQLite 的 share-nothing 形态比 Postgres 的 shared central infra 更对得上这个定位。
+
+### 15.2 移除的依赖
+
+| 依赖 | 原用途 | 替代 |
+|---|---|---|
+| `:postgrex` | Postgres driver | 不需要,用 SQLite |
+| `:oban` | snapshot 定时 / DLQ evict / audit archival 等 | **`Esr.Scheduler`** 用 `Process.send_after/3`,~15 LOC;DLQ evict 在 insert 时同步处理 |
+
+**Deferred 到 v0.x+ 的库**:
+```elixir
+# {:horde,                          "~> 0.9"},    # 跨节点 Registry/Supervisor
+# {:commanded,                      "~> 1.4"},    # Event Sourcing
+# {:commanded_eventstore_adapter,   "~> 1.4"},
+# {:req_s3,                         "~> 0.2"},    # 大文件附件存 S3,边缘节点通常不需要
+```
+
+### 15.3 Schema portability(不维护)
+
+SQLite vs Postgres 语法差异在 spec 里**不存在**——v0 完全 SQLite。未来如果某个部署形态需要 Postgres,届时再讨论 portability。**现在 spec 不维护双轨**,避免"一点点不一样"的混乱。
+
+具体 schema 写法(§10 详述):
+- JSONB 字段:Ecto `:map` 字段类型,SQLite 自动 JSON 文本存储
+- 数组字段:Ecto `{:array, :string}` 类型,SQLite 自动 JSON 数组序列化
+- Timestamps:`utc_datetime` 类型,SQLite ISO 8601 文本存储
+- 主键:`text` 字符串(用 URI),不用 `bigserial`
+
+### 15.4 esr_core 不依赖,移到独立 plugin
+
+- `:erlexec` → `esr_behavior_os_process`
+- `:ex_pty` → `esr_behavior_pty`
+- `:optimus` → `esr_adapter_cli`(CLI 参考实现,见 Appendix D)
+- `:phoenix_live_view` → `esr_web_liveview`(IM dogfood + 可选 admin,见 Appendix D)
+- `:phoenix_live_dashboard` → 开发期 dep,esr_web 应用层加
+
+---
+
+## 16. What's ours vs ecosystem
+
+按 Phoenix-first 优先级排序:
+
+| 概念 | 生态对应 | 优先级 | 自己写 LOC |
+|---|---|---|---|
+| WS / Channel transport | **`Phoenix.Socket`** + **`Phoenix.Channel`** | 1 | — |
+| 同步 HTTP 入口 | **`Plug`** + **`Phoenix.Endpoint`** + **`Bandit`** | 1 | — |
+| actor 间消息总线 | **`Phoenix.PubSub`** | 1 | — |
+| 跨节点在线状态 | **`Phoenix.Presence`** | 1 | — |
+| `:subscribe` mode | `Phoenix.PubSub` | 1 | — |
+| Transport path 路由 | **`Phoenix.Router`** | 1 | — |
+| 配置 / 定义 / audit | **`Ecto`** + **`Postgrex`** | 3 | — |
+| Snapshot 持久化 (C) | `Ecto` + JSONB | 3 | ~40 helper |
+| HTTP client | **`Req`**(plugin) | 3 | — |
+| 后台调度 | **`Oban`** | 3 | — |
+| Kind instance | **`GenServer`** | 2 | — |
+| KindType.Supervisor | **`DynamicSupervisor`** | 2 | — |
+| KindRegistry | **`Registry`** / **`Horde.Registry`**(v0.2+) | 2 | ~30 wrapper |
+| BehaviorRegistry | **ETS** | 2 | ~50 |
+| **RoutingRegistry** | **`Registry`**(duplicate_keys) | 2 | ~60 wrapper |
+| Plugin = OTP app | **`Application`** + **`Supervisor`** | 2 | — |
+| Plugin drain helper | (无) | — | ~20 |
+| Plugin discover | **`Application.loaded_applications/0`** | 2 | ~80 |
+| Telemetry 钩点 | **`:telemetry`** | 2 | ~20 helpers |
+| Distributed traces | **OpenTelemetry** stack | 2 | — |
+| os-process(被 plugin 用) | **`:erlexec`** | 4 | — |
+| pty(被 plugin 用) | **`:ex_pty`** | 4 | — |
+| CLI 渲染(被 plugin 用) | **`Optimus`** | — | — |
+| URI parser | `URI` stdlib | 2 | ~25 |
+| Invocation struct + dispatch + reply | (无) | — | ~70 |
+| Capability struct + matcher | `MapSet` + 自写 | — | ~30 |
+| Behavior `@callback` | `@behaviour` Erlang | 2 | ~15 |
+| `use Esr.Kind` 宏 | (无) | — | ~40 |
+| `Esr.Kind.Template` | `@behaviour` | 2 | ~15 |
+
+**自己写代码 ≈ 920 LOC**。其余全部装配。
+
+### 16.1 真正的创新只有五条
+
+剥掉装配,核心创新都是**约定,不是组件**:
+
+1. **URI 作为 system-wide operationId**(类比 OpenAPI)
+2. **`@interface` 强制 schema 声明**,所有 adapter 从此生成
+3. **Behavior 模块化 + state slicing 约定**
+4. **Push-style CapBAC 在 Kind instance 鉴权**
+5. **Plugin = OTP app + drain-then-stop 生命周期**
+
+---
+
+## 17. Deferred
+
+显式不做的功能列表:
+
+### 17.1 Next.js admin dashboard(LiveView 之外的另一条路)
+
+LiveView 已经在 v0 内用作内部 IM dogfood 前端(见 §2.2),BEAM-native dashboard 的能力天然在手。Next.js 作为另一条选项保留:
+
+- **触发条件**:出现"前端需要独立部署 / 跨域 / 大量 JS interactive 组件 / 设计师只熟悉 React"的需求
+- **路径**:`esr_plugin_admin_next` 维护 React 代码,通过 AdminAPI(REST/JSON)与 ESR 通信
+- **最终主用哪条**:看 dogfood 结果。两条并存也可。
+
+### 17.2 Event Sourcing — **不做**(已决,见 §1.3 + Decision Log)
+
+完整 Event Sourcing 不在 v0.x roadmap 上。理由(详见 Decision Log):
+
+- append-only Message stream 已经具备 ES 的所有真实好处(不可变审计、message identity invariant、context replay 源)
+- ES 的复杂度(Commanded + Postgres-only EventStore + aggregate 边界 + event versioning + CQRS)对 ESR 场景**没有匹配收益**
+- ESR 的 schema 还在剧烈演化,event versioning 是过早承担的负担
+- Agent 行为非确定(LLM),event replay 本身意义有限
+
+未来如果出现金融/监管/合规场景需要严格 event replay,届时重新评估——但不作为 deferred,作为**已决不做**。
+
+### 17.3 Federation — 独立 ESR 节点 + cross-node 协议(v0.x+)
+
+每个 ESR 实例(SQLite + 单 BEAM)是**完全自治的边缘节点**。Federation 形态:
+
+- **不共享数据库**——每节点一个 SQLite 文件,share-nothing
+- **不共享 BEAM cluster**(`Node.connect`)——节点间独立,只通过应用层协议通信
+- **Cross-node 消息协议**——大概率走 IRC s2s-style 协议(节点 A 把 message envelope 转发给节点 B,B 的本地 Session 处理),或 MCP-over-WS
+
+主要决策点(留作未来 grill):
+- Federated routing — 本地 RoutingRegistry vs 全局可见?跨节点 URI 怎么表达?
+- Federated cap — 单节点 cap vs 跨节点信任链?Token 模型是不是这里的必要前提?
+- Federated Message identity — Message URI 在跨节点中转时仍要 invariant,怎么保证?
+
+v0 单节点,**所有 federation 设计推迟**。但 §10 的 share-nothing 持久化、§5.4 的 URI 寻址、§7 的 Push CapBAC 都已经为 federation 留好了接口——不需要重新设计,只需要加协议层。
+
+### 17.4 Horde 跨节点 Registry(v0.x+,如果走 BEAM cluster 而非 federation)
+
+如果某个部署不走 federation,而是传统 BEAM cluster(多节点共享 Registry):
+- **`Horde.Registry`** + **`Horde.DynamicSupervisor`** 替换单节点 `Registry`
+- pty Session 不能跨节点迁移(pty fd 是 node-local)→ 约定"pty Session 绑定单节点"
+
+跟 17.3 是**两种不同形态**,大概率走 17.3(federation),不走 17.4。
+
+### 17.5 Cap Token 化
+- 方案:**Macaroon** / **Biscuit** 替换 `MapSet<Capability>`
+- 触发条件:跨信任域调用
+
+### 17.6 Cap delegation & attenuation
+- 触发条件:出现真实"A 把部分权限授给 B"场景
+
+### 17.7 `@interface` runtime 强校验
+- v0 compile-time 简单 check;runtime 强校验 + ExUnit `@interface` property-based test gen
+
+### 17.8 Cross-cutting plugin migration CLI
+- `mix esr.plugin.grant <plugin>`,批量给已存在 principal 发新 cap
+
+### 17.9 Event archival pipeline
+- D / E 冷数据移 S3 通过 **Oban** 周期任务
+
+### 17.10 Voice
+- voice channel(WebRTC / SIP)— 独立 channel kind,不影响主架构
+
+### 17.11 Bundle
+- 显式不做。"一组 plugin + 默认 template 一键部署" = `mix release` profile + `priv/seeds/*.exs`;不发明新抽象
+
+### 17.12 Routing 迁移分诊规则(给现有 esr → v0 迁移用)
+
+现有 esr 的 9 个 registry 共 1722 行 routing 逻辑,**不一次性迁**。**逐个分诊**——问"v0.4 新模型是不是已经免费提供了这个"。
+
+| 这段代码是 | v0 怎么办 |
+|---|---|
+| 旧架构偶然复杂度(新模型免费提供) | **不迁——蒸发**(例:slash_route registry 的 493 行,核心是手动注册路由 + overlay 合并,但 v0.4 Appendix D.3.4 说 slash 路由从 `@interface` 自动派生——那一大坨在新模型里根本不存在,剩 ~30 行真·prefix 匹配迁过来即可) |
+| 真实业务逻辑 / 踩出来的行为边界 | **在新模型里重新表达**——旧代码当"必须保留的行为"规格,e2e scenario 当验收测试 |
+| verbatim 值得保留的好设计 | 几乎没有 |
+
+具体例:
+- `slash_route/registry.ex`(493 行)→ **大部分蒸发**,剩 ~30 行真·prefix 匹配
+- `chat_routing/registry.ex`(417 行)→ **拆两半**:attach/detach/current 翻译进一张 RoutingRegistry 表 + 一个薄 Behavior;搭便车的 default_workspace state 不跟着迁
+- 其余 7 个小 registry → **大多蒸发**(thin wrapper,融进通用 RoutingRegistry)
+
+**V0 范围建议**:别一次迁 9 个。**feishu-cc 垂直切片**只需 §10.7 的 3 张表(ChatRouting / PrincipalMapping / SessionRules),做出来跑通 e2e,模式立住了,其余等各自 plugin 上线时按同一模式重新表达。这样 v0 期工作量 = ~50 行新写 + e2e 复用,不是 1722 行重写。
+
+---
+
+## 18. 已决问题汇总 / 给实施者的参考
+
+### 18.1 已决问题速查
+
+本轮 grill 已经决定的问题列表(详见 Decision Log 对应编号):
+
+| 主题 | 已决方案 | Decision # |
+|---|---|---|
+| Python adapter ↔ ESR 协议 | 三种 transport 全 first-class(WS / stdio / MCP via channel) | #36 |
+| RoutingRegistry table 集合 | core 不预定义,plugin 自声明 | #37 |
+| Routing 路径编辑与切换 | additive rules + matcher DSL | #41 |
+| `:on_change` 触发时机 | slice 值真变了才写(`new_slice != old_slice`) | #59 |
+| Audit log 写入策略 | 异步 — GenServer cast + batch + 100ms flush;BEAM 原生,不用 Oban | #60 |
+
+### 18.2 测试策略(留给实施者决定)
+
+供参考的方向,具体实施可调整:
+
+- **Unit**:Behavior 是纯函数,直接调 `invoke/4` 测,无 mock
+- **Integration**:Kind GenServer + Registry + SQLite snapshot,真实数据库测
+- **E2E**:full plugin loaded + `Phoenix.ChannelTest`(对 transport)、HTTP client(对 Webhook)
+- **现有 31 个 e2e bash 的迁移**:推荐先迁核心 10 个 happy path,长尾留 v0.3.x
+
+具体测试框架选择、CI 集成方式、覆盖率目标、性能基准等,由当前 ESR 实施同事按团队工程实践决定。
+
+---
+
+## Appendix A: Invocation Flow
+
+```
+Adapter           Esr.Invocation        Kind GenServer     Behavior       :telemetry
+  │                    │                     │                │              │
+  │ 1. dispatch(%I{})  │                     │                │              │
+  ├───────────────────→│                     │                │              │
+  │                    │ 2. parse URI →                       │              │
+  │                    │    {kind, id, action}                │              │
+  │                    │ 2.5 validate args                    │              │
+  │                    │     against @interface               │              │
+  │                    │ 2.7 idempotency check                │              │
+  │                    │     if ctx.idempotency_key &&        │              │
+  │                    │        Idempotency.seen?(key)        │              │
+  │                    │     → {:ok, :duplicate_ignored}      │              │
+  │                    │     else: Idempotency.record(key)    │              │
+  │                    │ 3. ReadyGate.status(receiver_uri)    │              │
+  │                    │    + mode-aware routing:             │              │
+  │                    │    - :ready → KindRegistry.lookup    │              │
+  │                    │    - :not_ready + :cast → buffer     │              │
+  │                    │    - :not_ready + :call → fail-fast  │              │
+  │                    │    - :unknown → {:error, :no_actor}  │              │
+  │                    │ 4. GenServer.call/cast(pid, ...)     │              │
+  │                    ├────────────────────→│                │              │
+  │                    │                     │ 5. BehaviorRegistry.lookup    │
+  │                    │                     │    → behavior_module          │
+  │                    │                     │ 5.5 ⚑ AUTHZ GATE              │
+  │                    │                     │    needed ∈? ctx.caps         │
+  │                    │                     │ 6. slice = state[slice_key]   │
+  │                    │                     │ 7. invoke(action, slice, ...) │
+  │                    │                     ├───────────────→│              │
+  │                    │                     │ 8. {:ok, new_slice, result}   │
+  │                    │                     │←───────────────┤              │
+  │                    │                     │ 9. put_in(state, ...)         │
+  │                    │                     │    [snapshot if new_slice     │
+  │                    │                     │     != old_slice]             │
+  │                    │                     │ 10. :telemetry [:esr, ...]     │
+  │                    │                     ├──────────────────────────────→│
+  │                    │ 11. {:ok, result}   │                │              │
+  │                    │←────────────────────┤                │              │
+  │                    │ 12. Invocation.reply(ctx, result)    │              │
+  │                    │     → 根据 ctx.reply 路由            │              │
+  │←───────────────────┤                                      │              │
+  │ (push / broadcast / HTTP response / ...)                  │              │
+```
+
+**关键 step 解释**:
+
+- **Step 2.7 Idempotency**:adapter 在外部协议有 `message_id` 时填 `ctx.idempotency_key`(例:`"feishu:om_abc123"`)。`Esr.Idempotency` ETS 表 bounded 10k(LRU),`seen?(key)` 返回 true → 直接 `{:ok, :duplicate_ignored}`,不进 Kind。**Webhook 重试自动去重,不重复修改 state**。
+- **Step 3 ReadyGate 路由**:`:cast` mode 到 not-ready actor 可 buffer(PendingDelivery);`:call` / `:call_stream` 不可 buffer——caller 同步阻塞等结果,buffer 会撞 `deadline_ms`,必须 `{:error, :not_ready}` fail-fast,让 caller 自己决定重试。
+- **Step 9 Snapshot**:`new_slice != old_slice` 才写——slice 真变了才落 SQLite。BEAM 不可变 + 值比较自然给出正确语义,plugin 作者不需要管 dirty 标记。
+
+**失败路径**:
+
+| 失败点 | 行为 |
+|---|---|
+| step 2.5 args validation fail | `{:error, {:invalid_args, violations}}`(不进 Kind) |
+| step 2.7 duplicate detected | `{:ok, :duplicate_ignored}` — **不是失败,是预期**,但 telemetry `[:esr, :idempotency, :hit]` 记一次 |
+| step 3 receiver `:unknown` | `{:error, :no_such_actor}` + telemetry `[:esr, :dispatch, :no_actor]` |
+| step 3 `:not_ready` + `:call` | `{:error, :not_ready}` — caller 应重试或放弃 |
+| step 5 behavior not registered | `{:error, {:unknown_action, action}}` |
+| **step 5.5 cap missing** | `:telemetry [:esr, :authz, :denied]` + `{:error, :unauthorized}` |
+| step 7 behavior raises | caught;`[:esr, :invoke, :exception]`;state untouched;**写入 DLQ** |
+| step 9 snapshot 写失败 | `[:esr, :persistence, :failed]`;state 已更新,下次 snapshot 追上 |
+| Kind GenServer crash | DynamicSupervisor restart;init 从 snapshot 恢复;caller 收 `{:exit, _}` |
+| **零匹配 routing**(§5.5.5) | `[:esr, :routing, :unroutable]` + DLQ 'unroutable' 队列 |
+
+---
+
+## Appendix B: Decision Log
+
+按讨论顺序累积(v0.1 → v0.2 → v0.3 → v0.4):
+
+| # | 决策 | 起源 |
+|---|---|---|
+| 1 | ❎ Mixin → ✅ Dispatch via Registry | v0.1 |
+| 2 | URI + Verb + Args 三元组(verb 不进 URI) | v0.1 |
+| 3 | Umbrella + `Esr.<Category>.<KindType>.{Server, Supervisor}` 命名 | v0.1 |
+| 4 | Macro hygiene 问题 → Slice 隔离消解 | v0.1 |
+| 5 | Plugin 卸载:drain till instance=0,then stop | v0.1 |
+| 6 | Template:`Esr.Kind.Template` 通用 | v0.1 |
+| 7 | Channel → ExternalChannel in Resource | v0.1 |
+| 8 | CapBAC 粒度:Behavior 级 | v0.1 |
+| 9 | CapBAC 携带:Push(未来 Token) | v0.1 |
+| 10 | Plugin 默认 cap `:self`,Creator 全权 | v0.1 |
+| 11 | ❎ Delegation / Attenuation(v0) | v0.1 |
+| 12 | `:self` grant-time resolution | v0.1 |
+| 13 | Command / Interface 是 tag,不是 subtype | v0.1 |
+| 14 | A/B/D Ecto,C v0 Snapshot,v0.4+ ES | v0.1 |
+| 15 | Plugin convention,不走 DSL | v0.1 |
+| 16 | Plugin discovery 通过 `Application.spec :env` | v0.1 |
+| 17 | Cross-cutting Behavior attach 五条规则 | v0.1 |
+| 18 | "框架"心态退役,项目 = 约定 + 装配 | v0.1 |
+| 19 | **Phoenix ecosystem first** | v0.2 |
+| 20 | **ES 推迟到 v0.4+**,v0 用 Snapshot | v0.2 |
+| 21 | **URI as universal operationId**(类比 OpenAPI) | v0.3 |
+| 22 | **`@interface` 升为强制 schema**,`@command` tag 删 | v0.3 |
+| 23 | **Adapter pattern 升为顶层**,所有外部入口都是 adapter | v0.3 |
+| 24 | **`ctx.reply` 协议无关回复路由** | v0.3 |
+| 25 | **Mode 加 `:call_stream`**,集合扩到 5 个 | v0.3 |
+| 26 | **`erlexec` / `:ex_pty` 归位到 Behavior 内部**,不是顶层 Process impl | v0.3 |
+| 27 | **删除 v0.2 的 Process trait/impl 抽象**,Kind = GenServer 是唯一执行模型 | v0.3 |
+| 28 | **新增 RoutingRegistry**(第三种 Registry 家族,统一 n×n routing) | v0.3 |
+| 29 | **`erlexec` / `:ex_pty` / `:optimus` 移出 `esr_core`**,独立 plugin | v0.3 |
+| 30 | **CapBAC scope 加 `{:within_session, session_uri}`** | v0.3 |
+| 31 | **Phoenix-as-transport,不是 fullstack**;LiveView 推迟,Next.js + AdminAPI 优先 | v0.3 |
+| 32 | **2 个 Phoenix Socket**(`/socket` + `/mcp`),不是 5 个 | v0.3 |
+| 33 | **Standard Behavior library** 作为独立 plugin 集合(`esr_behavior_*`) | v0.3 |
+| 34 | **Bundle 概念砍**,`mix release` profile + seeds 即可 | v0.3 |
+| 35 | **DLQ 单立类 E**,不混入 audit log | v0.3 |
+| 36 | **三种 transport 都是 v0 first-class**(WS via `/socket`、stdio via OSProcess、MCP via `/mcp`)— 外部生态决定调用方式,不是选型 | v0.3 |
+| 37 | **RoutingRegistry: core 不预定义任何 table**,全部由 plugin 自声明 | v0.3 |
+| 38 | **LiveView 重新启用**作早期内部 IM dogfood 前端(`esr_web_liveview` plugin);不再延后。Next.js 留作 admin dashboard 的另一选项 | v0.3 |
+| 39 | **`%Message{}` 是 `%Invocation{}` 的特化 args shape**(只在 Entity↔Entity 链路上使用),不是平行新概念 | v0.3 |
+| 40 | **Message identity invariant**:Message 跨任意层中转其 sender/ref/body/mentions/inserted_at 不变,中转者只创建新 Invocation 携带它 | v0.3 |
+| 41 | **Routing rules = additive rules**(`(matcher, receivers)` 独立可加,union)+ **Matcher DSL**(编译期产数据 AST,类似 Ecto.Query) | v0.3 |
+| 42 | **View 是 Adapter 的对称面**——通用 Invocation 渲染器(不只 Message),`@interface.render_hint` 是可选提示 | v0.3 |
+| 43 | **Behavior 名字精简**:`ChatRoom` → `Chat`,`ExternalProcess` → `OSProcess`,`PtySession` → `Pty` | v0.3 |
+| 44 | **LOC budget 显式化**:esr_core target ~580 LOC,每模块 hard ceiling,任何模块超 cap 触发设计 review | v0.3 |
+| 45 | **持久化 F (Message stream) + G (File attachments) 全部 Phoenix 生态原生**:Ecto + SQLite BLOB / S3 via `req_s3`;无新外部依赖 | v0.3 |
+| 46 | **SQLite 是唯一数据库**(不双轨),Postgres 不出现在 v0 spec | v0.3 |
+| 47 | **`:oban` 移除**:snapshot 定时 / DLQ evict / drain timer 改用 `Process.send_after/3`(~15 LOC `Esr.Scheduler`);BEAM 原生足够 | v0.3 |
+| 48 | **Federation 形态 A 确认**(独立节点 + cross-node 协议),v0 不实现,但 share-nothing 持久化 / URI 寻址 / Push CapBAC 已为它留好接口 | v0.3 |
+| 49 | **LiveView IM dogfood + CLI 写入 spec**(Appendix D),作为 reference 实现,让 spec 读者直观感受系统怎么用 | v0.3 |
+| 50 | **ESR 不内置通用 MCP server**——内嵌 BEAM agent 直接调 Elixir API,Python adapter 走 WS;唯一 MCP 集成是 CC Channel | v0.3 |
+| 51 | **CC Channel = ESR ↔ CC 桥** — 反向 MCP push 模型(不是 LLM pull tools);双向:CC reply 回 ESR routing | v0.3 |
+| 52 | **`esr_plugin_cc_channel` 单 plugin 含两侧组件**(Elixir adapter + Python channel server)统一发布 | v0.3 |
+| 53 | **CC Channel 实现语言:Python 优先**(复用现有 esr 的 Python channel 实现),Bun 备选 | v0.3 |
+| 54 | **Adapter driver 关系两种**:ESR-driven(Feishu/Slack,OSProcess 拉起)与 external-driven(CC Channel,CC 用 `--channels` 拉起) | v0.3 |
+| 55 | **单层鉴权模型**:WS connect 验 token(身份)+ Invocation flow 验 cap(权限);Channels 协议的 sender allowlist / pairing 不使用 | v0.3 |
+| 56 | **`esr_plugin_cc_pty` vs `esr_plugin_cc_channel` 独立 plugin**:本地 pty 拉起 vs 外部 channel 桥接,两者并存可同装 | v0.3 |
+| 57 | **LiveView IM 不限于 dogfood**:v0 期内部 IM 验证 spec,v0 之后作为产品 web 入口持续存在,跟 Feishu/Slack/CC channel 并列 | v0.3 |
+| 58 | **LiveView ↔ CLI 同构映射**:两侧 UI 都从 `@interface` 自动派生;`/agent:set-default A` ↔ `esr agent set-default A` 等价;新 Behavior 自动出现在两侧 | v0.3 |
+| 59 | **`:on_change` 触发时机:slice 真变了才写**(`new_slice != old_slice`),不是 invoke 后都写。BEAM 不可变 + 值比较自然给出正确语义,用户无需管 dirty 标记 | v0.3 |
+| 60 | **Audit log 异步写入**:`:telemetry` handler 只 `GenServer.cast` 到 `Esr.Audit.Writer`(微秒);Writer 内部 batch + 100ms flush;不阻塞 invoke,不用 Oban | v0.3 |
+| 61 | **顶层 framing — ESR 是 router 不是 req/resp app**:失败默认静默,必须人工造可观测性;统一了 4 个 P1/P2 设计动作的共同根 | v0.4 |
+| 62 | **顶层 framing — 持久化层存了代码引用**:用稳定 `type_name` 间接层而非模块名字符串;消除 rename → snapshot orphan 类 bug | v0.4 |
+| 63 | **Plugin 判定原则:读什么数据,归哪里**——读 core 数据(`%Message{}` 等)→ core;读 plugin 专属 payload → plugin。比"业务/基础设施"二分更准 | v0.4 |
+| 64 | **Resource Kind 薄形态明确化 + "shared referent needs identity" 原则**:被多方按身份引用的概念必须独立可寻址,不能展开成 tuple;Workspace 是代表性应用 | v0.4 |
+| 65 | **RoutingRegistry 加 `put_new` 语义**:unique-key 表必须用 `put_new`(撞 key reject 不静默 shadow);duplicate-key 表(如 `SessionRules`)用 `put`(append 语义) | v0.4 |
+| 66 | **三件 Reliability primitives 全部在 core**:`Esr.ReadyGate` / `Esr.PendingDelivery` / `Esr.Idempotency`,`use Esr.Kind` 宏自动接入,plugin 作者无法绕过 | v0.4 |
+| 67 | **`Esr.deliver/2` 合进 `Esr.Invocation.dispatch/1`**:plugin 作者只学一个 API;`:cast` to not-ready 可 buffer,`:call` to not-ready 必须 fail-fast(caller 同步阻塞会撞 deadline_ms) | v0.4 |
+| 68 | **零匹配路由 → telemetry + DLQ unroutable**:消息到达零个 receiver 是 ESR chat 系统的 bug,不能静默返回 [];必须显式可观测 | v0.4 |
+| 69 | **双层 Template 模型**:Template Class(模块级,开发者写)+ Template Instance(运行时 Resource Kind,用户创建);Workspace 是 Instance 的代表性示例;`validate/1` 是契约 | v0.4 |
+| 70 | **Workspace 保留为薄 Resource Kind**:不绑定到 Session/Entity,平行三个 Kind 子类;5 类引用者(cap/session bindings/user.default/repo registry/plugin config)证明它必须独立存在 | v0.4 |
+| 71 | **Matcher 边界按"读 core 数据"画线**:组合子 + Message-field matcher 全部在 core(~85 LOC);未来 plugin-payload matcher(`feishu_card_type` 等)在 plugin。防止 audit/workflow plugin 依赖 chat plugin | v0.4 |
+| 72 | **LOC 预算校准 595 → ~870**:dev review 实测论证扎实;invocation/matcher/kind 三个核心模块上调;新增 4 个模块(interface_validator/idempotency/ready_gate/pending_delivery);red line 提到 1100 | v0.4 |
+| 73 | **feishu-cc 切片 3 张参考表入 spec**(§10.7):ChatRouting / PrincipalMapping(unique, put_new)+ SessionRules(duplicate, put);其他 plugin 按同模式扩展 | v0.4 |
+| 74 | **Routing 迁移分诊规则**(§17.11):不一次性迁 1722 行;旧架构偶然复杂度蒸发(slash route 493 → ~30),真实业务逻辑重新表达;feishu-cc 切片优先 | v0.4 |
+| 75 | **inbound 永远走 dispatch,绝不裸 `PubSub.broadcast`** — 升级为 §5.7.6 硬不变式;Phoenix.PubSub 不 buffer 没订阅者的 topic,裸 broadcast 在 register→subscribe 窗口会丢消息(事故 2.1 根因) | v0.4 |
+| 76 | **Idempotency v0 语义:收到即记,不是成功才记**(§5.7.3)— 失败路径走 DLQ 兜底;事务化"成功才记"超出 v0 复杂度预算;真需要重试到成功用专门 retry policy | v0.4 |
+| 77 | **Event Sourcing 不做** — 从 §17.2 deferred 改成已决不做;append-only Message stream 已具备 ES 真实好处,不需要承担 ES 复杂度 | v0.4 |
+| 78 | **`SessionBindings` 作为 v0.4 第 4 张参考表**(§10.7,duplicate-key);RoutingRegistry 加 `reverse_index` 可选参数支持反查(workspace→session 正向 + session→workspace 反向) | v0.4 |
+| 79 | **LOC cap 总和 > red line 是预期**:cap 是单模块异常天花板,red line 是实测合计触发器,两个独立信号(防止读者看到"自相矛盾") | v0.4 |
+| 80 | **sub-step 是 /goal 内部 e2e gate,phase 才是 Allen review 单元**:行为正确性自动化(sub-step 完成跑对应 e2e flow + 单元/集成测试,绿才 tag)+ 架构判断人工(整 phase 完才 review)拆开;VERIFICATION.md 在 brainstorm 阶段先于 PLAN.md 写,作为 sub-step 之间契约 | v0.4 |
+| 81 | **`user://admin` 是 bootstrap 默认 principal**,持 all-caps 不可 revoke(结构性 invariant 在 `Esr.Capability.revoke/2` 集中检查 — 见 §7.6);Phase 1-3c LiveView/CLI 默认 `ctx.caller = user://admin`,Phase 3d cap 真实化后仍持 all-caps;`Esr.Bootstrap` 首次启动检查 `users` 表空时创建 | v0.4 |
+| 82 | **authz stub 带 `:stub_grant` telemetry 防代码层"顺手简化"**:Phase 1 dispatch step 5.5 authz_check/2 是显式 permissive stub(永远 grant + emit `:stub_grant`),带 `PHASE-3D-STUB: DO NOT REMOVE` 注释;Phase 3d in-place 替换为真实 cap 检查 + `:granted`/`:denied` telemetry;stub 阶段也可观测,gate 在路径里不变式不破 | v0.4 |
+| 83 | **§14 LOC budget round-2 校准**:`message_store.ex` 之前漏在 §14 模块清单外,工程师 round-2 review 发现;补进清单(~50 LOC,cap 70),target 870 → 920,red line 1100 → 1150 | v0.4 |
+
+---
+
+## Appendix C: 设计哲学
+
+整个 grill 过程在反复做同一件事——**把抽象边界划清楚**。每一层(URI / Invocation / Behavior / Capability / Adapter)各管各事,层间通信只通过狭窄接口(Registry lookup、`ctx` struct、`@interface` schema)。
+
+具体到方法上,反复用的判断标准是:**这条决策让新人加入项目时多懂几个东西,还是少懂几个东西?**
+
+- 凡是让新人多记的 → **拒绝**(mixin 字段冲突、URI 里塞 verb、Command/Interface 三选一、DSL 宏、5 种 socket、Process trait/impl 三选一)
+- 凡是让新人少记的 → **接受**(dispatch 一条路、Behavior 一种入口、Capability 一份契约、Plugin 就是 OTP app、`@interface` 一份 schema、URI 是 operationId)
+
+**最终的简化路径**:
+
+```
+v0.1: 自创"Kind/Process/Behavior/Plugin/Capability"五件套
+v0.2: Phoenix-first,大量复用生态
+v0.3: 发现这本质是 OpenAPI-on-Phoenix-transport
+        URI = operationId
+        @interface = schema
+        Adapter = code generator + protocol translator
+        Behavior = pure invokable
+        Kind = GenServer
+        Plugin = OTP app
+```
+
+少发明,多装配,Phoenix-as-transport,@interface 是契约。把判断力花在边界上。
+## Appendix D: Reference Views — LiveView IM + CLI
+
+两个 reference 实现,展示 ESR 怎么用。**v0 阶段用作内部 dogfood**(在接外部 IM 前先验证 spec);**未来产品也会用到** LiveView IM(它是 ESR 自带的 web 入口,Feishu/Slack 接入后仍然存在,作为浏览器端的统一界面)。
+
+### D.1 LiveView IM
+
+Plugin: **`esr_web_liveview`**(独立 OTP app)
+Target LOC: **~300**
+依赖: `:phoenix_live_view`、`esr_core`
+
+#### D.1.1 URL 结构
+
+```
+/sessions                       → 列出所有 session
+/sessions/:id                   → 进入某 session(IM 主界面)
+/sessions/:id/rules             → routing rules 编辑器(同页 side panel)
+/agents                         → 列出所有 agent
+/agents/:id                     → agent 详情 + 它持有的 caps
+```
+
+#### D.1.2 Session view 布局
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│ session://feishu-cc/cc-7f3a   [4 members]  [9 rules]   [⚙]  │  ← top bar
+├──────────────────────────────────────────────┬──────────────┤
+│                                              │  Members     │
+│  09:23  @allen  hello @arch-a                │   • pty      │
+│  09:23  @arch-a  let me see...               │   • allen    │
+│         [thinking 1.2s ▼]                    │   • arch-a   │
+│  09:24  @arch-a  pong                        │   • arch-b   │
+│                                              │              │
+│  ─── allen set default to @arch-a ───        │  Rules       │
+│                                              │   • always→A │
+│  09:25  @allen  @arch-b 你也看看              │   • @A → A   │
+│  09:25  @arch-b  collab idea: ...            │   • @B → B,A │
+│  09:25  @arch-a  +1, 我补充一点              │   • pty out  │
+│                                              │              │
+│                                              │  [+ add rule]│
+├──────────────────────────────────────────────┴──────────────┤
+│ > _                                              [Send]      │
+└─────────────────────────────────────────────────────────────┘
+```
+
+#### D.1.3 关键交互
+
+| 用户动作 | LiveView event | 内部 dispatch |
+|---|---|---|
+| 输入 `hello @arch-a` + Send | `send_message` | `dispatch(%Invocation{target: chat/receive, args: %Message{sender: allen, mentions: [arch-a], body: "hello @arch-a"}})` |
+| 输入 `/set-default A` | `slash_command` | `dispatch(%Invocation{target: session_routing/set_default, args: %{agent: "A"}})` |
+| 点击 "+ add rule" | `open_rule_editor` | LiveView 内部状态;提交时 dispatch `session_routing/add_rule` |
+| 点击 mention `@arch-a` | (nothing,纯渲染) | — |
+| 加载历史 (mount) | (mount hook) | 查 messages 表 last 100 条 |
+| 实时新消息 | PubSub `<session_uri>:events` | LiveView assign update |
+
+#### D.1.4 Render dispatch — View 抽象的具体落地
+
+LiveView module 实现 `Esr.View` behaviour:
+
+```elixir
+defmodule EsrWebLiveview.MessageView do
+  @behaviour Esr.View
+
+  def render(%Invocation{args: %Esr.Message{} = m}, _ctx) do
+    %{type: :bubble, sender: m.sender, body: m.body, mentions: m.mentions, ts: m.inserted_at}
+  end
+
+  def render(%Invocation{
+    target: %URI{path: "/behavior/session_routing/set_default"},
+    args: args,
+    ctx: ctx
+  }, _) do
+    %{type: :system, text: "#{short(ctx.caller)} set default to @#{args.agent}"}
+  end
+
+  def render(%Invocation{} = inv, _) do
+    %{type: :system, text: "(#{inv.target |> short})"}
+  end
+end
+```
+
+LiveView template 根据 `%{type: ...}` 不同分支渲染气泡 vs 系统消息。
+
+#### D.1.5 Routing rules 可视化(side panel)
+
+每条 rule 显示为:`<matcher pretty-print> → [<receivers>]`。点击可编辑或删除(走 SessionRouting Behavior)。matcher pretty-print:
+
+```
+always()                                    →  always
+mention("A")                                →  @A
+mention("B") and from_member(:user)         →  @B + from user
+from_external(:inbound)                     →  external inbound
+```
+
+DSL 反向渲染由 `Esr.Routing.Matcher.to_string/1` 提供(~10 LOC,递归 walk AST)。
+
+### D.2 CLI
+
+Plugin: **`esr_adapter_cli`**(独立 OTP app)
+Target LOC: **~200**
+依赖: `:optimus`、`:owl`(Elixir rich CLI rendering)、`:phoenix_gen_socket_client` or 类似
+
+#### D.2.1 调用形态
+
+```bash
+# Inspect
+$ esr-cli inspect session://feishu-cc/cc-7f3a
+session://feishu-cc/cc-7f3a (Esr.Session.Feishu2CC)
+  members: [pty, user://allen, agent://arch-a, agent://arch-b]
+  rules: 9 active
+  last_activity: 32s ago
+
+# Attach (interactive)
+$ esr-cli attach session://feishu-cc/cc-7f3a
+[connected as user://allen]
+[09:23] @allen: hello @arch-a
+[09:23] @arch-a: let me see...
+[09:24] @arch-a: pong
+─── allen set default to @arch-a ───
+> _
+
+# One-shot invocation(脚本用)
+$ esr-cli call agent://arch-a/behavior/chat/inbox_append \
+  --args '{"body": "drive-by ping"}'
+{:ok, "msg://..."}
+```
+
+#### D.2.2 Render 形态
+
+CLI 实现 `Esr.View` behaviour,渲染到 ANSI:
+
+```elixir
+defmodule EsrAdapterCli.MessageView do
+  @behaviour Esr.View
+
+  def render(%Invocation{args: %Esr.Message{} = m}, _) do
+    IO.ANSI.format([
+      :light_black, fmt_time(m.inserted_at), " ",
+      sender_color(m.sender), "@", short(m.sender), ": ",
+      :reset, highlight_mentions(m.body, m.mentions), "\n"
+    ])
+  end
+
+  def render(%Invocation{target: target, ctx: ctx} = inv, _) do
+    IO.ANSI.format([:light_black, "─── ",
+      describe_invocation(target, inv.args, ctx), " ───\n"])
+  end
+end
+```
+
+#### D.2.3 跟 LiveView 同构
+
+注意 `EsrWebLiveview.MessageView` 跟 `EsrAdapterCli.MessageView` 是**同构 View module**——两者都 dispatch 同样的 `%Invocation{}`,只是渲染输出类型不同(HTML assigns vs ANSI iodata)。这正是 §12.7 描述的 View pattern——adapter 的对称面,通用 Invocation 渲染器。
+
+未来加 Feishu/Slack adapter 时,各自实现一个 `MessageView`,渲染成 Feishu card / Slack block。**Behavior 代码完全不变**。
+
+### D.3 LiveView 与 CLI 的同构映射
+
+LiveView 跟 CLI 是同一个系统的两个 View;**用户输入和命令在两侧自动等价**。这不是凑巧——它是 §6.2 `@interface` 强制 schema 的直接副产品。
+
+#### D.3.1 等价的例子
+
+| LiveView 输入 | CLI 输入 | 内部 Invocation |
+|---|---|---|
+| `/agent:set-default A`(slash command) | `esr agent set-default A` | `dispatch(target=session_routing/set_default, args={agent: "A"})` |
+| 点击 "+ rule" 按钮填表单 | `esr rule add --matcher 'mention("B")' --to agent_b` | `dispatch(target=session_routing/add_rule, args={matcher, receivers})` |
+| 输入框 `@arch-a hi`(自然 message) | `esr send @arch-a hi`(或 attach 模式直接输入) | `dispatch(target=chat/receive, args=%Message{...})` |
+| 点击 "Invite Agent" | `esr session invite --template ...` | `dispatch(target=session_routing/invite, args=...)` |
+| 点击某 agent 查 caps | `esr agent caps agent://...` | `dispatch(target=identity/list_caps, args={})` |
+
+任何 LiveView 上的用户操作,都有对应 CLI 命令;任何 CLI 命令,都能在 LiveView 上找到 UI 对应。
+
+#### D.3.2 为什么可以这样映射
+
+每个 Behavior 声明 `@interface`——它就是该 Behavior 所有 action 的 schema(args / returns / errors / modes)。这一份声明,两侧 View **从同一个 source 自动派生 UI**:
+
+```
+@interface
+   │
+   ├── EsrWebLiveview.SlashParser.compile/1   →  "/agent:set-default A" parser
+   ├── EsrWebLiveview.FormBuilder.compile/1   →  inline form / button
+   ├── EsrAdapterCli.OptimusBuilder.compile/1 →  "esr agent set-default A" parser
+   └── (未来) HTTP, MCP, ... 各自从同一份 @interface 派生
+```
+
+LiveView 没有"手写命令解析",CLI 没有"手写参数列表"——**两侧都是 `@interface` 的渲染**。新增一个 Behavior 时,只需要写 `@interface` + `invoke/4`,LiveView 和 CLI **自动获得**该 Behavior 的所有 action,作为新的 slash command / CLI subcommand。
+
+#### D.3.3 命名映射规则
+
+LiveView slash 命令格式:`/<behavior-short-name>:<action>`,如:
+- `/agent:set-default` → `Esr.Behavior.SessionRouting.set_default`
+- `/chat:send` → `Esr.Behavior.Chat.send`
+
+CLI 命令格式:`esr <behavior-short-name> <action>`(下划线/连字符互转):
+- `esr agent set-default` ↔ `set_default` action
+- `esr chat send` ↔ `send` action
+
+`<behavior-short-name>` 由 Behavior 模块声明的 `@cli_name`(默认是模块名 snake_case 末段)决定,**两侧用同一份命名**。
+
+#### D.3.4 自动挂载
+
+CLI 命令**自动挂载**——无需 ops 手写命令清单。CLI plugin 启动时:
+
+1. 通过 `BehaviorRegistry` 拿到当前 BEAM 内**所有已注册**的 Behavior
+2. 读取每个 Behavior 的 `@interface` + `@cli_name`
+3. 用 Optimus DSL 在内存里编译出一棵 subcommand tree
+4. `esr --help` 显示所有可用命令
+
+新装一个 plugin → 重启 CLI → 新命令自动可见。**没有需要 ops 维护的命令清单**。LiveView 同理——slash parser 编译时扫描注册表,新 Behavior 的 action 自动出现在 slash 自动补全里。
+
+#### D.3.5 这一映射的隐含价值
+
+| 价值 | 具体表现 |
+|---|---|
+| **可写脚本** | 任何 LiveView 操作都能用 CLI 一行复现,写 shell 自动化无障碍 |
+| **可远程演示** | 直播写一遍 CLI 命令,观众在 LiveView 上看到等价效果,文档同步性强 |
+| **可教学** | "试一下点这个按钮" 和 "试一下跑这条命令" 是同一件事,两种学习路径并存 |
+| **可调试** | LiveView 不工作时,CLI 直接复现路径,排除前端问题 |
+| **可压测** | CLI 写循环刷 1000 个 message,LiveView 实时看效果 |
+
+这种"多 View 同源"是 OpenAPI 类比的直接收益——`@interface` 是 operationId schema,每个 View 都是它的一种渲染。新增 View(未来:HTTP REST / MCP tool / 自定义 TUI)都遵循同一个模式。
+
+### D.4 用 LiveView 验证 spec 的几个关键点
+
+v0 期 LiveView IM 起来后,以下 spec 决策都能在浏览器里立即看到效果——这正是为什么 v0 优先做 LiveView 而不是先接 Feishu。
+
+| 验证项 | LiveView IM 能看到什么 |
+|---|---|
+| `@interface` 自动生成 form 跟 slash parser 是否好用 | 输入 `/set-default<TAB>` 是否能补全;form 表单字段是否准 |
+| Message identity invariant | 同一条 message 转发多次,渲染应该一致;ref 指向旧消息能跳转 |
+| Routing rules additive 语义 | side panel 显示所有 rule,新加一条不影响已有 |
+| n×n routing | @B 时确认 A 也收到 |
+| CapBAC | 没 cap 的 action 在 UI 上灰显;点击给 "forbidden" toast |
+| Cross-cutting Behavior attach | attach `AuditLog` plugin 后,UI 立即出现 audit timeline |
+| Snapshot persistence | 重启 BEAM,session 状态恢复;message 历史从 messages 表读出 |
+
+LiveView 起来后,**第一个 sprint 应该跑通 §3-§7 全部决策**,任何不对劲都会立刻 surface 出来。LiveView IM 作为产品也会延续到 v0 之后,跟 Feishu/Slack/CC channel 并列。
+
+---
+
