@@ -1,9 +1,10 @@
 # ESR Kind Runtime — 架构设计 v0.4
 
-> **Status**: 架构骨架冻结,dev review **三轮**闭环(round-2 补 message_store.ex 缺口),可开始迁移实施
-> **Last updated**: 2026-05-14
+> **Status**: 架构骨架冻结,Phase 0 完成(`phase0` tag),Phase 1 spec sign-off,实施期决策已开始记录(impl 期 #84+)
+> **Last updated**: 2026-05-15
 > **Owner**: Allen / ezagent42
 > **Changes from v0.3**: 顶层加"ESR 是 router 不是 req/resp app"framing;Resource Kind 加"shared referent needs identity"判定原则;Template 升级为双层模型(Class / Instance,Workspace 是 Instance 示范);加 reliability primitives 三件套(ReadyGate / PendingDelivery / Idempotency);RoutingRegistry 加 `put_new` 语义(unique-key only)+ `reverse_index` 反查;Matcher 边界按"读 core 数据 → core"画线;Plugin 判定原则显式化;5 个事故坑全部 design-in;LOC 校准 475/595 → ~870 → 920;feishu-cc 切片 4 张参考表入 spec;ES 从 deferred 改为已决不做;dev 两轮 review 闭环
+> **Impl-period 更新**: §5.7.4 承认 Kind 生命周期两条等价实现路径(宏 / 共享 Server,Decision #84);Decision Log #84 #85 加入
 
 ---
 
@@ -842,10 +843,16 @@ end
 
 显式标注这是 limitation,实施时不要"自然扩展"成事务化语义。
 
-#### 5.7.4 `use Esr.Kind` 宏自动生成的生命周期 — plugin 作者无法绕过
+#### 5.7.4 Kind GenServer 生命周期 — 两条等价实现路径
+
+ESR Kind 的 `register → subscribe → announce_ready` 生命周期是不变式(Decision #66),
+**有两条 means 实现等价 property**,plugin 作者都无法绕过:
+
+**路径 A — `use Esr.Kind` 宏**(原方案):每个 Kind 模块通过 `use Esr.Kind` 宏展开,
+宏生成 `init/1` 实现固定的 register→subscribe→announce_ready 三步。
 
 ```elixir
-# 宏展开出:
+# 路径 A:use Esr.Kind 宏展开出:
 def init(args) do
   state = load_or_init(args)
   :ok = Esr.KindRegistry.put_new(state.uri, self())   # 撞 key crash, let-it-crash
@@ -855,20 +862,59 @@ end
 
 def handle_continue(:announce_ready, state) do
   Esr.ReadyGate.mark_ready(state.uri)
-  # 同时 flush 这段时间 buffer 的消息
-  Esr.PendingDelivery.flush(state.uri)
-  |> Enum.each(&handle_inbound(&1, state))
+  Esr.PendingDelivery.flush(state.uri) |> Enum.each(&handle_inbound(&1, state))
   {:noreply, state}
 end
 ```
 
-**保证次序**:`register → subscribe → mark_ready` 严格三步,plugin 作者改不了。这消除了"先发后订"race:
+**路径 B — `@behaviour Esr.Kind` + 共享 `Esr.Kind.Server`**(Phase 1 实施选择,Decision #84):
+每个 Kind 模块只声明 `@behaviour Esr.Kind` + callback(`type_name/0`、`behaviors/0`、
+`persistence/0`、可选 `uri_from_args/1`)。整个系统**一个**共享 `Esr.Kind.Server` GenServer,
+Kind 实例由 `Esr.Kind.Server.start_link({kind_module, args})` 启动。plugin 作者根本不写 init,
+property 等价或更强(用户写不出 wrong init,因为没 init 可写)。
+
+```elixir
+# 路径 B:Kind 模块
+defmodule Esr.Entity.Echo do
+  @behaviour Esr.Kind
+  def type_name, do: :echo
+  def behaviors, do: [Esr.Behavior.Echo]
+  def persistence, do: :ephemeral
+end
+
+# 共享 server 处理生命周期(同等 register→subscribe→announce_ready 严格三步)
+defmodule Esr.Kind.Server do
+  use GenServer
+  def init({kind_module, args}) do
+    state = load_or_init(args, kind_module)
+    :ok = Esr.KindRegistry.put_new(state.uri, self())
+    :ok = subscribe_own_topics(state.uri)
+    {:ok, %{kind: kind_module, uri: state.uri, state: state}, {:continue, :announce_ready}}
+  end
+  # handle_continue + handle_call/cast 同上
+end
+```
+
+**保证次序**(两条路径都满足):`register → subscribe → mark_ready` 严格三步,plugin 作者改不了。这消除了"先发后订"race:
 
 - 注册前没人能 lookup 到 → 没人能 cast 进来
 - 注册后 subscribe 前的窗口里:**`dispatch/1` 路径被 ReadyGate 接住**(`put_new` 时 ReadyGate 就置 `:not_ready`,`:cast` 进 PendingDelivery buffer,`:call` fail-fast),所以 dispatch 来的 message 一条不丢
 - mark_ready 前 dispatch 来的消息 → PendingDelivery buffer,ready 时 flush
 
-**关键不变式**:这个窗口的正确性依赖 §5.7.6 的硬不变式(inbound 永远走 dispatch,**不**裸 `PubSub.broadcast` 到 inbound topic)。Phoenix.PubSub 对没有订阅者的 topic **不** buffer——裸 broadcast 进 inbound topic 在 register→subscribe 窗口里**会被丢**(这正是事故 2.1 的本来面貌)。
+**两条路径的 trade-off**:
+
+| 维度 | 路径 A(宏) | 路径 B(共享 Server) |
+|---|---|---|
+| Kind 之间隔离边界 | **compile time**(每 Kind 自己的 GenServer module,代码层独立) | **runtime**(所有 Kind 共享 `Esr.Kind.Server`,state shape 由 slice key 隔离) |
+| `handle_dispatch/3` 复杂度 | 简单(每 Kind 自己处理) | 必须 defensive 处理多 Kind 的 state shape |
+| Plugin 隔离 invariant | 强(模块级) | 弱(运行时 dispatch table 隔离) |
+| 宏调试复杂度 | 高(stack trace 难读) | 低(无宏展开) |
+| Plugin 作者改 init 的能力 | 不能(宏展开覆盖) | 不能(根本没 init 可写) |
+| Property 等价 | ✓ | ✓ |
+
+**Phase 1 选路径 B**(详见 `phase-specs/phase1/DECISIONS.md` P1-D2 + Decision Log #84):理由是 Phase 1 只有 Echo 一个业务 Kind,runtime 隔离风险接近零;property 收益(用户写不出 wrong init)对 Phase 1 dogfood loop 价值更大。Phase 2+ 加 Chat Behavior 时如果发现共享 Server 跟某些 Kind 的 state 假设冲突,届时评估是否需要切回路径 A 或两条并存。
+
+**关键不变式**(两条路径都依赖):这个窗口的正确性依赖 §5.7.6 的硬不变式(inbound 永远走 dispatch,**不**裸 `PubSub.broadcast` 到 inbound topic)。Phoenix.PubSub 对没有订阅者的 topic **不** buffer——裸 broadcast 进 inbound topic 在 register→subscribe 窗口里**会被丢**(这正是事故 2.1 的本来面貌)。
 
 #### 5.7.5 `Esr.Invocation.dispatch/1` 内置投递路径选择
 
@@ -2451,7 +2497,7 @@ Adapter           Esr.Invocation        Kind GenServer     Behavior       :telem
 
 ## Appendix B: Decision Log
 
-按讨论顺序累积(v0.1 → v0.2 → v0.3 → v0.4):
+按讨论顺序累积(v0.1 → v0.2 → v0.3 → v0.4 → impl):
 
 | # | 决策 | 起源 |
 |---|---|---|
@@ -2538,6 +2584,8 @@ Adapter           Esr.Invocation        Kind GenServer     Behavior       :telem
 | 81 | **`user://admin` 是 bootstrap 默认 principal**,持 all-caps 不可 revoke(结构性 invariant 在 `Esr.Capability.revoke/2` 集中检查 — 见 §7.6);Phase 1-3c LiveView/CLI 默认 `ctx.caller = user://admin`,Phase 3d cap 真实化后仍持 all-caps;`Esr.Bootstrap` 首次启动检查 `users` 表空时创建 | v0.4 |
 | 82 | **authz stub 带 `:stub_grant` telemetry 防代码层"顺手简化"**:Phase 1 dispatch step 5.5 authz_check/2 是显式 permissive stub(永远 grant + emit `:stub_grant`),带 `PHASE-3D-STUB: DO NOT REMOVE` 注释;Phase 3d in-place 替换为真实 cap 检查 + `:granted`/`:denied` telemetry;stub 阶段也可观测,gate 在路径里不变式不破 | v0.4 |
 | 83 | **§14 LOC budget round-2 校准**:`message_store.ex` 之前漏在 §14 模块清单外,工程师 round-2 review 发现;补进清单(~50 LOC,cap 70),target 870 → 920,red line 1100 → 1150 | v0.4 |
+| 84 | **Phase 1 采用路径 B(`@behaviour Esr.Kind` + 共享 `Esr.Kind.Server`)** 不用宏 — register→subscribe→announce_ready property 等价 Decision #66 但 means 不同;共享 Server 把 Kind 隔离从 compile time 推到 runtime,`Esr.Kind.Runtime.handle_dispatch/3` 必须 defensive 处理多 Kind state shape;Phase 1 接受 trade-off 因为只有 Echo 一个业务 Kind;Phase 2+ 若 state shape 假设冲突再评估切回路径 A 或两条并存(详见 §5.7.4) | impl |
+| 85 | **`.claude/` 暂用 plain dir 不 vendor+submodule**(Phase 0 实施期决策)— 短期符合"少发明多装配"+ 镜像老 esr 实际结构;trigger 迁 vendor: (a) 出现 skill 需要 upstream 更新需求,或 (b) Phase 5 完成后整理 tech debt | impl |
 
 ---
 
