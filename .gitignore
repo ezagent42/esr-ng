@@ -30,3 +30,10 @@ erl_crash.dump
 # Claude Code worktrees
 /.claude/worktrees/
 
+
+# Local overrides for cc-bridge-attach.sh — proxy + creds, per operator.
+scripts/cc-bridge-attach.local.sh
+
+# Phase 1 v1_prototype: generated MCP config for cc-bridge-attach.
+# Each operator has their own ESRD_URL / proxy; gitignored.
+.mcp.json

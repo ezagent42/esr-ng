@@ -57,6 +57,14 @@ config :logger, :default_formatter,
 # Use Jason for JSON parsing in Phoenix
 config :phoenix, :json_library, Jason
 
+# Register text/event-stream so Plug's :accepts plug recognises it for
+# Phase 1 v1_prototype's SSE endpoint at /api/cc-bridge/events. Without
+# this entry, Plug returns 406 Not Acceptable for the bridge's
+# `Accept: text/event-stream` request.
+config :mime, :types, %{
+  "text/event-stream" => ["event-stream"]
+}
+
 # Import environment specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.
 import_config "#{config_env()}.exs"

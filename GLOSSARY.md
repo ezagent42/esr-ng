@@ -110,8 +110,10 @@ ESR 项目的**单一真相源**(single source of truth)for:
 | 81 | **`user://admin` bootstrap principal,持 all-caps 不可 revoke** — 结构性 invariant 集中在 `Esr.Capability.revoke/2`;Phase 1-3c LiveView/CLI 默认 `ctx.caller = user://admin` | v0.4 |
 | 82 | **authz stub 带 `:stub_grant` telemetry 防"顺手简化"** — Phase 1 永远 grant + emit telemetry;Phase 3d in-place 替换为真实检查 + `:granted`/`:denied` | v0.4 |
 | 83 | **§14 LOC budget round-2 校准** — `message_store.ex` 之前漏列;补进清单 ~50 LOC;target 870 → 920;red line 1100 → 1150 | v0.4 |
+| 84 | **Phase 1 采用路径 B(`@behaviour Esr.Kind` + 共享 `Esr.Kind.Server`)** 不用宏 — register→subscribe→announce_ready property 等价 Decision #66 但 means 不同;共享 Server 把 Kind 隔离从 compile time 推到 runtime;`Esr.Kind.Runtime.handle_dispatch/3` 必须 defensive 处理多 Kind state shape;Phase 1 接受 trade-off 因为只有 Echo 一个业务 Kind;Phase 2+ 若 state shape 假设冲突再评估(详见 ARCHITECTURE.md §5.7.4) | impl |
+| 85 | **`.claude/` 暂用 plain dir 不 vendor+submodule**(Phase 0 实施期决策)— 短期符合"少发明多装配"+ 镜像老 esr 实际结构;trigger 迁 vendor: (a) 出现 skill 需要 upstream 更新需求,或 (b) Phase 5 完成后整理 tech debt | impl |
 
-实施期决策(impl):append from here →
+实施期决策(impl)将持续从 #86 起 append →
 
 ---
 
@@ -524,7 +526,7 @@ ESR domain 词跟外部世界(Phoenix / Elixir / 通用计算机科学)同名碰
 ### 实施期新增 Decision
 
 1. 实施期产生新架构决策(brainstorm 阶段 / dev review / Allen 指示)
-2. Append 到 §1 Decision Log,编号递增(下一条 #84)
+2. Append 到 §1 Decision Log,编号递增(下一条 #86)
 3. Period 字段标 `impl`(区别 v0.1-v0.4 的"设计期"决策)
 4. 决策正文要简洁:**一句话核心 + 关键 link**(到 ARCHITECTURE.md 章节或 phase-specs/)
 5. 同步:如果决策影响 ARCHITECTURE.md,Allen 决定要不要 patch 主文档(小决策可能只在 GLOSSARY 记录)
@@ -549,6 +551,6 @@ ESR domain 词跟外部世界(Phoenix / Elixir / 通用计算机科学)同名碰
 
 本文件是 ESR 项目的**单一真相源**,跟 ARCHITECTURE.md 平级。实施期任何疑问优先查这里。
 
-**Maintainers**: Allen + 工程师
-**Last updated**: v0.4 round-3 闭环(2026-05-14)
-**Decision Log status**: #83(下一条 #84 是 impl 期起点)
+**Maintainers**: Allen + Claude(顶层文档维护)+ 工程师(实施期 phase-specs)
+**Last updated**: Phase 1 spec sign-off(2026-05-15)+ impl 期 #84-#85 入账
+**Decision Log status**: #85(下一条 #86,实施期持续 append)

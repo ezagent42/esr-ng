@@ -1,0 +1,22 @@
+#!/usr/bin/env bash
+# cc-bridge-attach.local.sh — user-local overrides for cc-bridge-attach.sh.
+#
+# Copy this file to `cc-bridge-attach.local.sh` (without the .example
+# suffix) and edit. The real file is gitignored so each operator keeps
+# their own settings.
+#
+# Mirrors cc-openclaw.local.sh's pattern.
+
+# --- Proxy (required when reaching api.anthropic.com from CN) ---
+# Adjust to match your proxy. cc-openclaw uses 127.0.0.1:7897 by default.
+export http_proxy=http://127.0.0.1:7897
+export https_proxy=http://127.0.0.1:7897
+export HTTP_PROXY=$http_proxy
+export HTTPS_PROXY=$https_proxy
+export no_proxy=localhost,127.0.0.1,::1
+export NO_PROXY=$no_proxy
+
+# --- ESRD URL (optional) ---
+# Where the Python bridge POSTs its announce. Defaults to
+# http://127.0.0.1:4000 if unset.
+# export ESR_BRIDGE_ESRD_URL=http://100.64.0.27:4000

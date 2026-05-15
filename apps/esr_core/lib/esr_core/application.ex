@@ -8,16 +8,37 @@ defmodule EsrCore.Application do
   @impl true
   def start(_type, _args) do
     children = [
+      # ① ETS tables — must be ready before any process that reads/writes them
+      # (KindRegistry, Idempotency.Sweeper, plugin Kind instances).
+      # See DECISIONS impl-time §ETS+Application children.
+      EsrCore.EtsOwner,
+
+      # ② stdlib Registry for URI → pid (Esr.KindRegistry wraps this).
+      {Registry, keys: :unique, name: Esr.KindRegistry},
+
+      # ③ Idempotency LRU prune — its own GenServer so a crash doesn't
+      # take the ETS owner with it.
+      Esr.Idempotency.Sweeper,
+
+      # ④ SQLite repo + migrations (Phase 0 baseline).
       EsrCore.Repo,
       {Ecto.Migrator,
        repos: Application.fetch_env!(:esr_core, :ecto_repos), skip: skip_migrations?()},
       {DNSCluster, query: Application.get_env(:esr_core, :dns_cluster_query) || :ignore},
-      {Phoenix.PubSub, name: EsrCore.PubSub}
-      # Start a worker by calling: EsrCore.Worker.start_link(arg)
-      # {EsrCore.Worker, arg}
+
+      # ⑤ PubSub — needed by LiveView audit:stream + future view fan-outs.
+      {Phoenix.PubSub, name: EsrCore.PubSub},
+
+      # ⑥ Audit batch writer — must come after Repo + PubSub.
+      Esr.Audit.Writer
     ]
 
-    Supervisor.start_link(children, strategy: :one_for_one, name: EsrCore.Supervisor)
+    result = Supervisor.start_link(children, strategy: :one_for_one, name: EsrCore.Supervisor)
+
+    # Attach telemetry handlers after the writer is up. Idempotent on restart.
+    :ok = Esr.Audit.attach()
+
+    result
   end
 
   defp skip_migrations?() do

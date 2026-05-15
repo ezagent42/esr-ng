@@ -1,0 +1,490 @@
+defmodule EsrWebLiveview.AdminLive do
+  @moduledoc """
+  /admin LiveView — Phase 1's "Allen can drive the system" surface.
+
+  Three interactive bits:
+  1. **Echo button** — one-click dispatch of `agent://echo/behavior/echo/say`
+     with a fixed `"hello"` payload. Verifies dispatch round-trip without
+     the user needing to type anything.
+  2. **Manual dispatch form** — target URI / args (JSON) / mode. Drives
+     arbitrary invocations. Used in 1a-G4 VERIFICATION step 3.
+  3. **Audit log stream** — `Phoenix.LiveView.stream` bounded to 50
+     entries, subscribed to `Esr.Audit.stream_topic/0`. Each new
+     `{:audit_event, _}` arrives via `handle_info` and pushes to the
+     stream so the table updates in place (no full re-render).
+
+  Per DECISIONS P1-D4: this is the §5.7.6-legitimate broadcast usage —
+  audit is a view-fanout topic, audience is undefined observers, so a
+  `PubSub.broadcast` is allowed (and is what `Esr.Audit` does).
+  """
+
+  use Phoenix.LiveView
+  import Phoenix.Component
+
+  @echo_target URI.parse("agent://echo/behavior/echo/say")
+
+  @impl true
+  def mount(_params, _session, socket) do
+    connected_bridges = list_bridges_safely()
+
+    if connected?(socket) do
+      Phoenix.PubSub.subscribe(EsrCore.PubSub, Esr.Audit.stream_topic())
+      Phoenix.PubSub.subscribe(EsrCore.PubSub, bridge_topic_safely())
+
+      # If bridges are already connected when this LV mounts (e.g. you
+      # started attach before opening the page), subscribe to each
+      # bridge's replies topic — the cc_connected event already fired,
+      # so we won't get a second chance.
+      Enum.each(connected_bridges, fn {bid, _entry} ->
+        Phoenix.PubSub.subscribe(
+          EsrCore.PubSub,
+          Esr.Bridge.V1Prototype.Server.replies_topic(bid)
+        )
+      end)
+    end
+
+    historical = load_recent_invocations(50)
+
+    # Pull recent replies from each connected bridge so the panel isn't
+    # empty after a page refresh on an established session.
+    historical_replies =
+      connected_bridges
+      |> Enum.flat_map(fn {bid, _} ->
+        for entry <- list_replies_safely(bid) do
+          %{
+            direction: :from_claude,
+            bridge_id: bid,
+            text: entry.text,
+            at: entry.at
+          }
+        end
+      end)
+      |> Enum.sort_by(& &1.at, {:desc, DateTime})
+      |> Enum.take(40)
+
+    socket =
+      socket
+      |> stream(:invocations, historical, limit: 50)
+      |> assign(:caller_uri_str, URI.to_string(Esr.Entity.User.admin_uri()))
+      |> assign(:flash_error, nil)
+      |> assign(:connected_bridges, connected_bridges)
+      |> assign(:bridge_messages, historical_replies)
+      |> assign(:form,
+        to_form(%{"target" => "", "args" => "", "mode" => "call"}, as: "manual_dispatch")
+      )
+      |> assign(
+        :channel_form,
+        to_form(%{"bridge_id" => "", "text" => ""}, as: "channel_push")
+      )
+
+    {:ok, socket}
+  end
+
+  defp list_replies_safely(bridge_id) do
+    if Code.ensure_loaded?(Esr.Bridge.V1Prototype.Server) do
+      Esr.Bridge.V1Prototype.Server.recent_replies(bridge_id)
+    else
+      []
+    end
+  end
+
+  defp bridge_topic_safely do
+    if Code.ensure_loaded?(Esr.Bridge.V1Prototype.Server) do
+      Esr.Bridge.V1Prototype.Server.topic()
+    else
+      # Plugin not loaded — subscribe to a placeholder so PubSub.subscribe
+      # doesn't crash. Topic strings are arbitrary.
+      "esr:bridge_v1:unavailable"
+    end
+  end
+
+  defp list_bridges_safely do
+    if Code.ensure_loaded?(Esr.Bridge.V1Prototype.Server) do
+      Esr.Bridge.V1Prototype.Server.list_connected()
+    else
+      []
+    end
+  end
+
+  defp load_recent_invocations(n) do
+    %{rows: rows} =
+      EsrCore.Repo.query!(
+        "SELECT target, action, authz, duration_us, inserted_at " <>
+          "FROM invocations ORDER BY id DESC LIMIT ?",
+        [n]
+      )
+
+    Enum.map(rows, fn [target, action, authz, duration_us, inserted_at] ->
+      %{
+        id: "hist-#{:erlang.unique_integer([:positive, :monotonic])}",
+        target: target,
+        action: action || "—",
+        authz: authz,
+        result: "ok",
+        duration_us: duration_us,
+        at: format_inserted_at(inserted_at)
+      }
+    end)
+  end
+
+  defp format_inserted_at(%NaiveDateTime{} = ndt), do: NaiveDateTime.to_iso8601(ndt)
+  defp format_inserted_at(s) when is_binary(s), do: s
+  defp format_inserted_at(other), do: inspect(other)
+
+  # --- Audit stream handler ---------------------------------------------
+
+  @impl true
+  def handle_info({:audit_event, event}, socket) do
+    row = event_to_row(event)
+    {:noreply, stream_insert(socket, :invocations, row, at: 0)}
+  end
+
+  def handle_info({:cc_connected, bridge_id, _entry}, socket) do
+    if connected?(socket) do
+      Phoenix.PubSub.subscribe(
+        EsrCore.PubSub,
+        Esr.Bridge.V1Prototype.Server.replies_topic(bridge_id)
+      )
+    end
+
+    {:noreply, assign(socket, :connected_bridges, list_bridges_safely())}
+  end
+
+  def handle_info({:cc_disconnected, _bridge_id}, socket) do
+    {:noreply, assign(socket, :connected_bridges, list_bridges_safely())}
+  end
+
+  def handle_info({:claude_reply, bridge_id, entry}, socket) do
+    msg = %{
+      direction: :from_claude,
+      bridge_id: bridge_id,
+      text: entry.text,
+      at: entry.at
+    }
+
+    {:noreply, assign(socket, :bridge_messages, [msg | socket.assigns.bridge_messages] |> Enum.take(40))}
+  end
+
+  # --- User actions -----------------------------------------------------
+
+  @impl true
+  def handle_event("echo_test", _params, socket) do
+    inv = %Esr.Invocation{
+      target: @echo_target,
+      mode: :call,
+      args: %{msg: "hello"},
+      ctx: ctx()
+    }
+
+    case Esr.Invocation.dispatch(inv) do
+      {:ok, _result} ->
+        {:noreply, assign(socket, :flash_error, nil)}
+
+      {:error, reason} ->
+        {:noreply, assign(socket, :flash_error, "Echo failed: #{inspect(reason)}")}
+    end
+  end
+
+  def handle_event(
+        "channel_push",
+        %{"channel_push" => %{"bridge_id" => bridge_id, "text" => text}},
+        socket
+      )
+      when is_binary(text) and text != "" do
+    if bridge_id == "" do
+      {:noreply, assign(socket, :flash_error, "Select a bridge first.")}
+    else
+      :ok =
+        Esr.Bridge.V1Prototype.Server.push_to_claude(bridge_id, text, %{
+          "chat_id" => bridge_id,
+          "sender" => "admin-lv"
+        })
+
+      msg = %{
+        direction: :to_claude,
+        bridge_id: bridge_id,
+        text: text,
+        at: DateTime.utc_now()
+      }
+
+      {:noreply,
+       socket
+       |> assign(:flash_error, nil)
+       |> assign(:bridge_messages, [msg | socket.assigns.bridge_messages] |> Enum.take(40))}
+    end
+  end
+
+  def handle_event("channel_push", _params, socket) do
+    {:noreply, assign(socket, :flash_error, "Message text is required.")}
+  end
+
+  def handle_event(
+        "manual_dispatch",
+        %{"manual_dispatch" => %{"target" => target, "args" => args_json, "mode" => mode}},
+        socket
+      ) do
+    with {:ok, target_uri} <- safe_uri(target),
+         {:ok, args_map} <- safe_args(args_json),
+         {:ok, mode_atom} <- safe_mode(mode) do
+      inv = %Esr.Invocation{
+        target: target_uri,
+        mode: mode_atom,
+        args: args_map,
+        ctx: ctx()
+      }
+
+      case Esr.Invocation.dispatch(inv) do
+        {:ok, _} -> {:noreply, assign(socket, :flash_error, nil)}
+        :ok -> {:noreply, assign(socket, :flash_error, nil)}
+        {:error, reason} -> {:noreply, assign(socket, :flash_error, "Dispatch failed: #{inspect(reason)}")}
+      end
+    else
+      {:error, reason} ->
+        {:noreply, assign(socket, :flash_error, reason)}
+    end
+  end
+
+  # --- Render -----------------------------------------------------------
+
+  @impl true
+  def render(assigns) do
+    ~H"""
+    <div style="max-width: 900px; margin: 0 auto; padding: 24px; font-family: -apple-system, sans-serif;">
+      <header>
+        <h1 style="font-size: 22px; font-weight: 600;">Admin</h1>
+        <p style="font-size: 13px; color: #666;">
+          Caller: <code>{@caller_uri_str}</code>
+        </p>
+      </header>
+
+      <section id="quick-actions" style="margin-top: 24px;">
+        <h2 style="font-size: 16px; font-weight: 500; margin: 0 0 8px 0;">Quick Actions</h2>
+        <button
+          type="button"
+          phx-click="echo_test"
+          id="echo-test-btn"
+          style="padding: 8px 16px; background: #0969da; color: white; border: none; border-radius: 4px; cursor: pointer;"
+        >
+          Echo 测试
+        </button>
+      </section>
+
+      <section id="manual-dispatch" style="margin-top: 24px;">
+        <h2 style="font-size: 16px; font-weight: 500; margin: 0 0 8px 0;">Manual Dispatch</h2>
+        <.form for={@form} phx-submit="manual_dispatch">
+          <div style="margin-bottom: 8px;">
+            <label style="display: block; font-size: 13px; font-weight: 500;" for="manual_dispatch_target">target</label>
+            <input
+              type="text"
+              name="manual_dispatch[target]"
+              id="manual_dispatch_target"
+              placeholder="agent://echo/behavior/echo/say"
+              style="width: 100%; padding: 6px 10px; border: 1px solid #d1d5da; border-radius: 4px;"
+            />
+          </div>
+          <div style="margin-bottom: 8px;">
+            <label style="display: block; font-size: 13px; font-weight: 500;" for="manual_dispatch_args">args (JSON)</label>
+            <input
+              type="text"
+              name="manual_dispatch[args]"
+              id="manual_dispatch_args"
+              placeholder='{"msg": "hello"}'
+              style="width: 100%; padding: 6px 10px; border: 1px solid #d1d5da; border-radius: 4px;"
+            />
+          </div>
+          <div style="margin-bottom: 8px;">
+            <label style="display: block; font-size: 13px; font-weight: 500;" for="manual_dispatch_mode">mode</label>
+            <select
+              name="manual_dispatch[mode]"
+              id="manual_dispatch_mode"
+              style="padding: 6px 10px; border: 1px solid #d1d5da; border-radius: 4px;"
+            >
+              <option value="call">call</option>
+              <option value="cast">cast</option>
+            </select>
+          </div>
+          <button
+            type="submit"
+            style="padding: 8px 16px; background: white; color: #0969da; border: 1px solid #0969da; border-radius: 4px; cursor: pointer;"
+          >
+            Dispatch
+          </button>
+        </.form>
+
+        <p :if={@flash_error} style="color: #cf222e; font-size: 13px; margin-top: 8px;">{@flash_error}</p>
+      </section>
+
+      <section id="cc-bridges" style="margin-top: 24px;">
+        <h2 style="font-size: 16px; font-weight: 500; margin: 0 0 8px 0;">CC Bridges (v1 prototype)</h2>
+        <p :if={@connected_bridges == []} id="bridge-empty" style="font-size: 13px; color: #57606a;">
+          No connected bridges. Start one with <code>bash scripts/cc-bridge-attach.sh</code>.
+        </p>
+        <table :if={@connected_bridges != []} id="bridges-table" style="width: 100%; font-size: 13px; border-collapse: collapse;">
+          <thead>
+            <tr style="border-bottom: 1px solid #d1d5da;">
+              <th style="text-align: left; padding: 4px 0;">bridge_id</th>
+              <th style="text-align: left;">status</th>
+              <th style="text-align: left;">connected_at</th>
+              <th style="text-align: left;">client</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr :for={{bridge_id, entry} <- @connected_bridges} style="border-bottom: 1px solid #eee;">
+              <td style="font-family: monospace; padding: 4px 0;">{bridge_id}</td>
+              <td style="color: #1f883d; font-weight: 600;">connected</td>
+              <td style="color: #57606a;">{DateTime.to_iso8601(entry.connected_at)}</td>
+              <td style="font-family: monospace; font-size: 11px;">{client_label(entry)}</td>
+            </tr>
+          </tbody>
+        </table>
+        <p style="font-size: 11px; color: #888; margin-top: 8px;">
+          v1_prototype — Phase 5 wholesale-replaces this with esr_plugin_cc_channel.
+        </p>
+      </section>
+
+      <section id="channel-chat" :if={@connected_bridges != []} style="margin-top: 24px;">
+        <h2 style="font-size: 16px; font-weight: 500; margin: 0 0 8px 0;">Send to Claude (via channel)</h2>
+        <.form for={@channel_form} phx-submit="channel_push" style="display: flex; gap: 8px; align-items: end;">
+          <div style="flex: 0 0 220px;">
+            <label style="display: block; font-size: 13px; font-weight: 500;" for="channel_push_bridge_id">bridge</label>
+            <select
+              name="channel_push[bridge_id]"
+              id="channel_push_bridge_id"
+              style="width: 100%; padding: 6px 10px; border: 1px solid #d1d5da; border-radius: 4px;"
+            >
+              <option value="">— select —</option>
+              <option :for={{bid, _} <- @connected_bridges} value={bid}>{bid}</option>
+            </select>
+          </div>
+          <div style="flex: 1 1 auto;">
+            <label style="display: block; font-size: 13px; font-weight: 500;" for="channel_push_text">message</label>
+            <input
+              type="text"
+              name="channel_push[text]"
+              id="channel_push_text"
+              placeholder="你好,告诉我你能听到吗?"
+              style="width: 100%; padding: 6px 10px; border: 1px solid #d1d5da; border-radius: 4px;"
+            />
+          </div>
+          <button
+            type="submit"
+            style="padding: 8px 16px; background: #1f883d; color: white; border: none; border-radius: 4px; cursor: pointer;"
+          >
+            Send
+          </button>
+        </.form>
+
+        <div id="bridge-messages" :if={@bridge_messages != []} style="margin-top: 12px; max-height: 280px; overflow-y: auto; border: 1px solid #d1d5da; border-radius: 4px; padding: 8px;">
+          <div :for={msg <- @bridge_messages} style={message_style(msg.direction)}>
+            <span style="font-family: monospace; font-size: 11px; color: #666;">
+              {message_arrow(msg.direction)} {msg.bridge_id} · {DateTime.to_iso8601(msg.at)}
+            </span>
+            <div style="margin-top: 2px; white-space: pre-wrap;">{msg.text}</div>
+          </div>
+        </div>
+      </section>
+
+      <section id="audit-stream" style="margin-top: 24px;">
+        <h2 style="font-size: 16px; font-weight: 500; margin: 0 0 8px 0;">Audit Log (last 50)</h2>
+        <table style="width: 100%; font-size: 13px; border-collapse: collapse;">
+          <thead>
+            <tr style="border-bottom: 1px solid #d1d5da;">
+              <th style="text-align: left; padding: 6px 0;">target</th>
+              <th style="text-align: left;">action</th>
+              <th style="text-align: left;">authz</th>
+              <th style="text-align: left;">result</th>
+              <th style="text-align: left;">duration_us</th>
+              <th style="text-align: left;">at</th>
+            </tr>
+          </thead>
+          <tbody id="invocations" phx-update="stream">
+            <tr :for={{dom_id, row} <- @streams.invocations} id={dom_id} style="border-bottom: 1px solid #eee;">
+              <td style="padding: 4px 0; font-family: monospace; font-size: 11px;">{row.target}</td>
+              <td>{row.action}</td>
+              <td>{row.authz}</td>
+              <td style="font-family: monospace; font-size: 11px;">{row.result}</td>
+              <td>{row.duration_us}</td>
+              <td style="color: #666;">{row.at}</td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+    </div>
+    """
+  end
+
+  # --- Helpers ----------------------------------------------------------
+
+  defp ctx do
+    %{
+      caller: Esr.Entity.User.admin_uri(),
+      caps: Esr.Entity.User.admin_caps(),
+      reply: :ignore
+    }
+  end
+
+  defp event_to_row(%{event: event, measurements: m, metadata: meta, at: at}) do
+    %{
+      id: "ev-#{:erlang.unique_integer([:positive, :monotonic])}",
+      target: Map.get(meta, :target, "—"),
+      action: stringify(Map.get(meta, :action)),
+      authz: authz_label(event),
+      result: result_label(event, meta),
+      duration_us: Map.get(m, :duration_us, 0),
+      at: DateTime.to_iso8601(at)
+    }
+  end
+
+  defp message_style(:to_claude),
+    do: "padding: 6px 8px; border-left: 3px solid #0969da; margin-bottom: 6px; background: #f6f8fa;"
+
+  defp message_style(:from_claude),
+    do: "padding: 6px 8px; border-left: 3px solid #1f883d; margin-bottom: 6px; background: #f0fdf4;"
+
+  defp message_arrow(:to_claude), do: "→ to claude"
+  defp message_arrow(:from_claude), do: "← from claude"
+
+  defp client_label(%{info: %{claude_info: %{"name" => name, "version" => v}}}),
+    do: "#{name} #{v}"
+
+  defp client_label(%{info: %{claude_info: %{"name" => name}}}), do: name
+  defp client_label(_), do: "—"
+
+  defp authz_label([:esr, :invoke, :stop]), do: "stub_grant"
+  defp authz_label([:esr, :invoke, :error]), do: "—"
+  defp authz_label(_), do: "—"
+
+  defp result_label([:esr, :invoke, :stop], _meta), do: "ok"
+  defp result_label([:esr, :invoke, :error], %{reason: r}), do: "err: #{inspect(r)}"
+  defp result_label(_, _), do: "—"
+
+  defp stringify(nil), do: "—"
+  defp stringify(a) when is_atom(a), do: Atom.to_string(a)
+  defp stringify(s) when is_binary(s), do: s
+
+  defp safe_uri(s) when is_binary(s) do
+    case URI.new(s) do
+      {:ok, %URI{scheme: nil}} -> {:error, "target must include a scheme (e.g. agent://...)"}
+      {:ok, uri} -> {:ok, uri}
+      {:error, _} -> {:error, "malformed URI"}
+    end
+  end
+
+  defp safe_uri(_), do: {:error, "target missing"}
+
+  defp safe_args(""), do: {:ok, %{}}
+
+  defp safe_args(json) when is_binary(json) do
+    case Jason.decode(json, keys: :atoms) do
+      {:ok, m} when is_map(m) -> {:ok, m}
+      {:ok, _} -> {:error, "args must be a JSON object"}
+      {:error, _} -> {:error, "invalid JSON in args"}
+    end
+  end
+
+  defp safe_args(_), do: {:ok, %{}}
+
+  defp safe_mode("call"), do: {:ok, :call}
+  defp safe_mode("cast"), do: {:ok, :cast}
+  defp safe_mode(other), do: {:error, "unsupported mode: #{inspect(other)}"}
+end

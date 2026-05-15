@@ -14,10 +14,22 @@ defmodule EsrWeb.Router do
     plug :accepts, ["json"]
   end
 
+  # SSE pipeline — accepts text/event-stream for streaming endpoints.
+  pipeline :sse do
+    plug :accepts, ["event-stream"]
+  end
+
   scope "/", EsrWeb do
     pipe_through :browser
 
     live "/", HomeLive
+  end
+
+  # /admin is owned by the esr_web_liveview plugin (Phase 1 step 5).
+  scope "/", EsrWebLiveview do
+    pipe_through :browser
+
+    live "/admin", AdminLive
   end
 
   # Liveness probe — plain JSON, no ESR dispatch path involved.
@@ -25,6 +37,23 @@ defmodule EsrWeb.Router do
     pipe_through :api
 
     get "/_health", HealthController, :index
+  end
+
+  # Phase 1 v1_prototype: CC bridge announce endpoint (Phase 5 will use
+  # a Phoenix Channel join handshake instead — this scope is throwaway).
+  scope "/api", EsrWeb do
+    pipe_through :api
+
+    post "/cc-bridge/announce", CcBridgeAnnounceController, :announce
+    delete "/cc-bridge/announce/:bridge_id", CcBridgeAnnounceController, :disconnect
+    post "/cc-bridge/reply", CcBridgeAnnounceController, :reply
+  end
+
+  # SSE route — separate scope because its accepts header differs.
+  scope "/api", EsrWeb do
+    pipe_through :sse
+
+    get "/cc-bridge/events", CcBridgeAnnounceController, :events_sse
   end
 
   # Other scopes may use custom stacks.
