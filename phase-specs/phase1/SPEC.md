@@ -72,11 +72,14 @@
 
 > **Architecture reference**: cc-openclaw 的 MCP-stdio 模式(就是这个 chat 正在用的 openclaw-channel 走的链路)。**不要**沿用老 esr `--dangerously-load-development-channels server:esr-channel` + Phoenix Channel WebSocket pattern — 那条路在老 esr 上有问题,cc-openclaw 选了 MCP-stdio 是有原因的。
 
-**Python MCP server**(在 `apps/esr_plugin_cc_bridge_v1_prototype/python/esr_mcp_bridge_v1_prototype.py`):
-- ~80 LOC Python:**标准 MCP stdio 协议**(JSON-RPC over stdin/stdout per MCP spec)
-- 暴露 1+ tool:`esr_announce` — claude 调它时,Python 把 announcement HTTP POST 到 esrd
+**Python MCP server / channel**(在 `apps/esr_plugin_cc_bridge_v1_prototype/python/esr_mcp_bridge_v1_prototype.py`):
+- ~225 LOC Python:**标准 MCP stdio + channel capability**(`capabilities.experimental['claude/channel'] = {}`)
+- 暴露 1 tool:`reply` — claude 调用它把消息发回 ESR(POST /api/cc-bridge/reply)
+- 通过 MCP `notifications/claude/channel` 把来自 ESR 的消息推给 claude(claude 看作 `<channel source="esr-bridge" ...>` 用户消息)
+- init 时自动 POST /api/cc-bridge/announce 注册 bridge(不需要 claude 显式触发)
+- 启动 SSE 订阅 `GET /api/cc-bridge/events?bridge_id=X` 接收 ESR 推送
 - 启动时通过 env var 拿 `ESRD_URL`(默认 `http://127.0.0.1:4000`)
-- claude 通过 mcp.json 配置 spawn 这个 Python 进程为 MCP server
+- claude 通过 mcp.json + `--dangerously-load-development-channels server:esr-bridge` flag 加载
 
 **Elixir 侧**(在 `apps/esr_plugin_cc_bridge_v1_prototype/lib/`):
 - `Esr.Bridge.V1Prototype.McpConfigWriter`(~20 LOC):

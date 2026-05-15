@@ -29,15 +29,22 @@ defmodule Esr.Bridge.V1Prototype.McpConfigWriter do
   @config_filename "bridge.mcp.json"
 
   @doc """
-  Write the bridge mcp.json. Returns `{:ok, abs_path}` or raises if the
-  directory can't be created / written.
+  Write the bridge mcp.json. Returns `{:ok, abs_path}`.
+
+  Also writes a copy to the project root `.mcp.json` (a "drop file"
+  for Claude Code). Without the project-level file, Claude prints a
+  startup warning `server:esr-bridge · no MCP server configured with
+  that name` because `--dangerously-load-development-channels` looks
+  up the server name in project/user MCP configs **before** reading
+  `--mcp-config <abs>`. The project-level file makes the lookup
+  succeed at the right moment, suppressing the warning. The session-
+  level `--mcp-config <abs>` flag remains too so explicit pathing is
+  preserved.
   """
   @spec write!() :: {:ok, String.t()}
   def write! do
     dir = Application.get_env(:esr_plugin_cc_bridge_v1_prototype, :mcp_config_dir, @default_dir)
     File.mkdir_p!(dir)
-
-    path = Path.join(dir, @config_filename)
 
     config = %{
       "mcpServers" => %{
@@ -51,7 +58,23 @@ defmodule Esr.Bridge.V1Prototype.McpConfigWriter do
       }
     }
 
-    File.write!(path, Jason.encode!(config, pretty: true))
+    encoded = Jason.encode!(config, pretty: true)
+
+    path = Path.join(dir, @config_filename)
+    File.write!(path, encoded)
+
+    # Also write to project root so claude's startup lookup matches.
+    # Use git toplevel as anchor so this works regardless of cwd.
+    case System.cmd("git", ["rev-parse", "--show-toplevel"], stderr_to_stdout: true) do
+      {root, 0} ->
+        root = String.trim(root)
+        project_mcp = Path.join(root, ".mcp.json")
+        File.write!(project_mcp, encoded)
+
+      _ ->
+        :ok
+    end
+
     {:ok, path}
   end
 

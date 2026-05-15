@@ -37,7 +37,7 @@ During research preview this bypasses the channel-allowlist (with confirmation p
 ## What changes from current 508e1b2
 
 Current state:
-- Python MCP server with `initialize`, `tools/list`, `tools/call esr_announce`
+- Python MCP server with `initialize`, `tools/list`, `tools/call reply` (no `esr_announce` — announce is implicit at init)
 - HTTP `POST /api/cc-bridge/announce` for one-way claude→ESR proof
 - LiveView shows connected bridges, no message flow
 
@@ -45,7 +45,7 @@ Channel-ready state:
 1. **Python bridge** (~+50 LOC):
    - Add `experimental: {"claude/channel": {}}` to initialize response
    - Add `instructions` to initialize response telling Claude how to handle channel events
-   - Add `reply` tool (or rename `esr_announce` → `reply`)
+   - Add `reply` tool (announce stays implicit at init — no separate tool)
    - Add SSE subscription to `GET /api/cc-bridge/events?bridge_id=X` — pulls ESR-side messages
    - On SSE event arrival, emit `notifications/claude/channel` to claude over stdout
 2. **esr_web** (~+40 LOC):

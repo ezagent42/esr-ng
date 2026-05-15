@@ -196,7 +196,7 @@ end
 
 > 历史:初版 spec 让我 spawn Python echo bridge + 标 `_v1_prototype`,事实上没接真 claude(memory `feedback_completion_requires_invariant_test`)。Allen 反问"怎么知道成功链接了呢?",roll back tag,重写为真 CC 集成。**架构 reference 是 cc-openclaw,不是老 esr 的 Phoenix Channel WS pattern**。
 
-1. **Python MCP server**:`apps/esr_plugin_cc_bridge_v1_prototype/python/esr_mcp_bridge_v1_prototype.py`,~80 LOC,标准 MCP stdio JSON-RPC server,init 时主动 call esrd announce HTTP endpoint(不等 claude 调 tool — init 即注册),并暴露 `esr_announce` tool(给 claude 显式调用的入口)
+1. **Python MCP+channel server**:`apps/esr_plugin_cc_bridge_v1_prototype/python/esr_mcp_bridge_v1_prototype.py`,~225 LOC。`capabilities.experimental['claude/channel'] = {}` 声明 channel;init 时 POST `/api/cc-bridge/announce`(自动注册);SSE 订阅 `/api/cc-bridge/events`;`notifications/claude/channel` 推消息进 claude;`reply` tool 收 claude 回复 → POST `/api/cc-bridge/reply`
 2. **Elixir McpConfigWriter**:`lib/esr/bridge/v1_prototype/mcp_config_writer.ex`,~20 LOC,write/0 + 默认 ESRD url
 3. **Elixir Server rewrite**:`lib/esr/bridge/v1_prototype/server.ex` 去掉 Port spawn,改为 connected-state tracker(GenServer state = Map<bridge_id, info>)
 4. **Web 侧 announce controller**:`apps/esr_web/lib/esr_web/controllers/cc_bridge_announce_controller.ex` + router POST `/api/cc-bridge/announce` → Server.register + PubSub broadcast

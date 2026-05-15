@@ -125,7 +125,7 @@ ORDER BY id DESC LIMIT 10;
 ### 1b-G1 · 结构 + 编译
 
 - [ ] `apps/esr_plugin_cc_bridge_v1_prototype/` 存在(目录名 + 内部模块名都带 `_v1_prototype` 后缀)
-- [ ] `apps/esr_plugin_cc_bridge_v1_prototype/python/esr_mcp_bridge_v1_prototype.py`(~80 LOC,标准 MCP stdio server with `esr_announce` tool)
+- [ ] `apps/esr_plugin_cc_bridge_v1_prototype/python/esr_mcp_bridge_v1_prototype.py`(~225 LOC,MCP stdio + `claude/channel` capability + `reply` tool + SSE subscriber)
 - [ ] `apps/esr_plugin_cc_bridge_v1_prototype/lib/esr/bridge/v1_prototype/mcp_config_writer.ex`(写 mcp.json)
 - [ ] `apps/esr_plugin_cc_bridge_v1_prototype/lib/esr/bridge/v1_prototype/server.ex`(rewrite,只跟踪 connected state)
 - [ ] `apps/esr_web/lib/esr_web/controllers/cc_bridge_announce_controller.ex` + router POST `/api/cc-bridge/announce`
@@ -142,17 +142,19 @@ ORDER BY id DESC LIMIT 10;
 
 **USER ACTIONS / AGENT ACTIONS**:
 - v1_prototype 阶段:**agent 自己跑 `bash scripts/cc-bridge-attach.sh`** 后台启动真 claude session
-- 真 claude 会 spawn esr_mcp_bridge_v1_prototype.py 作为 MCP server,并 init 时调 `esr_announce` tool
-- 该 tool 调用 `POST http://127.0.0.1:4000/api/cc-bridge/announce` 通知 esrd
+- 真 claude 会 spawn esr_mcp_bridge_v1_prototype.py 作为 MCP+channel server
+- bridge 在 MCP `initialize` 阶段自动 POST `/api/cc-bridge/announce`(不靠 claude 触发)
+- bridge 同时启 SSE 订阅 `GET /api/cc-bridge/events?bridge_id=<id>`,接收 LV 推送
+- bridge 通过 stdout JSON-RPC `notifications/claude/channel` 把消息送进 claude
 
 **Step 1 · 启动 attach 脚本 + 验证 claude 起来**
 ```bash
 bash scripts/cc-bridge-attach.sh > /tmp/cc-bridge.log 2>&1 &
-# 等 ~5s 让 claude 初始化 + MCP server spawn + tool call
+# 等 ~5s 让 claude 初始化 + MCP server spawn + announce 完成
 sleep 8
-grep "esr_announce" /tmp/cc-bridge.log || curl -s http://127.0.0.1:4000/admin
+curl -s http://127.0.0.1:4000/admin   # 应该看到 connected bridges
 ```
-- [ ] `/tmp/cc-bridge.log` 显示 claude 启动 + MCP init + esr_announce 调用,或 esrd 端有 announce POST 进来
+- [ ] esrd 端有 announce POST 进来 + LV /admin "CC Bridges" 列表多一个 `bridge-XXXXXXXX` 行
 
 **Step 2 · agent-browser 看 LV /admin 显示 connected**
 ```bash
