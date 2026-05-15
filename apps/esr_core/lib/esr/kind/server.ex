@@ -67,7 +67,7 @@ defmodule Esr.Kind.Server do
     state = %{
       kind: kind_module,
       uri: uri,
-      state: build_initial_slices(kind_module, args)
+      state: Esr.Kind.Snapshot.load_or_init(uri, kind_module, args)
     }
 
     case Esr.KindRegistry.put_new(uri_str, self()) do
@@ -101,9 +101,11 @@ defmodule Esr.Kind.Server do
   def handle_call({:esr_dispatch, %Esr.Invocation{} = inv}, _from, state) do
     case Esr.Kind.Runtime.handle_dispatch(inv, state.state, state.kind) do
       {:ok, new_slice_state, result} ->
+        :ok = Esr.Kind.Snapshot.maybe_save(state.uri, state.kind, state.state, new_slice_state)
         {:reply, {:ok, result}, %{state | state: new_slice_state}}
 
       {:ok, new_slice_state} ->
+        :ok = Esr.Kind.Snapshot.maybe_save(state.uri, state.kind, state.state, new_slice_state)
         {:reply, :ok, %{state | state: new_slice_state}}
 
       {:error, _} = err ->
@@ -115,11 +117,13 @@ defmodule Esr.Kind.Server do
   def handle_cast({:esr_dispatch, %Esr.Invocation{} = inv}, state) do
     case Esr.Kind.Runtime.handle_dispatch(inv, state.state, state.kind) do
       {:ok, new_slice_state, result} ->
-        # cast still wants to reply via ctx.reply if set (e.g. caller_inbox).
+        :ok = Esr.Kind.Snapshot.maybe_save(state.uri, state.kind, state.state, new_slice_state)
+        # cast still replies via ctx.reply if set (e.g. caller_inbox).
         Esr.Invocation.reply(inv.ctx, {:ok, result})
         {:noreply, %{state | state: new_slice_state}}
 
       {:ok, new_slice_state} ->
+        :ok = Esr.Kind.Snapshot.maybe_save(state.uri, state.kind, state.state, new_slice_state)
         {:noreply, %{state | state: new_slice_state}}
 
       {:error, reason} ->
@@ -132,13 +136,5 @@ defmodule Esr.Kind.Server do
   def terminate(_reason, _state) do
     # Phase 1: no-op; Phase 3 wires snapshot-on-shutdown here.
     :ok
-  end
-
-  defp build_initial_slices(kind_module, args) do
-    kind_module.behaviors()
-    |> Enum.map(fn behavior ->
-      {behavior.state_slice(), behavior.init_slice(args)}
-    end)
-    |> Map.new()
   end
 end

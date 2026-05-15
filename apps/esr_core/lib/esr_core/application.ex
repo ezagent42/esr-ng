@@ -27,10 +27,18 @@ defmodule EsrCore.Application do
       {DNSCluster, query: Application.get_env(:esr_core, :dns_cluster_query) || :ignore},
 
       # ⑤ PubSub — needed by LiveView audit:stream + future view fan-outs.
-      {Phoenix.PubSub, name: EsrCore.PubSub}
+      {Phoenix.PubSub, name: EsrCore.PubSub},
+
+      # ⑥ Audit batch writer — must come after Repo + PubSub.
+      Esr.Audit.Writer
     ]
 
-    Supervisor.start_link(children, strategy: :one_for_one, name: EsrCore.Supervisor)
+    result = Supervisor.start_link(children, strategy: :one_for_one, name: EsrCore.Supervisor)
+
+    # Attach telemetry handlers after the writer is up. Idempotent on restart.
+    :ok = Esr.Audit.attach()
+
+    result
   end
 
   defp skip_migrations?() do
