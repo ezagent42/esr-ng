@@ -83,7 +83,10 @@ defmodule Mix.Tasks.Esr.CheckInvariants do
             "| grep -v 'lib/esr/audit.ex' " <>
             "| grep -v 'lib/esr/invocation.ex' " <>
             "| grep -v '_test.exs' " <>
-            "| grep -v 'esr.check_invariants.ex' || true"
+            "| grep -v 'esr.check_invariants.ex' " <>
+            # Strip lines that are pure prose mentions (backtick-quoted
+            # symbol inside docstring) rather than actual code calls.
+            "| grep -v ' `PubSub' || true"
         ],
         stderr_to_stdout: true
       )

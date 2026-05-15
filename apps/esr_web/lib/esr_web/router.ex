@@ -20,6 +20,13 @@ defmodule EsrWeb.Router do
     live "/", HomeLive
   end
 
+  # /admin is owned by the esr_web_liveview plugin (Phase 1 step 5).
+  scope "/", EsrWebLiveview do
+    pipe_through :browser
+
+    live "/admin", AdminLive
+  end
+
   # Liveness probe — plain JSON, no ESR dispatch path involved.
   scope "/", EsrWeb do
     pipe_through :api
