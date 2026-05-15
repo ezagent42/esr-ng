@@ -74,6 +74,13 @@ one sub-step at a time, grep the 8 invariants before each gate. Refs: phase-spec
 ARCHITECTURE.md §3-§5. Done when: M1 e2e flow in VERIFICATION.md green AND mix test passes AND invariant greps clean.
 ```
 
+**Length budget — hard cap 4000 characters.** Claude Code rejects `/goal` text longer than 4000 chars (`Goal condition is limited to 4000 characters`). Aim for **under ~3500** to leave headroom; if your draft would overflow, tighten before sending rather than let the TUI surface a rejection to the user. The cap is doubly binding because the entire goal string is re-fed to you every turn, so verbosity is also a per-turn token cost. Practical compression:
+
+- **Refs are paths, not content.** Cite doc paths and re-read them each turn; never paste spec text into the goal itself.
+- **Compress multi-criteria done-conditions** into one composite invariant ("M1 gate green") rather than enumerating every sub-check — the underlying VERIFICATION.md still spells out what "green" means.
+- **Drop `Approach:` entirely if the Refs already encode the method.** Pointing at the plan beats restating it.
+- **Trim prose**: remove articles, conjunctions, and project-name redundancy when content is unambiguous from the Refs.
+
 Then **announce, then send — do not wait for approval**. Post the exact goal text to
 the user in chat as a single transparent line and immediately proceed to Step 3:
 
