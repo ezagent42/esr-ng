@@ -81,7 +81,7 @@ defmodule Mix.Tasks.Esr.CheckInvariants do
           "-c",
           # Strip lines that are pure prose mentions (backtick-quoted
           # symbol inside docstring) rather than actual code calls.
-          "grep -rnE 'PubSub\\.broadcast' apps/esr_core apps/esr_plugin_echo apps/esr_web_liveview 2>/dev/null --include='*.ex' " <>
+          "grep -rnE 'PubSub\\.broadcast' apps/esr_core apps/esr_plugin_echo apps/esr_plugin_chat apps/esr_web_liveview 2>/dev/null --include='*.ex' " <>
             "| grep -v 'lib/esr/audit.ex' " <>
             "| grep -v 'lib/esr/invocation.ex' " <>
             "| grep -v '_test.exs' " <>
@@ -109,13 +109,14 @@ defmodule Mix.Tasks.Esr.CheckInvariants do
         "bash",
         [
           "-c",
-          "grep -rnE '^\\s*def init\\(' apps/esr_core apps/esr_plugin_echo apps/esr_web_liveview 2>/dev/null --include='*.ex' " <>
+          "grep -rnE '^\\s*def init\\(' apps/esr_core apps/esr_plugin_echo apps/esr_plugin_chat apps/esr_web_liveview 2>/dev/null --include='*.ex' " <>
             "| grep -v 'kind/server.ex' " <>
             "| grep -v 'ets_owner.ex' " <>
             "| grep -v 'idempotency/sweeper.ex' " <>
             "| grep -v 'audit/writer.ex' " <>
             "| grep -v 'esr_core/application.ex' " <>
             "| grep -v 'esr_plugin_echo/application.ex' " <>
+            "| grep -v 'esr_plugin_chat/application.ex' " <>
             "| grep -v '_test.exs' || true"
         ],
         stderr_to_stdout: true

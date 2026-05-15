@@ -4,6 +4,8 @@ defmodule Esr.InterfaceValidator do
 
   Type-spec grammar (per ARCHITECTURE.md §6.2):
   - `:string` / `:integer` / `:boolean` / `:atom` / `:map` — primitives
+  - `:uri` — `%URI{}` struct (Phase 2: Message envelope identity fields
+    are typed URIs, not bare strings — see DECISIONS §interface-validator-uri)
   - `{:list, ty}` — homogeneous list
   - `{:tuple, [ty1, ty2, ...]}` — fixed-arity tuple
   - `{:option, ty}` — `nil` or `ty`
@@ -22,6 +24,7 @@ defmodule Esr.InterfaceValidator do
           | :boolean
           | :atom
           | :map
+          | :uri
           | {:list, type_spec()}
           | {:tuple, [type_spec()]}
           | {:option, type_spec()}
@@ -63,6 +66,7 @@ defmodule Esr.InterfaceValidator do
   defp check(value, :boolean, _path) when is_boolean(value), do: :ok
   defp check(value, :atom, _path) when is_atom(value), do: :ok
   defp check(value, :map, _path) when is_map(value), do: :ok
+  defp check(%URI{} = _value, :uri, _path), do: :ok
 
   defp check(nil, {:option, _ty}, _path), do: :ok
   defp check(value, {:option, ty}, path), do: check(value, ty, path)
