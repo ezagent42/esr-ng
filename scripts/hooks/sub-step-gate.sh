@@ -5,14 +5,15 @@
 # a `git commit` or `git tag`, runs the sub-step gate before allowing it:
 #
 #   Phase 0:  mix format --check-formatted  +  mix test
+#   Phase 1:  + mix esr.check_invariants  (this commit)
 #
 # Gate red  → exit 2 (blocks the tool call; stderr is shown to Claude).
 # Not git   → exit 0 immediately (no-op for the vast majority of Bash calls).
 #
 # This is a *backstop*, not the primary mechanism — the primary mechanism is
 # agent discipline (/goal prompt + CLAUDE.md 贯穿条款). Each subsequent phase's
-# brainstorm extends this script: add `mix esr.check_invariants` once the 8
-# invariants apply (Phase 1+), add the phase's e2e flow checks, etc.
+# brainstorm extends this script: Phase 1 adds the invariants check;
+# Phase 2+ adds e2e flow checks once those exist.
 set -uo pipefail
 
 input=$(cat)
@@ -28,7 +29,7 @@ cd "${CLAUDE_PROJECT_DIR:-$(dirname "$0")/../..}" || {
   exit 2
 }
 
-echo "[sub-step-gate] git commit/tag detected — running Phase 0 gate" >&2
+echo "[sub-step-gate] git commit/tag detected — running Phase 1 gate" >&2
 
 echo "[sub-step-gate] → mix format --check-formatted" >&2
 if ! mix format --check-formatted >&2; then
@@ -39,6 +40,12 @@ fi
 echo "[sub-step-gate] → mix test" >&2
 if ! mix test >&2; then
   echo "[sub-step-gate] BLOCKED: mix test failed" >&2
+  exit 2
+fi
+
+echo "[sub-step-gate] → mix esr.check_invariants" >&2
+if ! mix esr.check_invariants >&2; then
+  echo "[sub-step-gate] BLOCKED: invariant violation (see grep output above)" >&2
   exit 2
 fi
 

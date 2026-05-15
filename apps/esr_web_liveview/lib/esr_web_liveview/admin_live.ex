@@ -29,9 +29,15 @@ defmodule EsrWebLiveview.AdminLive do
       Phoenix.PubSub.subscribe(EsrCore.PubSub, Esr.Audit.stream_topic())
     end
 
+    # Load the last 50 invocations from SQLite so audit history is
+    # visible across BEAM restarts. This is the F8-subset preview
+    # called out in VERIFICATION 1a-G4 step 4 — Phase 1 only restores
+    # audit history, not Kind state (which Phase 3 handles).
+    historical = load_recent_invocations(50)
+
     socket =
       socket
-      |> stream(:invocations, [], limit: 50)
+      |> stream(:invocations, historical, limit: 50)
       |> assign(:caller_uri_str, URI.to_string(Esr.Entity.User.admin_uri()))
       |> assign(:flash_error, nil)
       |> assign(:form,
@@ -40,6 +46,31 @@ defmodule EsrWebLiveview.AdminLive do
 
     {:ok, socket}
   end
+
+  defp load_recent_invocations(n) do
+    %{rows: rows} =
+      EsrCore.Repo.query!(
+        "SELECT target, action, authz, duration_us, inserted_at " <>
+          "FROM invocations ORDER BY id DESC LIMIT ?",
+        [n]
+      )
+
+    Enum.map(rows, fn [target, action, authz, duration_us, inserted_at] ->
+      %{
+        id: "hist-#{:erlang.unique_integer([:positive, :monotonic])}",
+        target: target,
+        action: action || "—",
+        authz: authz,
+        result: "ok",
+        duration_us: duration_us,
+        at: format_inserted_at(inserted_at)
+      }
+    end)
+  end
+
+  defp format_inserted_at(%NaiveDateTime{} = ndt), do: NaiveDateTime.to_iso8601(ndt)
+  defp format_inserted_at(s) when is_binary(s), do: s
+  defp format_inserted_at(other), do: inspect(other)
 
   # --- Audit stream handler ---------------------------------------------
 

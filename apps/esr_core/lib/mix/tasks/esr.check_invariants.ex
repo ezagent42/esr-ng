@@ -79,13 +79,13 @@ defmodule Mix.Tasks.Esr.CheckInvariants do
         "bash",
         [
           "-c",
+          # Strip lines that are pure prose mentions (backtick-quoted
+          # symbol inside docstring) rather than actual code calls.
           "grep -rnE 'PubSub\\.broadcast' apps/esr_core apps/esr_plugin_echo apps/esr_web_liveview 2>/dev/null --include='*.ex' " <>
             "| grep -v 'lib/esr/audit.ex' " <>
             "| grep -v 'lib/esr/invocation.ex' " <>
             "| grep -v '_test.exs' " <>
             "| grep -v 'esr.check_invariants.ex' " <>
-            # Strip lines that are pure prose mentions (backtick-quoted
-            # symbol inside docstring) rather than actual code calls.
             "| grep -v ' `PubSub' || true"
         ],
         stderr_to_stdout: true
