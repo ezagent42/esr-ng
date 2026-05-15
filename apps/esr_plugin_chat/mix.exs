@@ -28,7 +28,12 @@ defmodule EsrPluginChat.MixProject do
 
   defp deps do
     [
-      {:esr_core, in_umbrella: true}
+      {:esr_core, in_umbrella: true},
+      # Phase 2c: Chat.invoke(:receive) for Agent Kinds pushes the
+      # message body to claude via the bridge's SSE topic. Same
+      # v1_prototype coupling as the LV admin page — Phase 5 replaces
+      # both with the proper esr_plugin_cc_channel.
+      {:esr_plugin_cc_bridge_v1_prototype, in_umbrella: true}
     ]
   end
 end

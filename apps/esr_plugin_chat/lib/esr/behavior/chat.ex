@@ -126,10 +126,26 @@ defmodule Esr.Behavior.Chat do
         {:ok, slice}
 
       Esr.Entity.Agent ->
-        # 2c-step 1 wires `agent_uri → bridge_id` lookup on
-        # `Esr.Bridge.V1Prototype.Server` + push_to_claude/3.
-        # 2b leaves this as a no-op — no Agent is spawned at boot
-        # so this clause is unreachable in the 2b test surface.
+        # 2c-step 1: look up the bridge bound to this Agent's URI and
+        # push the body text to claude via the SSE topic. If no bridge
+        # is bound (Agent spawned but bridge already disconnected),
+        # silently drop — the message stays in MessageStore so a
+        # reconnecting bridge can replay it via rejoin's in_session_since.
+        case Esr.Bridge.V1Prototype.Server.bridge_for_agent(ctx.self_uri) do
+          {:ok, bridge_id} ->
+            Esr.Bridge.V1Prototype.Server.push_to_claude(
+              bridge_id,
+              body_text(msg.body),
+              %{
+                "sender" => URI.to_string(msg.sender),
+                "message_uri" => msg.uri
+              }
+            )
+
+          :error ->
+            :ok
+        end
+
         {:ok, slice}
 
       _other ->
@@ -229,6 +245,38 @@ defmodule Esr.Behavior.Chat do
     end
   end
 
+  # Bridge → Agent reply path (2c-step 1). When the controller's
+  # forward_reply_to_agent/2 lands on the Agent's mailbox, this clause
+  # constructs the chat envelope + dispatches send through Session so
+  # the reply walks the same router as any other chat message.
+  #
+  # Guarded on ctx.kind_module = Agent: other Kinds would not normally
+  # receive {:reply_received, _}, but the guard makes intent explicit
+  # and prevents a misrouted message from re-dispatching from User.
+  def handle_kind_message({:reply_received, text}, _slice, %{kind_module: Esr.Entity.Agent} = ctx)
+      when is_binary(text) do
+    agent_uri = ctx.self_uri
+    session_uri = Esr.Entity.Session.default_uri()
+
+    msg = Message.new(agent_uri, %{text: text, attachments: []})
+    target = URI.new!("#{URI.to_string(session_uri)}/behavior/chat/send")
+
+    _ =
+      Invocation.dispatch(%Invocation{
+        target: target,
+        mode: :cast,
+        args: %{message: msg},
+        ctx: %{
+          caller: agent_uri,
+          caps: MapSet.new(),
+          reply: :ignore
+        }
+      })
+
+    # Slice unchanged — Agent has no chat state of its own.
+    :ignore
+  end
+
   def handle_kind_message(_other_message, _slice, _ctx), do: :ignore
 
   # --- Interface schema --------------------------------------------------
@@ -323,6 +371,14 @@ defmodule Esr.Behavior.Chat do
       {ref, uri}, {found_ref, acc} -> {found_ref, Map.put(acc, ref, uri)}
     end)
   end
+
+  # Body comes back from MessageStore.load with string keys (Ecto :map
+  # column → JSON-decoded via ecto_sqlite3); freshly-constructed bodies
+  # in-flight have atom keys. Accept either to be safe across the
+  # dispatch boundary.
+  defp body_text(%{text: t}) when is_binary(t), do: t
+  defp body_text(%{"text" => t}) when is_binary(t), do: t
+  defp body_text(_), do: ""
 
   defp message_schema do
     %{
