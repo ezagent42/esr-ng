@@ -153,16 +153,25 @@ Phase 4 的 "LiveView IM 完整化" **不是从零做 LiveView**,是给 Phase 1-
 
 **3. Deliverables**（单块）：
 
-**工作顺序**(option-A 时序:esr-ng 已有 `.git` + 规划文档奠基提交):
+**工作顺序**(option-A 时序:esr-ng 已有 `.git` + 规划文档奠基提交。下面是 Phase 0
+实施后修正过的实际顺序 —— 原 M7 假设 `mix phx.new .` 就地脚手架,**不成立**):
 ```
-1. cd esr-ng                  # 已有 .git + 规划文档(ARCHITECTURE/GLOSSARY/ROADMAP/...)奠基提交
-2. mix phx.new . --umbrella --no-mailer --binary-id   # 其他 flag 由 brainstorm 定;`.` 形式脚手架进现有目录
-3. 处理 3 个冲突文件:留 phx.new 的 .gitignore / .formatter.exs,README 替换为 ESR-specific
-4. 老 .claude/ 审视后 cp 进 .claude/(skill 列表见字段 5)
-5. mix deps.get && mix test   # 应该绿(只有 phoenix 自带 test)
-6. git add . && git commit -m "phase 0: phoenix scaffolding"   # 不是 git init —— 已 inited
-7. tag phase0
+1. cd ~/Workspace                # esr-ng/ 已有 .git + 规划文档奠基提交
+2. cd esr-ng && mix phx.new . --umbrella --app esr_core --no-mailer --database sqlite3 --no-install
+   # ⚠️ phx 1.8 硬行为:`mix phx.new . --umbrella` 强制把项目建到 `<dir>_umbrella/`
+   #    —— 实际生成在 ../esr-ng_umbrella/,并在那里 git init。不是就地脚手架。
+   # ⚠️ 不加 --binary-id(P0-D2:text URI 主键)
+3. merge:rm 掉 esr-ng_umbrella/.git(phx.new 的空 git),把 scaffold 内容 mv 进 esr-ng/,
+   保留 esr-ng/ 原始 founding .git;rmdir esr-ng_umbrella
+4. 重命名 phx.new 默认的 esr_core_web → esr_web(目录+mix.exs+EsrWeb 模块前缀+config 全同步)
+5. mix deps.get && mix compile --warnings-as-errors   # 验证 scaffold + 重命名
+6. 其余 deliverable(/_health + tailnet 绑定 / HomeLive / GLOSSARY / .claude/ / check_invariants / git-hook)
+7. README 替换为 ESR-specific
+8. git add -A && git commit   # 不是 git init —— 已 inited
+9. tag phase0
 ```
+> phx.new 不生成 README/.gitignore/.formatter.exs 冲突(esr-ng/ 原本就没这 3 个文件),
+> 原 M7「处理 3 个冲突文件」一步实际不需要 —— phx.new 干净生成它们。
 
 Deliverable 项:
 - `mix.exs` 装上 ARCHITECTURE.md §15 的 12 个 deps(SQLite-only)
