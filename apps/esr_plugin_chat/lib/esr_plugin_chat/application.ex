@@ -2,63 +2,87 @@ defmodule EsrPluginChat.Application do
   @moduledoc """
   Chat plugin OTP application.
 
-  ## Phase 2b-step 1 scope (this commit)
+  ## Phase 2b boot sequence
 
-  Boot wiring for the three Chat-participating Kinds:
+  1. **Register Chat Behaviors per-Kind subset** (BehaviorRegistry) —
+     before spawning any Kind so dispatch routes correctly on first
+     message:
 
-  1. `EsrPluginChat.AgentSupervisor` — DynamicSupervisor for Agent
-     Kinds. Starts with **zero children**; Agent Kinds spawn when a
-     bridge announces (2c-step 1 wires the controller).
-  2. `Esr.Kind.Server` for `session://main` — the default Session.
-  3. `Esr.Kind.Server` for `user://admin` — Phase 2 promotes the
-     admin User from "Phase 1 stub callbacks, never spawned" to a
-     live Kind that can be a chat participant.
+         Esr.Entity.Session  → :send | :join | :leave  → Esr.Behavior.Chat
+         Esr.Entity.User     → :receive               → Esr.Behavior.Chat
+         Esr.Entity.Agent    → :receive               → Esr.Behavior.Chat
 
-  Per-Kind BehaviorRegistry registration + Chat invoke bodies arrive
-  in 2b-step 2. This step only stands up the processes.
+     Per Decision P2-D2 K-path: one Behavior module, multiple Kinds
+     each picking the subset of actions it consumes.
 
-  ## Boot order
+  2. **Children supervisor** —
+     - `EsrPluginChat.AgentSupervisor` — DynamicSupervisor for Agent
+       Kinds, 0 children at boot (Agents materialize when a bridge
+       announces; 2c-step 1 wires the controller).
+     - `Esr.Kind.Server` for `session://main` — the default Session.
+     - `Esr.Kind.Server` for `user://admin` — Phase 2 promotes the
+       admin User from a never-spawned stub to a live participant.
 
-  `esr_core` boots first (Repo / Registry / EtsOwner / BehaviorRegistry
-  table / PubSub) — `extra_applications` in mix.exs declares the dep.
-  When `start/2` runs here, `KindRegistry` + `ReadyGate` +
-  `PendingDelivery` are all live, so the Kind.Server lifecycle
-  (register → ready → flush pending) works.
+  3. **Post-boot admin join** — once Session and admin User are both
+     alive, dispatch `session://main/behavior/chat/join` with
+     `member: user://admin`. Using `:cast` so this is non-blocking;
+     PendingDelivery absorbs the still-becoming-ready window (memory
+     `feedback_let_it_crash_no_workarounds`: no defensive sleeps).
 
-  ## Why distinct child ids
+  ## Why post-boot dispatch (not Kind.Server.handle_continue)
 
-  Session and admin User both use `Esr.Kind.Server` as their server
-  module. Default `child_spec/1` derives id from the module — they'd
-  collide. Each spec gets an explicit `id:` keyed to its URI so the
-  Supervisor can track them independently and restart per-instance.
+  The /goal text suggested `handle_continue(:announce_ready)` as the
+  dispatch site. Equivalent in effect for a single dispatch — but
+  doing it from the Application keeps `Esr.Kind.Server` generic
+  (it doesn't have to know about Chat or admin User's specific
+  joining behavior). Application-level orchestration is the right
+  layer for "after these processes are up, fire X" wiring.
 
   ## Why use Esr.Entity.User from esr_core (not move it here)
 
-  The admin User module + its `admin_uri/0` / `admin_caps/0` constants
-  are widely referenced (snapshot tests, invocation tests, LV admin
-  page, plugin Echo integration tests). Moving it to `esr_plugin_chat`
-  would force every reader to dep on this plugin — wrong direction.
-  We keep User in `esr_core` (data + bootstrap constants) and spawn
-  the instance here (lifecycle is plugin-driven, per the
-  plugin-isolation north-star).
+  `admin_uri/0` + `admin_caps/0` are widely referenced (snapshot tests,
+  invocation tests, LV admin page, plugin Echo integration tests).
+  Keeping User in esr_core means readers don't depend on this plugin.
 
   Per the same reasoning, `Esr.Entity.User.behaviors/0` returns `[]`
-  — Chat is wired in via per-Kind `BehaviorRegistry.register`
-  (2b-step 2) rather than via `behaviors/0`, so esr_core doesn't have
-  to reference `Esr.Behavior.Chat`.
+  — Chat is wired in via per-Kind `BehaviorRegistry.register` rather
+  than via `behaviors/0`, so esr_core stays free of any
+  `Esr.Behavior.Chat` reference.
   """
 
   use Application
 
+  alias Esr.{BehaviorRegistry, Invocation}
+  alias Esr.Entity.{Agent, Session, User}
+  alias Esr.Behavior.Chat
+
   @impl true
   def start(_type, _args) do
+    :ok = register_chat_behaviors()
+
     children = [
       {DynamicSupervisor, name: EsrPluginChat.AgentSupervisor, strategy: :one_for_one},
-      kind_server_spec(:session_main, Esr.Entity.Session, Esr.Entity.Session.default_uri()),
-      kind_server_spec(:user_admin, Esr.Entity.User, Esr.Entity.User.admin_uri())
+      kind_server_spec(:session_main, Session, Session.default_uri()),
+      kind_server_spec(:user_admin, User, User.admin_uri())
     ]
 
-    Supervisor.start_link(children, strategy: :one_for_one, name: __MODULE__)
+    case Supervisor.start_link(children, strategy: :one_for_one, name: __MODULE__) do
+      {:ok, sup_pid} ->
+        :ok = admin_user_joins_default_session()
+        {:ok, sup_pid}
+
+      other ->
+        other
+    end
+  end
+
+  defp register_chat_behaviors do
+    :ok = BehaviorRegistry.register(Session, :send, Chat)
+    :ok = BehaviorRegistry.register(Session, :join, Chat)
+    :ok = BehaviorRegistry.register(Session, :leave, Chat)
+    :ok = BehaviorRegistry.register(User, :receive, Chat)
+    :ok = BehaviorRegistry.register(Agent, :receive, Chat)
+    :ok
   end
 
   defp kind_server_spec(child_id, kind_module, uri) do
@@ -66,5 +90,25 @@ defmodule EsrPluginChat.Application do
       {Esr.Kind.Server, {kind_module, %{uri: uri}}},
       id: child_id
     )
+  end
+
+  defp admin_user_joins_default_session do
+    admin_uri = User.admin_uri()
+    session_uri = Session.default_uri()
+    target = URI.new!("#{URI.to_string(session_uri)}/behavior/chat/join")
+
+    _ =
+      Invocation.dispatch(%Invocation{
+        target: target,
+        mode: :cast,
+        args: %{member: admin_uri},
+        ctx: %{
+          caller: admin_uri,
+          caps: User.admin_caps(),
+          reply: :ignore
+        }
+      })
+
+    :ok
   end
 end

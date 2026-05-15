@@ -32,22 +32,33 @@ defmodule Esr.Kind.Runtime do
           | {:ok, slice_state()}
           | {:error, term()}
 
-  @spec handle_dispatch(Esr.Invocation.t(), slice_state(), module()) :: result()
+  @spec handle_dispatch(Esr.Invocation.t(), slice_state(), module(), URI.t()) :: result()
   def handle_dispatch(
         %Esr.Invocation{target: target, args: args, ctx: ctx} = _inv,
         state,
-        kind_module
+        kind_module,
+        self_uri
       ) do
     started_at = System.monotonic_time(:microsecond)
 
+    # Phase 2: Behaviors that span multiple Kinds (e.g. Chat: Session does
+    # send/join/leave, User/Agent do receive) need to branch on which Kind
+    # they're currently hosting + know that Kind instance's URI for fan-out.
+    # Inject both into ctx at this single point so plugins never have to
+    # plumb it themselves.
+    enriched_ctx =
+      ctx
+      |> Map.put(:kind_module, kind_module)
+      |> Map.put(:self_uri, self_uri)
+
     with {:ok, {behavior_name_atom, action}} <- Esr.URI.behavior_action(target),
          {:ok, behavior_module} <- lookup_behavior(kind_module, action),
-         :ok <- authz_stub(kind_module, behavior_module, target, ctx),
+         :ok <- authz_stub(kind_module, behavior_module, target, enriched_ctx),
          :ok <- validate_args(behavior_module, action, args),
          slice_key <- behavior_module.state_slice(),
          slice <- Map.get(state, slice_key, %{}),
          {:ok, new_slice, result_or_nil} <-
-           invoke_behavior(behavior_module, action, slice, args, ctx) do
+           invoke_behavior(behavior_module, action, slice, args, enriched_ctx) do
       # Step 9 — put_in state. Snapshot wiring is Phase 1 step 3.
       new_state = Map.put(state, slice_key, new_slice)
 
@@ -57,7 +68,7 @@ defmodule Esr.Kind.Runtime do
         %{duration_us: System.monotonic_time(:microsecond) - started_at},
         %{
           target: target,
-          caller: Map.get(ctx, :caller),
+          caller: Map.get(enriched_ctx, :caller),
           action: action,
           behavior_name: behavior_name_atom,
           behavior_module: behavior_module,
@@ -75,7 +86,7 @@ defmodule Esr.Kind.Runtime do
         :telemetry.execute(
           [:esr, :invoke, :error],
           %{duration_us: System.monotonic_time(:microsecond) - started_at},
-          %{target: target, caller: Map.get(ctx, :caller), reason: reason}
+          %{target: target, caller: Map.get(enriched_ctx, :caller), reason: reason}
         )
 
         err
