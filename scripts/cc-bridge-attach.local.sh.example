@@ -20,3 +20,14 @@ export NO_PROXY=$no_proxy
 # Where the Python bridge POSTs its announce. Defaults to
 # http://127.0.0.1:4000 if unset.
 # export ESR_BRIDGE_ESRD_URL=http://100.64.0.27:4000
+
+# --- Phase 2c Agent URI (required for chat routing) ---
+# When set, esrd spawns an Esr.Entity.Agent at this URI and binds it
+# to the bridge. Reply traffic from claude then flows through the
+# Chat router so the LV chat stream renders replies as normal chat
+# messages. Without this var the bridge announces in legacy mode —
+# Phase 1 worked but the Phase 2 reply endpoint returns 422.
+#
+# Convention: agent://<short-display-name>. The host segment is what
+# admin's @-mention dropdown will display.
+export ESR_AGENT_URI="agent://cc-builder"

@@ -47,6 +47,12 @@ LOG = logging.getLogger("esr_mcp_bridge_v1")
 
 ESRD_URL = os.environ.get("ESRD_URL", "http://127.0.0.1:4000")
 BRIDGE_ID = os.environ.get("ESR_BRIDGE_ID", f"bridge-{uuid.uuid4().hex[:8]}")
+# Phase 2c: if set, the announce includes agent_uri so esrd spawns an
+# Esr.Entity.Agent Kind at this URI and binds it to BRIDGE_ID — reply
+# traffic then routes via the chat router (not the legacy record_reply).
+# Convention: agent://<short-name> (e.g. agent://cc-builder). Unset =
+# legacy Phase 1 mode (bare bridge, no Agent Kind, reply 422s).
+AGENT_URI = os.environ.get("ESR_AGENT_URI", "")
 
 _stdout_lock = threading.Lock()
 
@@ -67,13 +73,14 @@ def write_frame(obj: dict) -> None:
 
 
 def post_announce(claude_info: dict) -> bool:
-    body = json.dumps(
-        {
-            "bridge_id": BRIDGE_ID,
-            "claude_info": claude_info,
-            "tools": ["reply"],
-        }
-    ).encode("utf-8")
+    payload = {
+        "bridge_id": BRIDGE_ID,
+        "claude_info": claude_info,
+        "tools": ["reply"],
+    }
+    if AGENT_URI:
+        payload["agent_uri"] = AGENT_URI
+    body = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
         f"{ESRD_URL}/api/cc-bridge/announce",
         data=body,

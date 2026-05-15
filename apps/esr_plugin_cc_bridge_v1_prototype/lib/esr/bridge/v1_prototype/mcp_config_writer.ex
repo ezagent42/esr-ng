@@ -46,14 +46,25 @@ defmodule Esr.Bridge.V1Prototype.McpConfigWriter do
     dir = Application.get_env(:esr_plugin_cc_bridge_v1_prototype, :mcp_config_dir, @default_dir)
     File.mkdir_p!(dir)
 
+    # Phase 2c: forward ESR_AGENT_URI from operator's shell into the
+    # Python bridge subprocess so it can include it in the announce
+    # payload. esrd then spawns Esr.Entity.Agent at that URI. If unset,
+    # bridge announces without agent_uri → legacy bare-bridge mode.
+    env = %{"ESRD_URL" => esrd_url()}
+
+    env =
+      case System.get_env("ESR_AGENT_URI") do
+        nil -> env
+        "" -> env
+        agent_uri -> Map.put(env, "ESR_AGENT_URI", agent_uri)
+      end
+
     config = %{
       "mcpServers" => %{
         "esr-bridge" => %{
           "command" => "uv",
           "args" => ["run", "python3", bridge_script_path()],
-          "env" => %{
-            "ESRD_URL" => esrd_url()
-          }
+          "env" => env
         }
       }
     }
