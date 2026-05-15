@@ -35,7 +35,12 @@ defmodule EsrWebLiveview.MixProject do
       # compile cycle. The plugin uses Phoenix.LiveView directly.
       {:phoenix_live_view, ">= 0.0.0"},
       {:phoenix_html, "~> 4.1"},
-      {:jason, "~> 1.2"}
+      {:jason, "~> 1.2"},
+      # Phase 1 1b: the /admin LV displays the v1 bridge status. This
+      # is a v1_prototype coupling — Phase 5 wholesale-replaces the
+      # bridge with the production plugin and the LV will subscribe
+      # to a class of bridge topics rather than name a specific module.
+      {:esr_plugin_cc_bridge_v1_prototype, in_umbrella: true}
     ]
   end
 end

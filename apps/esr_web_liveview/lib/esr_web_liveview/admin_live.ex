@@ -27,6 +27,9 @@ defmodule EsrWebLiveview.AdminLive do
   def mount(_params, _session, socket) do
     if connected?(socket) do
       Phoenix.PubSub.subscribe(EsrCore.PubSub, Esr.Audit.stream_topic())
+      # 1b: also subscribe to the v1_prototype bridge events topic so
+      # we can show bridge status / hello / replies live.
+      Phoenix.PubSub.subscribe(EsrCore.PubSub, bridge_topic_safely())
     end
 
     # Load the last 50 invocations from SQLite so audit history is
@@ -40,11 +43,31 @@ defmodule EsrWebLiveview.AdminLive do
       |> stream(:invocations, historical, limit: 50)
       |> assign(:caller_uri_str, URI.to_string(Esr.Entity.User.admin_uri()))
       |> assign(:flash_error, nil)
+      |> assign(:bridge_status, current_bridge_status())
+      |> assign(:bridge_last_event, nil)
       |> assign(:form,
         to_form(%{"target" => "", "args" => "", "mode" => "call"}, as: "manual_dispatch")
       )
 
     {:ok, socket}
+  end
+
+  defp bridge_topic_safely do
+    if Code.ensure_loaded?(Esr.Bridge.V1Prototype.Server) do
+      Esr.Bridge.V1Prototype.Server.topic()
+    else
+      # Plugin not loaded — subscribe to a placeholder so PubSub.subscribe
+      # doesn't crash. Topic strings are arbitrary.
+      "esr:bridge_v1:unavailable"
+    end
+  end
+
+  defp current_bridge_status do
+    if Code.ensure_loaded?(Esr.Bridge.V1Prototype.Server) do
+      Esr.Bridge.V1Prototype.Server.status()
+    else
+      :not_loaded
+    end
   end
 
   defp load_recent_invocations(n) do
@@ -78,6 +101,24 @@ defmodule EsrWebLiveview.AdminLive do
   def handle_info({:audit_event, event}, socket) do
     row = event_to_row(event)
     {:noreply, stream_insert(socket, :invocations, row, at: 0)}
+  end
+
+  def handle_info({:bridge_event, msg}, socket) do
+    {:noreply,
+     socket
+     |> assign(:bridge_last_event, inspect(msg))
+     |> assign(:bridge_status, current_bridge_status())}
+  end
+
+  def handle_info({:bridge_reply, _id, _result}, socket) do
+    {:noreply, assign(socket, :bridge_status, current_bridge_status())}
+  end
+
+  def handle_info({:bridge_exited, _status}, socket) do
+    {:noreply,
+     socket
+     |> assign(:bridge_status, :exited)
+     |> assign(:bridge_last_event, "bridge exited")}
   end
 
   # --- User actions -----------------------------------------------------
@@ -196,6 +237,19 @@ defmodule EsrWebLiveview.AdminLive do
         <p :if={@flash_error} style="color: #cf222e; font-size: 13px; margin-top: 8px;">{@flash_error}</p>
       </section>
 
+      <section id="cc-bridges" style="margin-top: 24px;">
+        <h2 style="font-size: 16px; font-weight: 500; margin: 0 0 8px 0;">CC Bridges (v1 prototype)</h2>
+        <p style="font-size: 13px;">
+          Status: <span id="bridge-status" style={status_style(@bridge_status)}>{@bridge_status}</span>
+        </p>
+        <p :if={@bridge_last_event} style="font-size: 11px; color: #666; font-family: monospace;">
+          last event: {@bridge_last_event}
+        </p>
+        <p style="font-size: 11px; color: #888;">
+          v1_prototype — Phase 5 wholesale-replaces this with esr_plugin_cc_channel.
+        </p>
+      </section>
+
       <section id="audit-stream" style="margin-top: 24px;">
         <h2 style="font-size: 16px; font-weight: 500; margin: 0 0 8px 0;">Audit Log (last 50)</h2>
         <table style="width: 100%; font-size: 13px; border-collapse: collapse;">
@@ -246,6 +300,12 @@ defmodule EsrWebLiveview.AdminLive do
       at: DateTime.to_iso8601(at)
     }
   end
+
+  defp status_style(:ready), do: "color: #1f883d; font-weight: 600;"
+  defp status_style(:starting), do: "color: #9a6700;"
+  defp status_style(:down), do: "color: #cf222e;"
+  defp status_style(:exited), do: "color: #cf222e;"
+  defp status_style(_), do: "color: #57606a;"
 
   defp authz_label([:esr, :invoke, :stop]), do: "stub_grant"
   defp authz_label([:esr, :invoke, :error]), do: "—"
