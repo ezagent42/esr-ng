@@ -22,6 +22,7 @@ defmodule EsrWebLiveview.AdminLive do
   import Phoenix.Component
 
   @echo_target URI.parse("agent://echo/behavior/echo/say")
+  @session_uri URI.new!("session://main")
 
   @impl true
   def mount(_params, _session, socket) do
@@ -30,6 +31,7 @@ defmodule EsrWebLiveview.AdminLive do
     if connected?(socket) do
       Phoenix.PubSub.subscribe(EsrCore.PubSub, Esr.Audit.stream_topic())
       Phoenix.PubSub.subscribe(EsrCore.PubSub, bridge_topic_safely())
+      Phoenix.PubSub.subscribe(EsrCore.PubSub, session_events_topic())
 
       # If bridges are already connected when this LV mounts (e.g. you
       # started attach before opening the page), subscribe to each
@@ -69,6 +71,7 @@ defmodule EsrWebLiveview.AdminLive do
       |> assign(:flash_error, nil)
       |> assign(:connected_bridges, connected_bridges)
       |> assign(:bridge_messages, historical_replies)
+      |> assign(:session_members, read_session_members())
       |> assign(:form,
         to_form(%{"target" => "", "args" => "", "mode" => "call"}, as: "manual_dispatch")
       )
@@ -78,6 +81,39 @@ defmodule EsrWebLiveview.AdminLive do
       )
 
     {:ok, socket}
+  end
+
+  defp session_events_topic do
+    Esr.Behavior.Chat.session_events_topic(@session_uri)
+  end
+
+  # Read Session's chat slice via :sys.get_state — Phase 2 acceptable
+  # per PLAN.md 2b-step 3 ("真接 ETS-cached 形态 Phase 3 再考虑"). The
+  # call is serialized through the Session GenServer, so it's consistent
+  # with any in-flight join/leave.
+  defp read_session_members do
+    case Esr.KindRegistry.lookup(@session_uri) do
+      {:ok, pid} ->
+        try do
+          %{state: %{chat: slice}} = :sys.get_state(pid, 1_000)
+
+          for {uri, %{online: online?}} <- slice.members do
+            %{
+              uri: URI.to_string(uri),
+              online: online?,
+              last_seen: Map.get(slice.last_seen, uri)
+            }
+          end
+          |> Enum.sort_by(& &1.uri)
+        catch
+          # If Session is mid-restart or :sys.get_state times out, render
+          # an empty members list rather than crashing the LV mount.
+          _, _ -> []
+        end
+
+      :error ->
+        []
+    end
   end
 
   defp list_replies_safely(bridge_id) do
@@ -153,6 +189,22 @@ defmodule EsrWebLiveview.AdminLive do
   def handle_info({:cc_disconnected, _bridge_id}, socket) do
     {:noreply, assign(socket, :connected_bridges, list_bridges_safely())}
   end
+
+  # Session membership events (chat plugin broadcasts on join/leave/:DOWN).
+  # We refresh the whole members list rather than apply diffs — Phase 2
+  # has at most ~5 members per session, refresh cost is negligible.
+  def handle_info({:member_joined, _uri}, socket),
+    do: {:noreply, assign(socket, :session_members, read_session_members())}
+
+  def handle_info({:member_left, _uri}, socket),
+    do: {:noreply, assign(socket, :session_members, read_session_members())}
+
+  def handle_info({:member_offline, _uri, _at}, socket),
+    do: {:noreply, assign(socket, :session_members, read_session_members())}
+
+  # Chat messages — 2c-step 2 will populate a chat stream from these.
+  # For 2b we ignore (or could log) so the LV doesn't crash on receipt.
+  def handle_info({:chat_message, _msg}, socket), do: {:noreply, socket}
 
   def handle_info({:claude_reply, bridge_id, entry}, socket) do
     msg = %{
@@ -312,6 +364,33 @@ defmodule EsrWebLiveview.AdminLive do
         </.form>
 
         <p :if={@flash_error} style="color: #cf222e; font-size: 13px; margin-top: 8px;">{@flash_error}</p>
+      </section>
+
+      <section id="session-members" style="margin-top: 24px;">
+        <h2 style="font-size: 16px; font-weight: 500; margin: 0 0 8px 0;">
+          Session: <code>session://main</code>
+        </h2>
+        <p :if={@session_members == []} id="session-members-empty" style="font-size: 13px; color: #57606a;">
+          No members. (Boot should auto-join admin User — if this is empty, Chat plugin failed to start.)
+        </p>
+        <table :if={@session_members != []} id="session-members-table" style="width: 100%; font-size: 13px; border-collapse: collapse;">
+          <thead>
+            <tr style="border-bottom: 1px solid #d1d5da;">
+              <th style="text-align: left; padding: 4px 0;">member</th>
+              <th style="text-align: left;">status</th>
+              <th style="text-align: left;">last_seen</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr :for={member <- @session_members} style="border-bottom: 1px solid #eee;">
+              <td style="font-family: monospace; padding: 4px 0;">{member.uri}</td>
+              <td style={member_status_style(member.online)}>
+                {if member.online, do: "online", else: "offline"}
+              </td>
+              <td style="color: #57606a;">{format_last_seen(member.last_seen)}</td>
+            </tr>
+          </tbody>
+        </table>
       </section>
 
       <section id="cc-bridges" style="margin-top: 24px;">
@@ -487,4 +566,10 @@ defmodule EsrWebLiveview.AdminLive do
   defp safe_mode("call"), do: {:ok, :call}
   defp safe_mode("cast"), do: {:ok, :cast}
   defp safe_mode(other), do: {:error, "unsupported mode: #{inspect(other)}"}
+
+  defp member_status_style(true), do: "color: #1f883d; font-weight: 600;"
+  defp member_status_style(false), do: "color: #999;"
+
+  defp format_last_seen(nil), do: "—"
+  defp format_last_seen(%DateTime{} = dt), do: DateTime.to_iso8601(dt)
 end

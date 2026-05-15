@@ -161,6 +161,8 @@ defmodule Esr.Behavior.Chat do
             last_seen: new_last_seen
         }
 
+        broadcast_membership(session_uri, {:member_joined, member_uri})
+
         {:ok, new_slice, %{members: Map.keys(new_members)}}
 
       :error ->
@@ -170,7 +172,7 @@ defmodule Esr.Behavior.Chat do
 
   # --- :leave ------------------------------------------------------------
 
-  def invoke(:leave, slice, %{member: %URI{} = member_uri}, _ctx) do
+  def invoke(:leave, slice, %{member: %URI{} = member_uri}, ctx) do
     {ref_to_remove, new_monitors} = pop_monitor_ref(slice.monitors, member_uri)
 
     if ref_to_remove, do: Process.demonitor(ref_to_remove, [:flush])
@@ -181,6 +183,8 @@ defmodule Esr.Behavior.Chat do
         monitors: new_monitors,
         last_seen: Map.delete(slice.last_seen, member_uri)
     }
+
+    broadcast_membership(ctx.self_uri, {:member_left, member_uri})
 
     {:ok, new_slice}
   end
@@ -197,7 +201,7 @@ defmodule Esr.Behavior.Chat do
   point holding a dead ref) but the URI stays in `members` so rejoin
   recognizes it.
   """
-  def handle_kind_message({:DOWN, ref, :process, _pid, _reason}, slice, _ctx) do
+  def handle_kind_message({:DOWN, ref, :process, _pid, _reason}, slice, ctx) do
     case Map.pop(slice.monitors, ref) do
       {nil, _} ->
         # Not one of our monitors (could be another Behavior's ref or
@@ -205,10 +209,12 @@ defmodule Esr.Behavior.Chat do
         :ignore
 
       {member_uri, new_monitors} ->
+        now = DateTime.utc_now()
+
         new_members =
           Map.update(slice.members, member_uri, %{online: false}, &Map.put(&1, :online, false))
 
-        new_last_seen = Map.put(slice.last_seen, member_uri, DateTime.utc_now())
+        new_last_seen = Map.put(slice.last_seen, member_uri, now)
 
         new_slice = %{
           slice
@@ -216,6 +222,8 @@ defmodule Esr.Behavior.Chat do
             members: new_members,
             last_seen: new_last_seen
         }
+
+        broadcast_membership(ctx.self_uri, {:member_offline, member_uri, now})
 
         {:ok, new_slice}
     end
@@ -299,6 +307,14 @@ defmodule Esr.Behavior.Chat do
 
         :ok
     end
+  end
+
+  defp broadcast_membership(session_uri, event) do
+    Phoenix.PubSub.broadcast(
+      EsrCore.PubSub,
+      session_events_topic(session_uri),
+      event
+    )
   end
 
   defp pop_monitor_ref(monitors, member_uri) do

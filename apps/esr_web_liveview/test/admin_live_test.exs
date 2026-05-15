@@ -55,6 +55,23 @@ defmodule EsrWebLiveview.AdminLiveTest do
     assert html =~ "agent://echo/behavior/echo/say"
   end
 
+  test "Session members section shows admin User as online (Phase 2 boot)", %{conn: conn} do
+    {:ok, _lv, html} = live(conn, "/admin")
+
+    # Section header
+    assert html =~ "session://main"
+
+    # admin URI listed
+    assert html =~ "user://admin"
+
+    # admin is online (boot post-spawn dispatched chat/join)
+    assert html =~ "online"
+
+    # The members table id is rendered (not the empty-state placeholder)
+    assert html =~ ~s(id="session-members-table")
+    refute html =~ ~s(id="session-members-empty")
+  end
+
   test "Manual dispatch with invalid URI shows error message", %{conn: conn} do
     {:ok, lv, _html} = live(conn, "/admin")
 
