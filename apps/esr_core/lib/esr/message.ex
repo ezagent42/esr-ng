@@ -38,8 +38,11 @@ defmodule Esr.Message do
     当 generic struct 序列化所有字段,wire 上膨胀)
   """
 
-  @enforce_keys [:uri, :sender, :body, :inserted_at]
-  defstruct [:uri, :sender, :mentions, :body, :ref, :inserted_at]
+  use Ecto.Schema
+
+  # Drop Ecto.Schema's `:__meta__` field from JSON serialization (it's
+  # internal Ecto state, not part of the Message envelope on the wire).
+  @derive {Jason.Encoder, except: [:__meta__]}
 
   @type body_shape :: %{
           required(:text) => String.t(),
@@ -48,12 +51,33 @@ defmodule Esr.Message do
 
   @type t :: %__MODULE__{
           uri: String.t(),
+          session_uri: URI.t() | nil,
           sender: URI.t(),
           mentions: [URI.t()],
           body: body_shape(),
           ref: URI.t() | nil,
           inserted_at: DateTime.t()
         }
+
+  # `uri` is the primary key (message://<uuid16>); ecto_sqlite3 stores it
+  # as TEXT. Disable Ecto's default :id primary key.
+  @primary_key false
+
+  schema "messages" do
+    field :uri, :string, primary_key: true
+    # session_uri is routing metadata (not part of identity invariant per
+    # §3.5); caller supplies at MessageStore.write/2 boundary.
+    field :session_uri, Esr.Ecto.URI
+    field :sender, Esr.Ecto.URI
+    # mentions stored as JSON array of strings (each URI dumped via
+    # Esr.Ecto.URI.dump → string). ecto_sqlite3 JSON-encodes arrays
+    # transparently.
+    field :mentions, {:array, Esr.Ecto.URI}, default: []
+    # body is a JSON-encoded map per ecto_sqlite3's :map column handling.
+    field :body, :map
+    field :ref, Esr.Ecto.URI
+    field :inserted_at, :utc_datetime_usec
+  end
 
   @doc """
   Construct a new Message.
@@ -88,12 +112,7 @@ defimpl Jason.Encoder, for: URI do
   end
 end
 
-# Jason encoder for `%Esr.Message{}` — drops `__struct__` field, encodes
-# `inserted_at` via DateTime → ISO8601 (which Jason already handles).
-defimpl Jason.Encoder, for: Esr.Message do
-  def encode(%Esr.Message{} = msg, opts) do
-    msg
-    |> Map.from_struct()
-    |> Jason.Encode.map(opts)
-  end
-end
+# Note: `%Esr.Message{}` JSON encoding is via `@derive {Jason.Encoder,
+# except: [:__meta__]}` at the schema declaration (see top of module).
+# That handles `:__meta__` (Ecto's internal field) cleanly. No manual
+# defimpl needed.
