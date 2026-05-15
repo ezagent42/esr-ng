@@ -70,15 +70,48 @@
 
 ## 1b Deliverables
 
-**Python bridge**(在 `apps/esr_plugin_cc_bridge_v1_prototype/python/`,文件名带 `_v1_prototype` 后缀):
-- ~80 LOC Python: `claude --channels plugin:esr-bridge` 模式;bridge↔CC 用 stdio(channels 协议要求,不变式 #8);bridge↔ESR 用 stdio + JSON-RPC(Q1 决策)
-- ESR 用 `Esr.Behavior.OSProcess` 风格拉起 bridge 子进程(Phase 1 没有 Behavior.OSProcess,所以这步在 1b 临时用 `:erlexec.run/2` 直接调,标 `TODO Phase 5 替换为 OSProcess Behavior`)
+> **Architecture reference**: cc-openclaw 的 MCP-stdio 模式(就是这个 chat 正在用的 openclaw-channel 走的链路)。**不要**沿用老 esr `--dangerously-load-development-channels server:esr-channel` + Phoenix Channel WebSocket pattern — 那条路在老 esr 上有问题,cc-openclaw 选了 MCP-stdio 是有原因的。
 
-**Elixir 侧**(少量,在 `esr_web_liveview` plugin 增量 / 或新建 `apps/esr_plugin_cc_bridge_v1_prototype/lib/`):
-- `Esr.Bridge.V1Prototype.Server`:GenServer,持 bridge 子进程的 stdio port,从 stdout 读 JSON-RPC reply 解码后 dispatch 回 caller(via `ctx.reply = {:caller_inbox, pid}`)
-- LiveView `/admin` 增量:CC bridge 状态显示(已连入 N 个 bridge);manual dispatch form 多一个 dropdown 选 target = remote CC URI;reply 渲染回 audit log table
+**Python MCP server**(在 `apps/esr_plugin_cc_bridge_v1_prototype/python/esr_mcp_bridge_v1_prototype.py`):
+- ~80 LOC Python:**标准 MCP stdio 协议**(JSON-RPC over stdin/stdout per MCP spec)
+- 暴露 1+ tool:`esr_announce` — claude 调它时,Python 把 announcement HTTP POST 到 esrd
+- 启动时通过 env var 拿 `ESRD_URL`(默认 `http://127.0.0.1:4000`)
+- claude 通过 mcp.json 配置 spawn 这个 Python 进程为 MCP server
 
-**整 Phase 5 替换路径**:`esr_plugin_cc_bridge_v1_prototype/` 整个 app 在 Phase 5 由 `esr_plugin_cc_channel/`(完整 channel + WS + CapBAC)wholesale replace;v1 不修改,直接删。
+**Elixir 侧**(在 `apps/esr_plugin_cc_bridge_v1_prototype/lib/`):
+- `Esr.Bridge.V1Prototype.McpConfigWriter`(~20 LOC):
+  - `write!/0` 写 mcp.json 到 `~/.openclaw/esr-ng/bridge.mcp.json`
+  - 内容:`{mcpServers: {esr-bridge: {command: "uv", args: ["run", "python3", "<abs path to esr_mcp_bridge_v1_prototype.py>"]}}}`
+- `Esr.Bridge.V1Prototype.Server`(rewrite ~30 LOC):
+  - 不再 spawn Python 子进程(那是 claude 干的活)
+  - 只跟踪 "当前已 connected bridges" Map<bridge_id, %{connected_at, claude_info}>
+  - 暴露 `register/2`, `unregister/1`, `list_connected/0` API,被 announce endpoint 调用
+
+**Web 侧**(在 `apps/esr_web/lib/esr_web/controllers/`):
+- `EsrWeb.CcBridgeAnnounceController` + router 加 `POST /api/cc-bridge/announce`:
+  - 收到 `{"bridge_id": "...", "claude_session": "...", "tools": [...]}` body
+  - 调用 `Esr.Bridge.V1Prototype.Server.register/2`
+  - PubSub.broadcast `{:cc_connected, bridge_id, info}` 到 `esr:bridge_v1:events`
+
+**LiveView 侧**:
+- AdminLive 增量:订阅 `esr:bridge_v1:events`,渲染 connected bridge 列表(显示 bridge_id + connected_at)
+- handle_info `{:cc_connected, _, _}` → 更新 assigns
+
+**启动脚本**(在 `scripts/cc-bridge-attach.sh`):
+- ~15 LOC bash
+- `mix run -e "Esr.Bridge.V1Prototype.McpConfigWriter.write!()"` 写 mcp.json
+- `exec script -q /dev/null claude --mcp-config <abs path>` PTY 包装启动 claude(macOS/Linux `script` 命令)
+
+**用户/agent 操作**:
+- v1_prototype 阶段:**agent 自己跑 `bash scripts/cc-bridge-attach.sh`(后台启动)**,然后 agent-browser 看 LV /admin 显示 connected
+- Phase 5 升级:`Esr.Behavior.OSProcess` 接管 PTY 启动,无 bash 脚本
+
+**整 Phase 5 替换路径**:`esr_plugin_cc_bridge_v1_prototype/` 整个 app 在 Phase 5 由 `esr_plugin_cc_channel/`(完整 channel + WS + CapBAC + 完整 MCP tool surface)wholesale replace;v1 不修改,直接删。
+
+**为什么不是 Phoenix Channel WebSocket**(老 esr 路径):
+- cc-openclaw 实证可用,esr-ng 优先沿用工作中的 reference
+- MCP-stdio 更简单(150 LOC 对比 ~400+ LOC for WS Channel)
+- v1_prototype 不追求架构对齐 Phase 5 — 反正全替换。Phase 5 决定是 MCP-stdio 还是 WS Channel 时再 brainstorm
 
 ## 前序依赖
 

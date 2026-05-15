@@ -34,6 +34,15 @@ defmodule EsrWeb.Router do
     get "/_health", HealthController, :index
   end
 
+  # Phase 1 v1_prototype: CC bridge announce endpoint (Phase 5 will use
+  # a Phoenix Channel join handshake instead — this scope is throwaway).
+  scope "/api", EsrWeb do
+    pipe_through :api
+
+    post "/cc-bridge/announce", CcBridgeAnnounceController, :announce
+    delete "/cc-bridge/announce/:bridge_id", CcBridgeAnnounceController, :disconnect
+  end
+
   # Other scopes may use custom stacks.
   # scope "/api", EsrWeb do
   #   pipe_through :api

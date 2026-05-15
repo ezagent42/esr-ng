@@ -1,205 +1,121 @@
 defmodule Esr.Bridge.V1Prototype.Server do
   @moduledoc """
-  Phase 1 prototype CC stdio bridge — wraps a spawned Python subprocess
-  whose stdio speaks line-delimited JSON-RPC.
+  Connected-bridge state tracker.
 
-  ## What this proves
+  Phase 1 v1_prototype:
+  - Claude (NOT this GenServer) spawns the Python MCP bridge subprocess
+    via `--mcp-config` mechanism — see `Esr.Bridge.V1Prototype.McpConfigWriter`
+  - The bridge calls back to esrd's `POST /api/cc-bridge/announce`
+  - That controller calls `register/2` here to record a connected bridge
+  - LiveView /admin subscribes to `topic/0` for live connected count
 
-  The architecture's bridge model (bridge↔ESR via stdio JSON-RPC, per
-  P1-D1) end-to-end:
+  ## Why no Port.open here anymore
 
-  - `start_link/1` spawns `python3 esr_bridge_v1_prototype.py` via
-    `Port.open/2` with `:binary, :line` so stdout lines arrive as
-    discrete messages
-  - inbound JSON-RPC requests go out via `Port.command/2`
-  - outbound replies are decoded in `handle_info/2` and either:
-    - matched against a `from` reference in `state.pending` (for
-      `call/2`-style requests), reply to the awaiting caller, or
-    - emitted as a `{:bridge_event, msg}` PubSub broadcast on the
-      bridge's events topic (for unsolicited messages like the
-      initial `hello`)
+  Earlier prototype tried to have ESR spawn the Python script. That was
+  wrong — Claude itself spawns its MCP servers when started with
+  `--mcp-config`. Our role is to be the HTTP target the bridge posts
+  announcements to.
 
-  ## v1_prototype scope
+  ## State shape
 
-  - One bridge process; Phase 5's plugin handles supervisor/dynamic
-    spawning + multiple CC instances + lifecycle
-  - No actual Claude Code on the other side — the bridge is the
-    echo Python script. Phase 5 replaces both halves.
-  - Uses stdlib `Port` not `:erlexec` to keep deps minimal — the
-    `OSProcess` Behavior arrives in Phase 5 and will replace this
-    spawn line. **TODO Phase 5: replace Port.open with OSProcess.start**
-
-  ## Process lifecycle telemetry
-
-  `[:esr, :bridge_v1, :spawned]` on init success
-  `[:esr, :bridge_v1, :exited]` on EXIT / process death
-
-  These let LiveView /admin show a "bridge alive" badge by counting
-  spawned − exited.
+  `%{bridges: %{bridge_id => %{connected_at: DateTime, info: map}}}`
   """
 
   use GenServer
-  require Logger
-
-  defstruct [
-    :port,
-    :script_path,
-    :hello_received,
-    pending: %{},
-    next_id: 1
-  ]
 
   @bridge_topic "esr:bridge_v1:events"
 
-  def start_link(opts \\ []) do
-    GenServer.start_link(__MODULE__, opts, name: __MODULE__)
+  def start_link(_opts \\ []) do
+    GenServer.start_link(__MODULE__, [], name: __MODULE__)
   end
 
-  @doc "Topic for LV / other subscribers to subscribe to bridge events."
+  @doc "PubSub topic for LV subscribers."
   def topic, do: @bridge_topic
 
   @doc """
-  Send a JSON-RPC request to the bridge and wait for its reply.
+  Record a connected bridge. Called by the announce HTTP controller.
 
-  Returns `{:ok, result}` or `{:error, reason}`. Times out after
-  `timeout_ms` (default 5_000).
+  Returns `:ok` and broadcasts `{:cc_connected, bridge_id, info}` on
+  the bridge topic.
   """
-  @spec call(method :: String.t(), params :: map(), timeout_ms :: pos_integer()) ::
-          {:ok, term()} | {:error, term()}
-  def call(method, params \\ %{}, timeout_ms \\ 5_000) do
-    GenServer.call(__MODULE__, {:rpc, method, params}, timeout_ms + 1_000)
+  @spec register(String.t(), map()) :: :ok
+  def register(bridge_id, info) when is_binary(bridge_id) and is_map(info) do
+    GenServer.call(__MODULE__, {:register, bridge_id, info})
   end
 
-  @doc "Is the bridge process alive + initialized?"
+  @doc "Remove a bridge. Broadcasts `{:cc_disconnected, bridge_id}`."
+  @spec unregister(String.t()) :: :ok
+  def unregister(bridge_id) when is_binary(bridge_id) do
+    GenServer.call(__MODULE__, {:unregister, bridge_id})
+  end
+
+  @doc "List all currently connected bridges as `[{bridge_id, info}]`."
+  @spec list_connected() :: [{String.t(), map()}]
+  def list_connected do
+    GenServer.call(__MODULE__, :list_connected)
+  end
+
+  @doc "How many bridges are connected? Returns 0 if GenServer not started."
+  def count do
+    case Process.whereis(__MODULE__) do
+      nil -> 0
+      _ -> GenServer.call(__MODULE__, :count)
+    end
+  end
+
+  @doc "Legacy callsite from the LiveView — :down / :ready / count summary."
   def status do
     case Process.whereis(__MODULE__) do
-      nil -> :down
-      pid -> GenServer.call(pid, :status)
+      nil ->
+        :down
+
+      _ ->
+        case count() do
+          0 -> :no_bridges
+          n -> {:connected, n}
+        end
     end
   end
 
   # --- callbacks --------------------------------------------------------
 
   @impl true
-  def init(opts) do
-    script_path =
-      opts[:script_path] ||
-        Path.join([
-          Application.app_dir(:esr_plugin_cc_bridge_v1_prototype),
-          "..",
-          "..",
-          "..",
-          "..",
-          "apps",
-          "esr_plugin_cc_bridge_v1_prototype",
-          "python",
-          "esr_bridge_v1_prototype.py"
-        ])
-        |> Path.expand()
-
-    python_bin = System.find_executable("python3") || "/usr/bin/env python3"
-
-    port =
-      Port.open(
-        {:spawn_executable, python_bin},
-        [
-          :binary,
-          {:line, 8 * 1024},
-          :exit_status,
-          {:args, [script_path]}
-        ]
-      )
-
-    :telemetry.execute([:esr, :bridge_v1, :spawned], %{}, %{port: port, script: script_path})
-
-    {:ok,
-     %__MODULE__{
-       port: port,
-       script_path: script_path,
-       hello_received: false
-     }}
+  def init(_) do
+    {:ok, %{bridges: %{}}}
   end
 
   @impl true
-  def handle_call(:status, _from, state) do
-    status =
-      cond do
-        is_nil(state.port) -> :down
-        state.hello_received -> :ready
-        true -> :starting
-      end
+  def handle_call({:register, bridge_id, info}, _from, state) do
+    entry = %{connected_at: DateTime.utc_now(), info: info}
+    bridges = Map.put(state.bridges, bridge_id, entry)
 
-    {:reply, status, state}
+    Phoenix.PubSub.broadcast(
+      EsrCore.PubSub,
+      @bridge_topic,
+      {:cc_connected, bridge_id, entry}
+    )
+
+    {:reply, :ok, %{state | bridges: bridges}}
   end
 
-  def handle_call({:rpc, method, params}, from, state) do
-    id = "req-#{state.next_id}"
+  def handle_call({:unregister, bridge_id}, _from, state) do
+    bridges = Map.delete(state.bridges, bridge_id)
 
-    payload =
-      Jason.encode!(%{
-        "jsonrpc" => "2.0",
-        "id" => id,
-        "method" => method,
-        "params" => params
-      })
+    Phoenix.PubSub.broadcast(
+      EsrCore.PubSub,
+      @bridge_topic,
+      {:cc_disconnected, bridge_id}
+    )
 
-    Port.command(state.port, payload <> "\n")
-
-    new_state = %{
-      state
-      | pending: Map.put(state.pending, id, from),
-        next_id: state.next_id + 1
-    }
-
-    {:noreply, new_state}
+    {:reply, :ok, %{state | bridges: bridges}}
   end
 
-  @impl true
-  def handle_info({port, {:data, {:eol, line}}}, %{port: port} = state) do
-    case Jason.decode(line) do
-      {:ok, %{"method" => "hello"} = msg} ->
-        Phoenix.PubSub.broadcast(EsrCore.PubSub, @bridge_topic, {:bridge_event, msg})
-        {:noreply, %{state | hello_received: true}}
-
-      {:ok, %{"id" => id, "result" => result}} ->
-        new_pending = reply_to_pending(state.pending, id, {:ok, result})
-        Phoenix.PubSub.broadcast(EsrCore.PubSub, @bridge_topic, {:bridge_reply, id, result})
-        {:noreply, %{state | pending: new_pending}}
-
-      {:ok, %{"id" => id, "error" => err}} ->
-        new_pending = reply_to_pending(state.pending, id, {:error, err})
-        {:noreply, %{state | pending: new_pending}}
-
-      {:ok, msg} ->
-        Phoenix.PubSub.broadcast(EsrCore.PubSub, @bridge_topic, {:bridge_event, msg})
-        {:noreply, state}
-
-      {:error, _} ->
-        Logger.warning("Bridge V1 received non-JSON line: #{inspect(line)}")
-        {:noreply, state}
-    end
+  def handle_call(:list_connected, _from, state) do
+    list = Map.to_list(state.bridges)
+    {:reply, list, state}
   end
 
-  def handle_info({port, {:exit_status, status}}, %{port: port} = state) do
-    :telemetry.execute([:esr, :bridge_v1, :exited], %{}, %{exit_status: status})
-    Logger.info("Bridge V1 exited with status=#{status}")
-
-    Phoenix.PubSub.broadcast(EsrCore.PubSub, @bridge_topic, {:bridge_exited, status})
-
-    # Fail any pending RPC calls.
-    Enum.each(state.pending, fn {_id, from} ->
-      GenServer.reply(from, {:error, {:bridge_exited, status}})
-    end)
-
-    {:stop, :normal, %{state | port: nil, pending: %{}}}
-  end
-
-  def handle_info(_other, state), do: {:noreply, state}
-
-  defp reply_to_pending(pending, id, reply) do
-    case Map.pop(pending, id) do
-      {nil, p} -> p
-      {from, p} -> GenServer.reply(from, reply) && p
-    end
+  def handle_call(:count, _from, state) do
+    {:reply, map_size(state.bridges), state}
   end
 end

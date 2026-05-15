@@ -26,7 +26,3 @@ config :phoenix, :plug_init_mode, :runtime
 # Enable helpful, but potentially expensive runtime checks
 config :phoenix_live_view,
   enable_expensive_runtime_checks: true
-
-# Don't auto-spawn the v1 CC bridge in tests — tests start the GenServer
-# manually with explicit script paths.
-config :esr_plugin_cc_bridge_v1_prototype, auto_start: false

@@ -16,12 +16,10 @@ defmodule EsrPluginCcBridgeV1Prototype.Application do
 
   @impl true
   def start(_type, _args) do
-    children =
-      if Application.get_env(:esr_plugin_cc_bridge_v1_prototype, :auto_start, true) do
-        [Esr.Bridge.V1Prototype.Server]
-      else
-        []
-      end
+    # Rev 2026-05-15: Server is now a passive state tracker — it doesn't
+    # spawn anything, just records bridges that announce themselves via
+    # HTTP. Safe to always start; no env gate needed.
+    children = [Esr.Bridge.V1Prototype.Server]
 
     Supervisor.start_link(children, strategy: :one_for_one, name: __MODULE__)
   end

@@ -43,8 +43,7 @@ defmodule EsrWebLiveview.AdminLive do
       |> stream(:invocations, historical, limit: 50)
       |> assign(:caller_uri_str, URI.to_string(Esr.Entity.User.admin_uri()))
       |> assign(:flash_error, nil)
-      |> assign(:bridge_status, current_bridge_status())
-      |> assign(:bridge_last_event, nil)
+      |> assign(:connected_bridges, list_bridges_safely())
       |> assign(:form,
         to_form(%{"target" => "", "args" => "", "mode" => "call"}, as: "manual_dispatch")
       )
@@ -62,11 +61,11 @@ defmodule EsrWebLiveview.AdminLive do
     end
   end
 
-  defp current_bridge_status do
+  defp list_bridges_safely do
     if Code.ensure_loaded?(Esr.Bridge.V1Prototype.Server) do
-      Esr.Bridge.V1Prototype.Server.status()
+      Esr.Bridge.V1Prototype.Server.list_connected()
     else
-      :not_loaded
+      []
     end
   end
 
@@ -103,22 +102,12 @@ defmodule EsrWebLiveview.AdminLive do
     {:noreply, stream_insert(socket, :invocations, row, at: 0)}
   end
 
-  def handle_info({:bridge_event, msg}, socket) do
-    {:noreply,
-     socket
-     |> assign(:bridge_last_event, inspect(msg))
-     |> assign(:bridge_status, current_bridge_status())}
+  def handle_info({:cc_connected, _bridge_id, _entry}, socket) do
+    {:noreply, assign(socket, :connected_bridges, list_bridges_safely())}
   end
 
-  def handle_info({:bridge_reply, _id, _result}, socket) do
-    {:noreply, assign(socket, :bridge_status, current_bridge_status())}
-  end
-
-  def handle_info({:bridge_exited, _status}, socket) do
-    {:noreply,
-     socket
-     |> assign(:bridge_status, :exited)
-     |> assign(:bridge_last_event, "bridge exited")}
+  def handle_info({:cc_disconnected, _bridge_id}, socket) do
+    {:noreply, assign(socket, :connected_bridges, list_bridges_safely())}
   end
 
   # --- User actions -----------------------------------------------------
@@ -239,13 +228,28 @@ defmodule EsrWebLiveview.AdminLive do
 
       <section id="cc-bridges" style="margin-top: 24px;">
         <h2 style="font-size: 16px; font-weight: 500; margin: 0 0 8px 0;">CC Bridges (v1 prototype)</h2>
-        <p style="font-size: 13px;">
-          Status: <span id="bridge-status" style={status_style(@bridge_status)}>{@bridge_status}</span>
+        <p :if={@connected_bridges == []} id="bridge-empty" style="font-size: 13px; color: #57606a;">
+          No connected bridges. Start one with <code>bash scripts/cc-bridge-attach.sh</code>.
         </p>
-        <p :if={@bridge_last_event} style="font-size: 11px; color: #666; font-family: monospace;">
-          last event: {@bridge_last_event}
-        </p>
-        <p style="font-size: 11px; color: #888;">
+        <table :if={@connected_bridges != []} id="bridges-table" style="width: 100%; font-size: 13px; border-collapse: collapse;">
+          <thead>
+            <tr style="border-bottom: 1px solid #d1d5da;">
+              <th style="text-align: left; padding: 4px 0;">bridge_id</th>
+              <th style="text-align: left;">status</th>
+              <th style="text-align: left;">connected_at</th>
+              <th style="text-align: left;">client</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr :for={{bridge_id, entry} <- @connected_bridges} style="border-bottom: 1px solid #eee;">
+              <td style="font-family: monospace; padding: 4px 0;">{bridge_id}</td>
+              <td style="color: #1f883d; font-weight: 600;">connected</td>
+              <td style="color: #57606a;">{DateTime.to_iso8601(entry.connected_at)}</td>
+              <td style="font-family: monospace; font-size: 11px;">{client_label(entry)}</td>
+            </tr>
+          </tbody>
+        </table>
+        <p style="font-size: 11px; color: #888; margin-top: 8px;">
           v1_prototype — Phase 5 wholesale-replaces this with esr_plugin_cc_channel.
         </p>
       </section>
@@ -301,11 +305,11 @@ defmodule EsrWebLiveview.AdminLive do
     }
   end
 
-  defp status_style(:ready), do: "color: #1f883d; font-weight: 600;"
-  defp status_style(:starting), do: "color: #9a6700;"
-  defp status_style(:down), do: "color: #cf222e;"
-  defp status_style(:exited), do: "color: #cf222e;"
-  defp status_style(_), do: "color: #57606a;"
+  defp client_label(%{info: %{claude_info: %{"name" => name, "version" => v}}}),
+    do: "#{name} #{v}"
+
+  defp client_label(%{info: %{claude_info: %{"name" => name}}}), do: name
+  defp client_label(_), do: "—"
 
   defp authz_label([:esr, :invoke, :stop]), do: "stub_grant"
   defp authz_label([:esr, :invoke, :error]), do: "—"

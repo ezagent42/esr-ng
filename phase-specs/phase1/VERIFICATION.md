@@ -125,57 +125,52 @@ ORDER BY id DESC LIMIT 10;
 ### 1b-G1 · 结构 + 编译
 
 - [ ] `apps/esr_plugin_cc_bridge_v1_prototype/` 存在(目录名 + 内部模块名都带 `_v1_prototype` 后缀)
-- [ ] `apps/esr_plugin_cc_bridge_v1_prototype/python/esr_bridge.py`(~80 LOC)+ pyproject.toml
-- [ ] `apps/esr_plugin_cc_bridge_v1_prototype/lib/esr/bridge/v1_prototype/server.ex`(GenServer wrapping bridge stdio)
-- [ ] `EsrWebLiveview.AdminLive` 增量:CC bridge 状态显示 + manual dispatch target dropdown 多了 remote CC option
+- [ ] `apps/esr_plugin_cc_bridge_v1_prototype/python/esr_mcp_bridge_v1_prototype.py`(~80 LOC,标准 MCP stdio server with `esr_announce` tool)
+- [ ] `apps/esr_plugin_cc_bridge_v1_prototype/lib/esr/bridge/v1_prototype/mcp_config_writer.ex`(写 mcp.json)
+- [ ] `apps/esr_plugin_cc_bridge_v1_prototype/lib/esr/bridge/v1_prototype/server.ex`(rewrite,只跟踪 connected state)
+- [ ] `apps/esr_web/lib/esr_web/controllers/cc_bridge_announce_controller.ex` + router POST `/api/cc-bridge/announce`
+- [ ] `scripts/cc-bridge-attach.sh`(PTY 包装 + 写 mcp.json + exec claude)
+- [ ] `EsrWebLiveview.AdminLive` 增量:CC bridge 状态显示(connected list)
 - [ ] `mix compile --warnings-as-errors` clean
-- [ ] `mix test` 全绿(增 bridge GenServer 的 unit/integration test)
+- [ ] `mix test` 全绿
 
-### 1b-G2 · agent-browser F1 via remote CC(强制最终 gate)
+### 1b-G2 · agent-browser real CC verify(强制最终 gate)
 
-**前置:** 远程开发机起 `claude --channels plugin:esr-bridge`(Allen 操作或 ssh 触发);ESR `mix phx.server` 跑;tailnet `100.64.0.27` 可达。
+**Architecture pattern**: cc-openclaw MCP-stdio(就是这个 chat 用的 openclaw-channel 走的路径)。**不是**老 esr `--dangerously-load-development-channels` Phoenix Channel WebSocket。
 
-**Step 1 · CC bridge 已连入**
+**前置:** ESR `mix phx.server` 跑,绑 `100.64.0.27:4000`。`claude` binary 在 PATH(`which claude` 有输出)。
+
+**USER ACTIONS / AGENT ACTIONS**:
+- v1_prototype 阶段:**agent 自己跑 `bash scripts/cc-bridge-attach.sh`** 后台启动真 claude session
+- 真 claude 会 spawn esr_mcp_bridge_v1_prototype.py 作为 MCP server,并 init 时调 `esr_announce` tool
+- 该 tool 调用 `POST http://127.0.0.1:4000/api/cc-bridge/announce` 通知 esrd
+
+**Step 1 · 启动 attach 脚本 + 验证 claude 起来**
+```bash
+bash scripts/cc-bridge-attach.sh > /tmp/cc-bridge.log 2>&1 &
+# 等 ~5s 让 claude 初始化 + MCP server spawn + tool call
+sleep 8
+grep "esr_announce" /tmp/cc-bridge.log || curl -s http://127.0.0.1:4000/admin
+```
+- [ ] `/tmp/cc-bridge.log` 显示 claude 启动 + MCP init + esr_announce 调用,或 esrd 端有 announce POST 进来
+
+**Step 2 · agent-browser 看 LV /admin 显示 connected**
 ```bash
 agent-browser open http://100.64.0.27:4000/admin
 agent-browser snapshot -i
 ```
-- [ ] snapshot 里 "CC Bridges" 区域显示至少 1 个 connected bridge(URI 形如 `agent://cc-builder` 或 user-set)
-
-**Step 2 · 通过 LiveView 发指令到 CC**
-
-人 review 行动:在 manual dispatch form,**复制粘贴**:
-
-`target` 框粘贴:
-```
-agent://cc-builder/behavior/chat/receive
-```
-(target 也可能是别的 URI;实施时 brigde plugin 应该在 LV 提供 dropdown,人选,不手打)
-
-`args` 框粘贴:
-```json
-{"message": "什么是 ESR?简短回答"}
-```
-
-`mode` = `:cast`。点 Dispatch。
-
-```bash
-agent-browser snapshot -i
-# 等 5-30s(CC 思考)
-agent-browser snapshot -i
-```
-- [ ] audit log table 看到:dispatch invocation(出);几秒到几十秒后,CC reply invocation(入)— audit table 多 1 行,sender = `agent://cc-builder`
+- [ ] snapshot 里 "CC Bridges" 区域显示至少 1 个 connected bridge,带 `bridge_id`(真实的 claude session 标识,不是 stub "ready")
 
 **Step 3 · screenshot 人眼确认**
 ```bash
 agent-browser screenshot /tmp/phase1b-final.png
 ```
-- [ ] screenshot 显示:audit table 含 dispatch + reply 配对,reply body 可读(中文 / 英文 / 不一定 — 关键是「真的从 CC 回来了」)
+- [ ] screenshot 显示真的 connected bridge,**Status: connected** + bridge_id 文本
 
-### 1b-G3 · CC bridge process lifecycle
+### 1b-G3 · CC bridge lifecycle
 
-- [ ] 拔掉 CC bridge(远程 `claude` 进程 kill),agent-browser snapshot:LV 显示 bridge disconnected
-- [ ] 重连后:LV 显示 connected;再发一条 dispatch,reply 仍然到达
+- [ ] kill claude(`pkill -f 'claude.*mcp-config'`),agent-browser snapshot:LV 显示 bridge disconnected(或 last_seen 时间停在 kill 前)
+- [ ] 重新跑 attach 脚本:LV 重新显示 connected,bridge_id 可能换(新 session)
 
 ---
 

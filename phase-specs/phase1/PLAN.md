@@ -192,16 +192,21 @@ end
 
 ---
 
-## 1b 序列(线性)
+## 1b 序列(线性)— REV REAL CC (2026-05-15)
 
-1b 不需要切多个 step(scope 小,~80 LOC Python + 少 LOC Elixir),做一遍。
+> 历史:初版 spec 让我 spawn Python echo bridge + 标 `_v1_prototype`,事实上没接真 claude(memory `feedback_completion_requires_invariant_test`)。Allen 反问"怎么知道成功链接了呢?",roll back tag,重写为真 CC 集成。**架构 reference 是 cc-openclaw,不是老 esr 的 Phoenix Channel WS pattern**。
 
-1. **Python bridge**:`apps/esr_plugin_cc_bridge_v1_prototype/python/esr_bridge.py` + pyproject.toml + uv 配置;手动跑 `uv run python esr_bridge.py` 看 stdio JSON-RPC 协议握手 + ping/pong
-2. **Elixir bridge server**:`lib/esr/bridge/v1_prototype/server.ex` GenServer + erlexec.run/2 启 Python 子进程 + handle_info stdout 解码
-3. **LV `/admin` 增量**:bridge 状态显示 + manual dispatch dropdown 多 remote CC option
-4. **集成测**:用 mock CC(test helper 起个小 Python 假 bridge)
-5. **agent-browser e2e**:`VERIFICATION.md` 1b-G2 全套
-6. **commit + tag**:`git commit -m "phase1b: CC stdio bridge v1 prototype + agent-browser verify"` + `git tag phase1b`
+1. **Python MCP server**:`apps/esr_plugin_cc_bridge_v1_prototype/python/esr_mcp_bridge_v1_prototype.py`,~80 LOC,标准 MCP stdio JSON-RPC server,init 时主动 call esrd announce HTTP endpoint(不等 claude 调 tool — init 即注册),并暴露 `esr_announce` tool(给 claude 显式调用的入口)
+2. **Elixir McpConfigWriter**:`lib/esr/bridge/v1_prototype/mcp_config_writer.ex`,~20 LOC,write/0 + 默认 ESRD url
+3. **Elixir Server rewrite**:`lib/esr/bridge/v1_prototype/server.ex` 去掉 Port spawn,改为 connected-state tracker(GenServer state = Map<bridge_id, info>)
+4. **Web 侧 announce controller**:`apps/esr_web/lib/esr_web/controllers/cc_bridge_announce_controller.ex` + router POST `/api/cc-bridge/announce` → Server.register + PubSub broadcast
+5. **LV /admin 增量**:订阅 events 改 status 显示(connected list 替代 single "ready" status)
+6. **scripts/cc-bridge-attach.sh**:写 mcp.json + `exec script -q /dev/null claude --mcp-config <path>`
+7. **集成测**:Python MCP server unit test(stdio in/out) + announce controller unit test(post → server state) + 端到端 mock 测试
+8. **agent-browser e2e**:agent 跑 attach 脚本 → 等 claude init → 看 LV connected → screenshot → kill claude → 看 disconnected → re-attach → re-connected
+9. **commit + tag**:`git commit -m "phase1b: real CC bridge via cc-openclaw MCP-stdio pattern"` + `git tag phase1b`
+
+**user/agent action note**: v1_prototype 阶段 agent 自己跑 attach 脚本。无 user-only step。Phase 5 由 Esr.Behavior.OSProcess 接管。
 
 ---
 
