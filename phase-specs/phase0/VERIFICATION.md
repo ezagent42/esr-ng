@@ -8,24 +8,27 @@
 
 全绿才能 tag `phase0`:
 
+> **验收执行记录**:全部 checklist 项已执行,全绿(2026-05-15)。`phase0` tag = `5199f36`;
+> Allen 已 sign-off。下方 `[x]` 是 agent 可验证项的执行勾;「人 review 关键点」一节归 Allen。
+
 ### 结构
-- [ ] esr-ng 是 Mix umbrella;`apps/esr_core/` + `apps/esr_web/` 存在
-- [ ] `esr_core` app 的 `mix.exs` deps **不含 `:phoenix`(框架)** 也不含 `:phoenix_live_view` / `:bandit` / `:plug` 这些 web-transport 依赖。**允许**含 `:phoenix_pubsub` / `:telemetry*` / `:ecto_sql` / `:ecto_sqlite3` / `:jason` 等独立 OTP 生态库(它们不需要 Phoenix 框架)
-- [ ] phx.new 默认的 `esr_core_web` 已重命名为 `esr_web`(目录 + mix.exs app name + `EsrWeb` 模块前缀 + config 引用全部同步)
-- [ ] 奠基提交的 5 个文档在根:`ARCHITECTURE.md` / `GLOSSARY.md` / `IMPLEMENTATION_ROADMAP.md` / `CLAUDE.md` / `ARCHITECTURE_GRILL_v0.3.md`
-- [ ] `AGENTS.md` 存在(phx.new 生成,未被重写)
-- [ ] `phase-specs/phase0/` 4 文件在版本控制里
+- [x] esr-ng 是 Mix umbrella;`apps/esr_core/` + `apps/esr_web/` 存在
+- [x] `esr_core` app 的 `mix.exs` deps **不含 `:phoenix`(框架)** 也不含 `:phoenix_live_view` / `:bandit` / `:plug` 这些 web-transport 依赖。**允许**含 `:phoenix_pubsub` / `:telemetry*` / `:ecto_sql` / `:ecto_sqlite3` / `:jason` 等独立 OTP 生态库(它们不需要 Phoenix 框架)
+- [x] phx.new 默认的 `esr_core_web` 已重命名为 `esr_web`(目录 + mix.exs app name + `EsrWeb` 模块前缀 + config 引用全部同步)
+- [x] 奠基提交的 5 个文档在根:`ARCHITECTURE.md` / `GLOSSARY.md` / `IMPLEMENTATION_ROADMAP.md` / `CLAUDE.md` / `ARCHITECTURE_GRILL_v0.3.md`
+- [x] `AGENTS.md` 存在(phx.new 生成,未被重写)
+- [x] `phase-specs/phase0/` 4 文件在版本控制里
 
 ### 编译 + 测试
-- [ ] `mix deps.get` 成功
-- [ ] `mix compile` 无 error、无 warning
-- [ ] `mix test` 绿(只有 phoenix 自带 test)
-- [ ] `mix format --check-formatted` 通过
+- [x] `mix deps.get` 成功
+- [x] `mix compile` 无 error、无 warning
+- [x] `mix test` 绿(只有 phoenix 自带 test)
+- [x] `mix format --check-formatted` 通过
 
 ### 运行(从 tailnet IP 验,不是 localhost)
-- [ ] `mix phx.server` 起得来,dev endpoint 绑 `0.0.0.0:4000`(不是 `127.0.0.1`)
-- [ ] 从 tailnet `curl http://<tailnet-ip>:4000/_health` 返回 200 + `{"status":"ok"}`
-- [ ] `mix ecto.create && mix ecto.migrate` 跑通,SQLite 文件生成
+- [x] `mix phx.server` 起得来,dev endpoint 绑 `0.0.0.0:4000`(不是 `127.0.0.1`)
+- [x] 从 tailnet `curl http://<tailnet-ip>:4000/_health` 返回 200 + `{"status":"ok"}`
+- [x] `mix ecto.create && mix ecto.migrate` 跑通,SQLite 文件生成
 
 ### 🔴 agent-browser 真实浏览器 gate(强制 — curl 不够)
 
@@ -35,17 +38,17 @@
 > "curl 通了就算"。这是 roadmap-wide 验收 convention(见 `IMPLEMENTATION_ROADMAP.md`
 > §1.2 同构 track / e2e flow track 的执行机制)。
 
-- [ ] `agent-browser open http://<tailnet-ip>:4000/` —— 用真实 headless Chrome 打开,不是 curl
-- [ ] `agent-browser snapshot -i` —— 快照里有 `heading "ESR v0.4 — phase 0 complete"`
-- [ ] `agent-browser screenshot` —— 截图人眼确认页面真正渲染(不是静态死页 / 不是错误页)
-- [ ] LiveView WS 真连上:`home_live_test.exs` 用 `live/2` 通过(测试层证明)+ 截图页面是活的(浏览器层证明)
-- [ ] **明确**:`/` 是唯一的首页路由。`/<任何不存在的路径>`(含 `/dev/dashboard**` 这类带 `**` 的)返回 404 是**正确行为**,不是 bug —— 404 页会列出可用路由,那是 Phoenix dev 模式在帮忙
+- [x] `agent-browser open http://<tailnet-ip>:4000/` —— 用真实 headless Chrome 打开,不是 curl
+- [x] `agent-browser snapshot -i` —— 快照里有 `heading "ESR v0.4 — phase 0 complete"`
+- [x] `agent-browser screenshot` —— 截图人眼确认页面真正渲染(不是静态死页 / 不是错误页)
+- [x] LiveView WS 真连上:`home_live_test.exs` 用 `live/2` 通过(测试层证明)+ 截图页面是活的(浏览器层证明)
+- [x] **明确**:`/` 是唯一的首页路由。`/<任何不存在的路径>`(含 `/dev/dashboard**` 这类带 `**` 的)返回 404 是**正确行为**,不是 bug —— 404 页会列出可用路由,那是 Phoenix dev 模式在帮忙
 
 ### 工具链
-- [ ] `.claude/skills/` 有迁移过来的 5 个 skill(elixir-phoenix-helper / erlexec-elixir / commit-work / grill-me / grill-with-docs),spot-check 一个能正常 invoke
-- [ ] `.claude/settings.json` 是 esr-ng **全新写**的 —— 没有指向不存在的老 esr 脚本(grep 确认无 `pre-merge-dev-gate.sh` / `openclaw-channel-postcheck.sh` / `replay-guide-reminder.sh` 死引用)
-- [ ] `mix esr.check_invariants` 能跑,输出「Phase 0: no invariants apply yet」,exit 0
-- [ ] B git-hook:`scripts/hooks/sub-step-gate.sh` 存在 + 可执行;`.claude/settings.json` 的 PreToolUse hook 配好;手动触发能跑 `mix test` + `mix format --check-formatted`
+- [x] `.claude/skills/` 有迁移过来的 5 个 skill(elixir-phoenix-helper / erlexec-elixir / commit-work / grill-me / grill-with-docs),spot-check 一个能正常 invoke
+- [x] `.claude/settings.json` 是 esr-ng **全新写**的 —— 没有指向不存在的老 esr 脚本(grep 确认无 `pre-merge-dev-gate.sh` / `openclaw-channel-postcheck.sh` / `replay-guide-reminder.sh` 死引用)
+- [x] `mix esr.check_invariants` 能跑,输出「Phase 0: no invariants apply yet」,exit 0
+- [x] B git-hook:`scripts/hooks/sub-step-gate.sh` 存在 + 可执行;`.claude/settings.json` 的 PreToolUse hook 配好;手动触发能跑 `mix test` + `mix format --check-formatted`
 
 ### 不变式 grep checklist
 Phase 0 **无 dispatch 路径,8 条硬不变式都不适用**。本 phase 的 `check_invariants` 是骨架。
