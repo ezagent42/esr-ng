@@ -29,8 +29,20 @@ defmodule Esr.Bridge.V1Prototype.Server do
     GenServer.start_link(__MODULE__, [], name: __MODULE__)
   end
 
-  @doc "PubSub topic for LV subscribers."
+  @doc "PubSub topic for LV bridge-connected/disconnected events."
   def topic, do: @bridge_topic
+
+  @doc """
+  Per-bridge inbound topic. SSE endpoint subscribes, gets events
+  destined for claude over this bridge.
+  """
+  def to_claude_topic(bridge_id), do: "esr:bridge_v1:to_claude:#{bridge_id}"
+
+  @doc """
+  Per-bridge replies topic. LV subscribes to render claude's reply tool
+  calls in real time.
+  """
+  def replies_topic(bridge_id), do: "esr:bridge_v1:replies:#{bridge_id}"
 
   @doc """
   Record a connected bridge. Called by the announce HTTP controller.
@@ -53,6 +65,45 @@ defmodule Esr.Bridge.V1Prototype.Server do
   @spec list_connected() :: [{String.t(), map()}]
   def list_connected do
     GenServer.call(__MODULE__, :list_connected)
+  end
+
+  @doc """
+  Push a message to claude via the named bridge.
+
+  Broadcasts on the per-bridge inbound topic; the SSE endpoint
+  subscribed to that topic streams the event to the Python bridge,
+  which converts to an MCP `notifications/claude/channel` so claude
+  sees a `<channel>` tag.
+
+  `content` is the body string; `meta` is a string→string map that
+  becomes attributes on the `<channel>` tag.
+  """
+  @spec push_to_claude(String.t(), String.t(), map()) :: :ok
+  def push_to_claude(bridge_id, content, meta \\ %{})
+      when is_binary(bridge_id) and is_binary(content) and is_map(meta) do
+    Phoenix.PubSub.broadcast(
+      EsrCore.PubSub,
+      to_claude_topic(bridge_id),
+      {:to_claude, %{content: content, meta: meta}}
+    )
+
+    :ok
+  end
+
+  @doc """
+  Record a reply from claude (via the reply tool POST). Stores the
+  most recent N replies per bridge in the GenServer state and
+  broadcasts on the per-bridge replies topic.
+  """
+  @spec record_reply(String.t(), String.t()) :: :ok
+  def record_reply(bridge_id, text) when is_binary(bridge_id) and is_binary(text) do
+    GenServer.call(__MODULE__, {:record_reply, bridge_id, text})
+  end
+
+  @doc "List recent replies for a bridge (most recent first), max 20."
+  @spec recent_replies(String.t()) :: [%{at: DateTime.t(), text: String.t()}]
+  def recent_replies(bridge_id) when is_binary(bridge_id) do
+    GenServer.call(__MODULE__, {:recent_replies, bridge_id})
   end
 
   @doc "How many bridges are connected? Returns 0 if GenServer not started."
@@ -81,7 +132,7 @@ defmodule Esr.Bridge.V1Prototype.Server do
 
   @impl true
   def init(_) do
-    {:ok, %{bridges: %{}}}
+    {:ok, %{bridges: %{}, replies: %{}}}
   end
 
   @impl true
@@ -117,5 +168,25 @@ defmodule Esr.Bridge.V1Prototype.Server do
 
   def handle_call(:count, _from, state) do
     {:reply, map_size(state.bridges), state}
+  end
+
+  def handle_call({:record_reply, bridge_id, text}, _from, state) do
+    entry = %{at: DateTime.utc_now(), text: text}
+    prior = Map.get(state.replies, bridge_id, [])
+    # Most recent first, cap at 20.
+    new_list = [entry | prior] |> Enum.take(20)
+    new_replies = Map.put(state.replies, bridge_id, new_list)
+
+    Phoenix.PubSub.broadcast(
+      EsrCore.PubSub,
+      replies_topic(bridge_id),
+      {:claude_reply, bridge_id, entry}
+    )
+
+    {:reply, :ok, %{state | replies: new_replies}}
+  end
+
+  def handle_call({:recent_replies, bridge_id}, _from, state) do
+    {:reply, Map.get(state.replies, bridge_id, []), state}
   end
 end

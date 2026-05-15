@@ -14,6 +14,11 @@ defmodule EsrWeb.Router do
     plug :accepts, ["json"]
   end
 
+  # SSE pipeline — accepts text/event-stream for streaming endpoints.
+  pipeline :sse do
+    plug :accepts, ["event-stream"]
+  end
+
   scope "/", EsrWeb do
     pipe_through :browser
 
@@ -41,6 +46,14 @@ defmodule EsrWeb.Router do
 
     post "/cc-bridge/announce", CcBridgeAnnounceController, :announce
     delete "/cc-bridge/announce/:bridge_id", CcBridgeAnnounceController, :disconnect
+    post "/cc-bridge/reply", CcBridgeAnnounceController, :reply
+  end
+
+  # SSE route — separate scope because its accepts header differs.
+  scope "/api", EsrWeb do
+    pipe_through :sse
+
+    get "/cc-bridge/events", CcBridgeAnnounceController, :events_sse
   end
 
   # Other scopes may use custom stacks.

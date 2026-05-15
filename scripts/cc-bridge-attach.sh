@@ -17,8 +17,18 @@
 # trick for that.
 set -euo pipefail
 
-REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 cd "$REPO_ROOT"
+
+# Source user-local overrides (proxy, API keys, etc.) — mirrors
+# cc-openclaw.sh's pattern. The .local.sh is gitignored so each
+# operator keeps their own proxy + creds. See
+# scripts/cc-bridge-attach.local.sh.example for the template.
+if [ -f "$SCRIPT_DIR/cc-bridge-attach.local.sh" ]; then
+  # shellcheck disable=SC1091
+  source "$SCRIPT_DIR/cc-bridge-attach.local.sh"
+fi
 
 if ! command -v claude >/dev/null 2>&1; then
   echo "❌ claude binary not on PATH. Install Claude Code first." >&2
@@ -44,12 +54,16 @@ if [ "${1:-}" = "--headless" ]; then
   # initialize, the announce HTTP POST hits esrd, then we tear down.
   exec script -q /dev/null claude \
     --permission-mode bypassPermissions \
+    --dangerously-load-development-channels server:esr-bridge \
     --mcp-config "$MCP_PATH" \
     --print "ping" \
     --output-format json
 else
-  # Interactive: opens a real claude session in this terminal.
+  # Interactive: opens a real claude session in this terminal with the
+  # esr-bridge channel loaded so messages from LV /admin become user
+  # input via <channel> tags.
   exec script -q /dev/null claude \
     --permission-mode bypassPermissions \
+    --dangerously-load-development-channels server:esr-bridge \
     --mcp-config "$MCP_PATH"
 fi

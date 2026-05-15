@@ -30,3 +30,6 @@ erl_crash.dump
 # Claude Code worktrees
 /.claude/worktrees/
 
+
+# Local overrides for cc-bridge-attach.sh — proxy + creds, per operator.
+scripts/cc-bridge-attach.local.sh

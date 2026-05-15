@@ -44,8 +44,13 @@ defmodule EsrWebLiveview.AdminLive do
       |> assign(:caller_uri_str, URI.to_string(Esr.Entity.User.admin_uri()))
       |> assign(:flash_error, nil)
       |> assign(:connected_bridges, list_bridges_safely())
+      |> assign(:bridge_messages, [])
       |> assign(:form,
         to_form(%{"target" => "", "args" => "", "mode" => "call"}, as: "manual_dispatch")
+      )
+      |> assign(
+        :channel_form,
+        to_form(%{"bridge_id" => "", "text" => ""}, as: "channel_push")
       )
 
     {:ok, socket}
@@ -102,12 +107,30 @@ defmodule EsrWebLiveview.AdminLive do
     {:noreply, stream_insert(socket, :invocations, row, at: 0)}
   end
 
-  def handle_info({:cc_connected, _bridge_id, _entry}, socket) do
+  def handle_info({:cc_connected, bridge_id, _entry}, socket) do
+    if connected?(socket) do
+      Phoenix.PubSub.subscribe(
+        EsrCore.PubSub,
+        Esr.Bridge.V1Prototype.Server.replies_topic(bridge_id)
+      )
+    end
+
     {:noreply, assign(socket, :connected_bridges, list_bridges_safely())}
   end
 
   def handle_info({:cc_disconnected, _bridge_id}, socket) do
     {:noreply, assign(socket, :connected_bridges, list_bridges_safely())}
+  end
+
+  def handle_info({:claude_reply, bridge_id, entry}, socket) do
+    msg = %{
+      direction: :from_claude,
+      bridge_id: bridge_id,
+      text: entry.text,
+      at: entry.at
+    }
+
+    {:noreply, assign(socket, :bridge_messages, [msg | socket.assigns.bridge_messages] |> Enum.take(40))}
   end
 
   # --- User actions -----------------------------------------------------
@@ -128,6 +151,39 @@ defmodule EsrWebLiveview.AdminLive do
       {:error, reason} ->
         {:noreply, assign(socket, :flash_error, "Echo failed: #{inspect(reason)}")}
     end
+  end
+
+  def handle_event(
+        "channel_push",
+        %{"channel_push" => %{"bridge_id" => bridge_id, "text" => text}},
+        socket
+      )
+      when is_binary(text) and text != "" do
+    if bridge_id == "" do
+      {:noreply, assign(socket, :flash_error, "Select a bridge first.")}
+    else
+      :ok =
+        Esr.Bridge.V1Prototype.Server.push_to_claude(bridge_id, text, %{
+          "chat_id" => bridge_id,
+          "sender" => "admin-lv"
+        })
+
+      msg = %{
+        direction: :to_claude,
+        bridge_id: bridge_id,
+        text: text,
+        at: DateTime.utc_now()
+      }
+
+      {:noreply,
+       socket
+       |> assign(:flash_error, nil)
+       |> assign(:bridge_messages, [msg | socket.assigns.bridge_messages] |> Enum.take(40))}
+    end
+  end
+
+  def handle_event("channel_push", _params, socket) do
+    {:noreply, assign(socket, :flash_error, "Message text is required.")}
   end
 
   def handle_event(
@@ -254,6 +310,48 @@ defmodule EsrWebLiveview.AdminLive do
         </p>
       </section>
 
+      <section id="channel-chat" :if={@connected_bridges != []} style="margin-top: 24px;">
+        <h2 style="font-size: 16px; font-weight: 500; margin: 0 0 8px 0;">Send to Claude (via channel)</h2>
+        <.form for={@channel_form} phx-submit="channel_push" style="display: flex; gap: 8px; align-items: end;">
+          <div style="flex: 0 0 220px;">
+            <label style="display: block; font-size: 13px; font-weight: 500;" for="channel_push_bridge_id">bridge</label>
+            <select
+              name="channel_push[bridge_id]"
+              id="channel_push_bridge_id"
+              style="width: 100%; padding: 6px 10px; border: 1px solid #d1d5da; border-radius: 4px;"
+            >
+              <option value="">— select —</option>
+              <option :for={{bid, _} <- @connected_bridges} value={bid}>{bid}</option>
+            </select>
+          </div>
+          <div style="flex: 1 1 auto;">
+            <label style="display: block; font-size: 13px; font-weight: 500;" for="channel_push_text">message</label>
+            <input
+              type="text"
+              name="channel_push[text]"
+              id="channel_push_text"
+              placeholder="你好,告诉我你能听到吗?"
+              style="width: 100%; padding: 6px 10px; border: 1px solid #d1d5da; border-radius: 4px;"
+            />
+          </div>
+          <button
+            type="submit"
+            style="padding: 8px 16px; background: #1f883d; color: white; border: none; border-radius: 4px; cursor: pointer;"
+          >
+            Send
+          </button>
+        </.form>
+
+        <div id="bridge-messages" :if={@bridge_messages != []} style="margin-top: 12px; max-height: 280px; overflow-y: auto; border: 1px solid #d1d5da; border-radius: 4px; padding: 8px;">
+          <div :for={msg <- @bridge_messages} style={message_style(msg.direction)}>
+            <span style="font-family: monospace; font-size: 11px; color: #666;">
+              {message_arrow(msg.direction)} {msg.bridge_id} · {DateTime.to_iso8601(msg.at)}
+            </span>
+            <div style="margin-top: 2px; white-space: pre-wrap;">{msg.text}</div>
+          </div>
+        </div>
+      </section>
+
       <section id="audit-stream" style="margin-top: 24px;">
         <h2 style="font-size: 16px; font-weight: 500; margin: 0 0 8px 0;">Audit Log (last 50)</h2>
         <table style="width: 100%; font-size: 13px; border-collapse: collapse;">
@@ -304,6 +402,15 @@ defmodule EsrWebLiveview.AdminLive do
       at: DateTime.to_iso8601(at)
     }
   end
+
+  defp message_style(:to_claude),
+    do: "padding: 6px 8px; border-left: 3px solid #0969da; margin-bottom: 6px; background: #f6f8fa;"
+
+  defp message_style(:from_claude),
+    do: "padding: 6px 8px; border-left: 3px solid #1f883d; margin-bottom: 6px; background: #f0fdf4;"
+
+  defp message_arrow(:to_claude), do: "→ to claude"
+  defp message_arrow(:from_claude), do: "← from claude"
 
   defp client_label(%{info: %{claude_info: %{"name" => name, "version" => v}}}),
     do: "#{name} #{v}"
