@@ -27,3 +27,6 @@ erl_crash.dump
 *.db
 *.db-*
 
+# Claude Code worktrees
+/.claude/worktrees/
+
