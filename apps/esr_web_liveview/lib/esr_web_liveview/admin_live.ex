@@ -25,26 +25,50 @@ defmodule EsrWebLiveview.AdminLive do
 
   @impl true
   def mount(_params, _session, socket) do
+    connected_bridges = list_bridges_safely()
+
     if connected?(socket) do
       Phoenix.PubSub.subscribe(EsrCore.PubSub, Esr.Audit.stream_topic())
-      # 1b: also subscribe to the v1_prototype bridge events topic so
-      # we can show bridge status / hello / replies live.
       Phoenix.PubSub.subscribe(EsrCore.PubSub, bridge_topic_safely())
+
+      # If bridges are already connected when this LV mounts (e.g. you
+      # started attach before opening the page), subscribe to each
+      # bridge's replies topic — the cc_connected event already fired,
+      # so we won't get a second chance.
+      Enum.each(connected_bridges, fn {bid, _entry} ->
+        Phoenix.PubSub.subscribe(
+          EsrCore.PubSub,
+          Esr.Bridge.V1Prototype.Server.replies_topic(bid)
+        )
+      end)
     end
 
-    # Load the last 50 invocations from SQLite so audit history is
-    # visible across BEAM restarts. This is the F8-subset preview
-    # called out in VERIFICATION 1a-G4 step 4 — Phase 1 only restores
-    # audit history, not Kind state (which Phase 3 handles).
     historical = load_recent_invocations(50)
+
+    # Pull recent replies from each connected bridge so the panel isn't
+    # empty after a page refresh on an established session.
+    historical_replies =
+      connected_bridges
+      |> Enum.flat_map(fn {bid, _} ->
+        for entry <- list_replies_safely(bid) do
+          %{
+            direction: :from_claude,
+            bridge_id: bid,
+            text: entry.text,
+            at: entry.at
+          }
+        end
+      end)
+      |> Enum.sort_by(& &1.at, {:desc, DateTime})
+      |> Enum.take(40)
 
     socket =
       socket
       |> stream(:invocations, historical, limit: 50)
       |> assign(:caller_uri_str, URI.to_string(Esr.Entity.User.admin_uri()))
       |> assign(:flash_error, nil)
-      |> assign(:connected_bridges, list_bridges_safely())
-      |> assign(:bridge_messages, [])
+      |> assign(:connected_bridges, connected_bridges)
+      |> assign(:bridge_messages, historical_replies)
       |> assign(:form,
         to_form(%{"target" => "", "args" => "", "mode" => "call"}, as: "manual_dispatch")
       )
@@ -54,6 +78,14 @@ defmodule EsrWebLiveview.AdminLive do
       )
 
     {:ok, socket}
+  end
+
+  defp list_replies_safely(bridge_id) do
+    if Code.ensure_loaded?(Esr.Bridge.V1Prototype.Server) do
+      Esr.Bridge.V1Prototype.Server.recent_replies(bridge_id)
+    else
+      []
+    end
   end
 
   defp bridge_topic_safely do
