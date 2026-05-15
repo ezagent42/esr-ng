@@ -1,5 +1,5 @@
 defmodule Mix.Tasks.Esr.CheckInvariants do
-  @shortdoc "Check ESR's 8 hard invariants — Phase 1 step-1 active"
+  @shortdoc "Check ESR's 8 hard invariants — Phase 1 step-2 active"
 
   @moduledoc """
   Greps the codebase for violations of ESR's 8 hard invariants
@@ -12,11 +12,11 @@ defmodule Mix.Tasks.Esr.CheckInvariants do
   meaningfully checkable once the relevant code lands:
 
   - **Phase 0**: no-op (no dispatch path)
-  - **Step 1** (this commit): invariant **#4 put_new for unique-key** —
-    `Esr.KindRegistry` exists, so we can grep for bare
-    `Registry.register` outside the `put_new` wrapper
-  - Step 2 will add **#2** (use Esr.Kind lifecycle, only `kind/server.ex`
-    has `def init`) and **#3** (`:not_ready + :call` fail-fast)
+  - Step 1: invariant **#4 put_new for unique-key**
+  - **Step 2** (this commit): adds **#2** (use Esr.Kind lifecycle —
+    only `kind/server.ex` has `def init/1` since plugin Kinds use
+    `@behaviour Esr.Kind`, not a macro) and **#3** (`:not_ready + :call`
+    fail-fast clause exists in `Esr.Invocation.dispatch/1`)
   - Step 3 will add **#1** (inbound via dispatch — `PubSub.broadcast`
     allowlist), **#6** (audit async), and **#7** (zero-match → DLQ)
   - Phase 2+ will add **#5** (snapshot on slice change) and **#8**
@@ -35,10 +35,12 @@ defmodule Mix.Tasks.Esr.CheckInvariants do
 
   @impl Mix.Task
   def run(_args) do
-    Mix.shell().info("esr.check_invariants — Phase 1 step 1 active")
+    Mix.shell().info("esr.check_invariants — Phase 1 step 2 active")
 
     failures =
       [
+        check_invariant_2(),
+        check_invariant_3(),
         check_invariant_4()
       ]
       |> Enum.reject(&match?(:ok, &1))
@@ -53,6 +55,58 @@ defmodule Mix.Tasks.Esr.CheckInvariants do
       end)
 
       Mix.raise("esr.check_invariants: #{length(failures)} invariant(s) violated")
+    end
+  end
+
+  # Invariant #2: use Esr.Kind lifecycle
+  # Per Decision #84: only `Esr.Kind.Server` should define `def init/1`.
+  # Plugin Kind modules (Echo, User, etc.) declare `@behaviour Esr.Kind`
+  # and rely on the shared server — they must not write their own init.
+  defp check_invariant_2 do
+    {output, _exit_code} =
+      System.cmd(
+        "bash",
+        [
+          "-c",
+          "grep -rnE '^\\s*def init\\(' apps/esr_core --include='*.ex' " <>
+            "| grep -v 'kind/server.ex' " <>
+            "| grep -v 'ets_owner.ex' " <>
+            "| grep -v 'idempotency/sweeper.ex' " <>
+            "| grep -v 'esr_core/application.ex' " <>
+            "| grep -v '_test.exs' || true"
+        ],
+        stderr_to_stdout: true
+      )
+
+    if String.trim(output) == "" do
+      Mix.shell().info("  ✓ #2 use Esr.Kind lifecycle (only Kind.Server has def init)")
+      :ok
+    else
+      {:error, 2, output}
+    end
+  end
+
+  # Invariant #3: :call to not-ready fail-fast
+  # `Esr.Invocation.dispatch/1` must have a clause matching
+  # `{:not_ready, mode}` when mode is `:call` or `:call_stream`, so that
+  # synchronous callers don't block until deadline_ms.
+  defp check_invariant_3 do
+    {output, _exit_code} =
+      System.cmd(
+        "bash",
+        [
+          "-c",
+          "grep -E ':not_ready, m\\} when m in \\[:call' " <>
+            "apps/esr_core/lib/esr/invocation.ex || true"
+        ],
+        stderr_to_stdout: true
+      )
+
+    if String.trim(output) == "" do
+      {:error, 3, "missing fail-fast clause in invocation.ex for {:not_ready, :call}"}
+    else
+      Mix.shell().info("  ✓ #3 :call to not-ready fail-fast (clause present)")
+      :ok
     end
   end
 

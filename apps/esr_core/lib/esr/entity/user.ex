@@ -57,17 +57,14 @@ defmodule Esr.Entity.User do
   end
 
   # --- Esr.Kind callbacks (Phase 1 stub) -----------------------------
-  #
-  # Declared via @behaviour Esr.Kind in step 2 once the contract module
-  # exists. For step 1, the functions are public so plugins and tests
-  # can call them; the @behaviour line is appended in step 2.
+  @behaviour Esr.Kind
 
-  @doc "Kind type atom — `:user`."
+  @impl Esr.Kind
   def type_name, do: :user
 
-  @doc "Phase 1: empty Behaviors list (Identity arrives in Phase 3d)."
+  @impl Esr.Kind
   def behaviors, do: []
 
-  @doc "Persistence policy — snapshot on slice change."
+  @impl Esr.Kind
   def persistence, do: {:snapshot, :on_change}
 end
