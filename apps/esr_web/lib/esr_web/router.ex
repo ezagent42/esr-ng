@@ -45,6 +45,9 @@ defmodule EsrWeb.Router do
 
     # Phase 4-completion PR 7: global RoutingRegistry rule editor.
     live "/admin/routing", RoutingLive
+
+    # Phase 5 PR 2: Users LV.
+    live "/admin/users", UsersLive
   end
 
   # Liveness probe — plain JSON, no ESR dispatch path involved.
