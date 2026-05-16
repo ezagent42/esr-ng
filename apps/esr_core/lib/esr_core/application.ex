@@ -54,6 +54,11 @@ defmodule EsrCore.Application do
     # K-path wiring happens here rather than in a plugin Application.
     :ok = register_workspace_behavior()
 
+    # Phase 5 PR 4: register RoutingAdmin Behavior + spawn singleton
+    # `routing-admin://default` so /admin/routing dispatches go through
+    # CapBAC check at step 5.5.
+    :ok = register_routing_admin()
+
     result
   end
 
@@ -67,6 +72,35 @@ defmodule EsrCore.Application do
     end)
 
     :ok
+  end
+
+  defp register_routing_admin do
+    alias Esr.BehaviorRegistry
+    alias Esr.Behavior.RoutingAdmin, as: RAB
+    alias Esr.Entity.RoutingAdmin, as: RAK
+
+    Enum.each(RAB.actions(), fn action ->
+      :ok = BehaviorRegistry.register(RAK, action, RAB)
+    end)
+
+    # Spawn the singleton instance. Use Workspace.Supervisor since it's
+    # the existing DynamicSupervisor that hosts foundational Kinds.
+    uri = RAK.default_uri()
+
+    case Esr.KindRegistry.lookup(uri) do
+      {:ok, _pid} ->
+        :ok
+
+      :error ->
+        case DynamicSupervisor.start_child(
+               Esr.Workspace.Supervisor,
+               {Esr.Kind.Server, {RAK, %{uri: uri}}}
+             ) do
+          {:ok, _pid} -> :ok
+          {:error, {:already_started, _pid}} -> :ok
+          err -> err
+        end
+    end
   end
 
   defp skip_migrations?() do
