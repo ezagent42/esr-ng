@@ -56,6 +56,7 @@ defmodule Esr.RoutingRegistryTest do
 
       # Use spawn + receive to avoid the linked-Task killing this process
       parent = self()
+
       spawn(fn ->
         result =
           try do

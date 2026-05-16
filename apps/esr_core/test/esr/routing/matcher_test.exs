@@ -1,0 +1,113 @@
+defmodule Esr.Routing.MatcherTest do
+  use ExUnit.Case, async: true
+  alias Esr.Routing.Matcher
+  alias Esr.Message
+
+  defp msg(opts \\ []) do
+    sender = Keyword.get(opts, :sender, URI.new!("user://admin"))
+    mentions = Keyword.get(opts, :mentions, [])
+    text = Keyword.get(opts, :text, "hello world")
+    Message.new(sender, %{text: text, attachments: []}, mentions: mentions)
+  end
+
+  describe "mention/1" do
+    test "matches when URI present in mentions" do
+      target = URI.new!("agent://cc-builder")
+      m = msg(mentions: [target])
+
+      assert Matcher.match?(Matcher.mention(target), m)
+      assert Matcher.match?(Matcher.mention("agent://cc-builder"), m)
+    end
+
+    test "no match when mentions empty" do
+      refute Matcher.match?(Matcher.mention("agent://cc-builder"), msg())
+    end
+
+    test "no match for different URI" do
+      m = msg(mentions: [URI.new!("agent://other")])
+      refute Matcher.match?(Matcher.mention("agent://cc-builder"), m)
+    end
+  end
+
+  describe "from/1" do
+    test "matches when sender == uri" do
+      m = msg(sender: URI.new!("agent://cc-builder"))
+      assert Matcher.match?(Matcher.from("agent://cc-builder"), m)
+    end
+
+    test "no match for different sender" do
+      refute Matcher.match?(Matcher.from("agent://cc-builder"), msg())
+    end
+  end
+
+  describe "text_contains/1" do
+    test "matches substring case-sensitive" do
+      m = msg(text: "system is URGENT down")
+      assert Matcher.match?(Matcher.text_contains("URGENT"), m)
+      refute Matcher.match?(Matcher.text_contains("urgent"), m)
+    end
+
+    test "handles body with string keys (loaded from store)" do
+      # Simulate body returned from Ecto :map column (string keys)
+      m = %Message{
+        sender: URI.new!("user://admin"),
+        body: %{"text" => "abc"},
+        mentions: [],
+        inserted_at: DateTime.utc_now(),
+        uri: "message://x"
+      }
+
+      assert Matcher.match?(Matcher.text_contains("abc"), m)
+    end
+  end
+
+  describe "text_matches/1" do
+    test "matches Elixir regex" do
+      m = msg(text: "deploy to prod")
+      assert Matcher.match?(Matcher.text_matches("^deploy"), m)
+      refute Matcher.match?(Matcher.text_matches("staging$"), m)
+    end
+
+    test "construction fails fast on bad regex" do
+      assert_raise MatchError, fn ->
+        Matcher.text_matches("[unclosed")
+      end
+    end
+  end
+
+  describe "always/0" do
+    test "always matches" do
+      assert Matcher.match?(Matcher.always(), msg())
+    end
+  end
+
+  describe "to_json/1 + from_json/1 round-trip" do
+    test "all 5 matchers round-trip cleanly" do
+      cases = [
+        Matcher.mention("user://admin"),
+        Matcher.from("agent://cc-builder"),
+        Matcher.text_contains("hi"),
+        Matcher.text_matches("^cmd"),
+        Matcher.always()
+      ]
+
+      for m <- cases do
+        json = Matcher.to_json(m)
+        encoded = Jason.encode!(json)
+        decoded = Jason.decode!(encoded)
+        assert {:ok, ^m} = Matcher.from_json(decoded)
+      end
+    end
+
+    test "from_json rejects bad regex with friendly error" do
+      bad = %{"type" => "text_matches", "arg" => "[unclosed"}
+      assert {:error, {:invalid_regex, _}} = Matcher.from_json(bad)
+    end
+
+    test "from_json rejects unknown matcher type" do
+      assert {:error, {:invalid_matcher_json, _}} =
+               Matcher.from_json(%{"type" => "exotic", "arg" => "x"})
+    end
+  end
+
+end
