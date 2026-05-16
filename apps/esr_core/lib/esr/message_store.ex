@@ -134,6 +134,32 @@ defmodule Esr.MessageStore do
   end
 
   @doc """
+  Messages in `session_uri` strictly older than `cursor` (inserted_at).
+
+  Descending order (newest of the older-than-cursor batch first), bounded
+  by `limit`. Phase 5 PR 5: backs the LV "↑ Load older" button — caller
+  passes the current oldest-visible inserted_at as cursor and `Enum.reverse`s
+  the result to prepend ascending into the stream.
+
+  Per Spec 5 P5-D8: cursor is `inserted_at` (not `id`); `id` isn't
+  guaranteed monotonic across nodes.
+  """
+  @spec older_than(URI.t(), DateTime.t(), pos_integer()) :: [Message.t()]
+  def older_than(%URI{} = session_uri, %DateTime{} = cursor, limit)
+      when is_integer(limit) and limit > 0 do
+    session_str = URI.to_string(session_uri)
+
+    from(m in Message,
+      join: r in MessageRouting,
+      on: r.message_uri == m.uri,
+      where: r.session_uri == ^session_str and r.inserted_at < ^cursor,
+      order_by: [desc: r.inserted_at],
+      limit: ^limit
+    )
+    |> Repo.all()
+  end
+
+  @doc """
   Single Message lookup by URI. Returns `{:ok, message}` or `:error`.
 
   Used for `ref` chain following — if `msg.ref == "message://X"` and
