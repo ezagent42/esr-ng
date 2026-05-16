@@ -33,7 +33,8 @@ defmodule EsrCore.EtsOwner do
     {Esr.ReadyGate, :set},
     {Esr.PendingDelivery, :set},
     {Esr.Idempotency, :set},
-    {Esr.BehaviorRegistry, :set}
+    {Esr.BehaviorRegistry, :set},
+    {Esr.RoutingRegistry, :set}
   ]
 
   def start_link(_opts) do
