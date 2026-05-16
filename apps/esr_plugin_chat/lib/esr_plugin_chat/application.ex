@@ -77,11 +77,57 @@ defmodule EsrPluginChat.Application do
       {:ok, sup_pid} ->
         :ok = admin_user_joins_default_session()
         :ok = EsrPluginChat.DefaultRules.bootstrap()
+
+        # Phase 4c: chat plugin owns agent://, session://, user:// schemes.
+        # Register spawn fns so Workspace.Loader can re-spawn members
+        # declared in persisted Workspaces without esr_core knowing about
+        # this plugin's supervisors. Plugin-isolation north star.
+        :ok = register_spawn_fns()
+
+        # Phase 4c: load persisted Workspaces. Runs HERE (in chat plugin's
+        # start callback, after spawn fn registration) rather than in
+        # EsrCore.Application so the Loader can resolve plugin-owned
+        # schemes. Phase 5 may move this to an explicit "all plugins
+        # ready" gate.
+        _ = Esr.Workspace.Loader.load_all()
+
         {:ok, sup_pid}
 
       other ->
         other
     end
+  end
+
+  defp register_spawn_fns do
+    :ok =
+      Esr.SpawnRegistry.register("agent", fn uri ->
+        DynamicSupervisor.start_child(
+          EsrPluginChat.AgentSupervisor,
+          {Esr.Kind.Server, {Agent, %{uri: uri, initial_caps: MapSet.new()}}}
+        )
+      end)
+
+    :ok =
+      Esr.SpawnRegistry.register("session", fn uri ->
+        DynamicSupervisor.start_child(
+          EsrPluginChat.SessionSupervisor,
+          {Esr.Kind.Server, {Session, %{uri: uri}}}
+        )
+      end)
+
+    :ok =
+      Esr.SpawnRegistry.register("user", fn uri ->
+        # Most users are spawned by their own bootstrap path (admin via
+        # chat plugin children list). This handler lets a Workspace
+        # declare a non-admin user that hasn't been spawned yet. Future
+        # multi-user phase will pass per-user initial_caps.
+        DynamicSupervisor.start_child(
+          EsrPluginChat.SessionSupervisor,
+          {Esr.Kind.Server, {User, %{uri: uri, initial_caps: MapSet.new()}}}
+        )
+      end)
+
+    :ok
   end
 
   defp register_chat_behaviors do
