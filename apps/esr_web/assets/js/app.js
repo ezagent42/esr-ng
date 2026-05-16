@@ -25,22 +25,52 @@ import {LiveSocket} from "phoenix_live_view"
 import {hooks as colocatedHooks} from "phoenix-colocated/esr_web"
 import topbar from "../vendor/topbar"
 
-// Phase 4-completion PR 9 §UI: auto-scroll messages stream on new
-// inserts. Without this, new chat messages arrive at the bottom of
-// the (scrolled) div but the operator never sees them. Hook is opt-in
-// per element via `phx-hook="ScrollOnUpdate"`.
+// Auto-scroll messages stream on new inserts AND preserve visual
+// position on history prepend.
+//
+// Two cases this hook handles:
+//   1. New chat message arrives (append at bottom) — scroll to bottom
+//      iff the operator was already near it (don't yank from history).
+//   2. Operator clicks "↑ Load older" (PR-5 prepend at top) — keep the
+//      previously-topmost visible message at the same visual position
+//      so the operator's eye doesn't jump. Without this, they'd either
+//      stay glued to the bottom (case 1's rule) and never see the new
+//      older messages, or jump to msg-1 and lose their place.
+//
+// Detection: beforeUpdate captures scrollHeight; updated compares.
+// If height grew more than the bottom-room allowed, that growth came
+// from a prepend — adjust scrollTop by the delta to compensate.
 const ScrollOnUpdate = {
-  scrollIfNearBottom() {
-    const el = this.el
-    // Only auto-scroll if the user is already near the bottom — don't
-    // yank them away if they're reading history.
-    const fromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
-    if (fromBottom < 120) {
-      el.scrollTop = el.scrollHeight
-    }
+  _firstChildId() { return this.el.firstElementChild ? this.el.firstElementChild.id : null },
+  mounted() {
+    this.el.scrollTop = this.el.scrollHeight
+    this._prevHeight = this.el.scrollHeight
+    this._prevFirstId = this._firstChildId()
   },
-  mounted() { this.el.scrollTop = this.el.scrollHeight },
-  updated() { this.scrollIfNearBottom() }
+  beforeUpdate() {
+    this._prevHeight = this.el.scrollHeight
+    this._prevScrollTop = this.el.scrollTop
+    this._prevFirstId = this._firstChildId()
+  },
+  updated() {
+    const el = this.el
+    const grew = el.scrollHeight - (this._prevHeight || 0)
+    const firstChanged = this._firstChildId() !== this._prevFirstId
+
+    if (grew > 0 && firstChanged) {
+      // Prepend (e.g. "↑ Load older"). Scroll up to reveal the newly
+      // added older messages while keeping previously-visible content
+      // still on screen as the user's anchor.
+      el.scrollTop = grew
+    } else {
+      // Append (new chat message). Follow it down iff already near bottom.
+      const wasNearBottom =
+        (this._prevHeight || 0) - (this._prevScrollTop || 0) - el.clientHeight < 120
+      if (wasNearBottom) el.scrollTop = el.scrollHeight
+    }
+    this._prevHeight = el.scrollHeight
+    this._prevFirstId = this._firstChildId()
+  }
 }
 
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
