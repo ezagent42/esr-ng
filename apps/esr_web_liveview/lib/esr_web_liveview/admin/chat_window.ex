@@ -24,6 +24,7 @@ defmodule EsrWebLiveview.Admin.ChatWindow do
       <div
         id="messages"
         phx-update="stream"
+        phx-hook="ScrollOnUpdate"
         style="height: 360px; overflow-y: auto; border: 1px solid #d1d5da; border-radius: 4px; padding: 12px; background: #fafbfc;"
       >
         <div :for={{dom_id, row} <- @messages_stream} id={dom_id} style={message_row_style(row.sender_kind)}>

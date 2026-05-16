@@ -82,7 +82,14 @@ defmodule EsrWebLiveview.RoutingLive do
           _ -> :invalid
         end
 
-      %{id: row.id, matcher: matcher, matcher_data: row.matcher_data, receivers: row.receivers}
+      %{
+        id: row.id,
+        matcher: matcher,
+        matcher_data: row.matcher_data,
+        receivers: row.receivers,
+        source: row.source,
+        enabled: row.enabled
+      }
     end)
   end
 
@@ -140,10 +147,19 @@ defmodule EsrWebLiveview.RoutingLive do
     end
   end
 
-  def handle_event("delete_rule", %{"id" => id_str}, socket) do
+  def handle_event("delete_rule", %{"id" => id_str}, socket),
+    do: rule_action(id_str, &RuleStore.delete/1, socket)
+
+  def handle_event("disable_rule", %{"id" => id_str}, socket),
+    do: rule_action(id_str, &RuleStore.disable/1, socket)
+
+  def handle_event("enable_rule", %{"id" => id_str}, socket),
+    do: rule_action(id_str, &RuleStore.enable/1, socket)
+
+  defp rule_action(id_str, fun, socket) do
     case Integer.parse(id_str) do
       {id, ""} ->
-        case RuleStore.delete(id) do
+        case fun.(id) do
           :ok ->
             :ok = RuleStore.load_into_registry(socket.assigns.current_table)
 
@@ -153,7 +169,7 @@ defmodule EsrWebLiveview.RoutingLive do
              |> assign(:flash_error, nil)}
 
           {:error, reason} ->
-            {:noreply, assign(socket, :flash_error, "delete failed: #{inspect(reason)}")}
+            {:noreply, assign(socket, :flash_error, "failed: #{inspect(reason)}")}
         end
 
       _ ->
@@ -242,18 +258,26 @@ defmodule EsrWebLiveview.RoutingLive do
           <thead>
             <tr style="border-bottom: 1px solid #d1d5da;">
               <th style="text-align: left; padding: 6px 4px;">ID</th>
+              <th style="text-align: left;">Source</th>
               <th style="text-align: left;">Matcher</th>
               <th style="text-align: left;">Receivers</th>
               <th></th>
             </tr>
           </thead>
           <tbody>
-            <tr :for={rule <- @rules} style="border-bottom: 1px solid #eaeef2;">
+            <tr :for={rule <- @rules} style={"border-bottom: 1px solid #eaeef2;" <> (if !rule.enabled, do: " opacity: 0.5;", else: "")}>
               <td style="padding: 4px 4px;">{rule.id}</td>
+              <td style="font-size: 11px;">
+                <span style={source_badge_style(rule.source)}>{rule.source}</span>
+                <span :if={!rule.enabled} style="color: #57606a; margin-left: 4px;">(disabled)</span>
+              </td>
               <td style="font-family: monospace; font-size: 11px;">{inspect(rule.matcher)}</td>
-              <td style="font-family: monospace; font-size: 11px;">{Enum.join(rule.receivers, ", ")}</td>
+              <td style="font-family: monospace; font-size: 11px;">
+                <span :for={r <- rule.receivers}>{render_receiver(r)} </span>
+              </td>
               <td>
                 <button
+                  :if={rule.source != "system_default"}
                   type="button"
                   phx-click="delete_rule"
                   phx-value-id={rule.id}
@@ -261,6 +285,25 @@ defmodule EsrWebLiveview.RoutingLive do
                   data-confirm="Delete this rule?"
                 >
                   Delete
+                </button>
+                <button
+                  :if={rule.source == "system_default" and rule.enabled}
+                  type="button"
+                  phx-click="disable_rule"
+                  phx-value-id={rule.id}
+                  style="padding: 4px 10px; background: white; color: #9a6700; border: 1px solid #9a6700; border-radius: 4px; cursor: pointer; font-size: 11px;"
+                  data-confirm="Disable this system_default rule? (admin opt-out — re-enable via Enable button)"
+                >
+                  Disable
+                </button>
+                <button
+                  :if={rule.source == "system_default" and !rule.enabled}
+                  type="button"
+                  phx-click="enable_rule"
+                  phx-value-id={rule.id}
+                  style="padding: 4px 10px; background: white; color: #1f883d; border: 1px solid #1f883d; border-radius: 4px; cursor: pointer; font-size: 11px;"
+                >
+                  Enable
                 </button>
               </td>
             </tr>
@@ -355,4 +398,14 @@ defmodule EsrWebLiveview.RoutingLive do
 
   defp mode_btn_style(false),
     do: "padding: 4px 12px; background: white; color: #0969da; border: 1px solid #d1d5da; border-radius: 4px; cursor: pointer; font-size: 12px;"
+
+  defp source_badge_style("system_default"),
+    do: "background: #ddf4ff; color: #0969da; padding: 2px 6px; border-radius: 3px; font-size: 10px;"
+
+  defp source_badge_style(_),
+    do: "background: #f6f8fa; color: #57606a; padding: 2px 6px; border-radius: 3px; font-size: 10px;"
+
+  # Render magic tokens as human-friendly hints, regular URIs as-is.
+  defp render_receiver("$session_members"), do: "(dynamic: members of current session)"
+  defp render_receiver(r), do: r
 end

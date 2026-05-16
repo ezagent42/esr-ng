@@ -25,11 +25,29 @@ import {LiveSocket} from "phoenix_live_view"
 import {hooks as colocatedHooks} from "phoenix-colocated/esr_web"
 import topbar from "../vendor/topbar"
 
+// Phase 4-completion PR 9 §UI: auto-scroll messages stream on new
+// inserts. Without this, new chat messages arrive at the bottom of
+// the (scrolled) div but the operator never sees them. Hook is opt-in
+// per element via `phx-hook="ScrollOnUpdate"`.
+const ScrollOnUpdate = {
+  scrollIfNearBottom() {
+    const el = this.el
+    // Only auto-scroll if the user is already near the bottom — don't
+    // yank them away if they're reading history.
+    const fromBottom = el.scrollHeight - el.scrollTop - el.clientHeight
+    if (fromBottom < 120) {
+      el.scrollTop = el.scrollHeight
+    }
+  },
+  mounted() { this.el.scrollTop = this.el.scrollHeight },
+  updated() { this.scrollIfNearBottom() }
+}
+
 const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute("content")
 const liveSocket = new LiveSocket("/live", Socket, {
   longPollFallbackMs: 2500,
   params: {_csrf_token: csrfToken},
-  hooks: {...colocatedHooks},
+  hooks: {...colocatedHooks, ScrollOnUpdate},
 })
 
 // Show progress bar on live navigation and form submits
