@@ -99,9 +99,13 @@ defmodule Esr.Behavior.Chat do
           {:chat_message, session_uri, msg}
         )
 
-        # 3. Fan out :receive to recipients. mentions = [] means
-        # "everyone in the room"; mentions = [...] means just those URIs.
-        recipients = derive_recipients(msg, slice)
+        # 3. Fan out :receive to recipients.
+        # Phase 3c-step 1: routing decisions go through Esr.Routing.Resolver
+        # (queries MentionRouting + SessionRouting tables for cross-session
+        # rules). If Resolver returns [] (no rule fired), fall through to
+        # in-session default fan-out (current session members). Per P3-D
+        # impl decision (b).
+        recipients = derive_recipients(msg, slice, session_uri)
 
         for recipient_uri <- recipients, recipient_uri != msg.sender do
           dispatch_receive(recipient_uri, msg, session_uri)
@@ -325,8 +329,15 @@ defmodule Esr.Behavior.Chat do
 
   # --- Internals ---------------------------------------------------------
 
-  defp derive_recipients(%Message{mentions: []}, slice), do: Map.keys(slice.members)
-  defp derive_recipients(%Message{mentions: mentions}, _slice), do: mentions
+  # Phase 3c-step 1: Resolver first, fall through to in-session members
+  # per P3-D impl decision (b). msg.mentions is consumed by the mention(URI)
+  # matcher inside Resolver, not directly here (per #P1-5).
+  defp derive_recipients(%Message{} = msg, slice, session_uri) do
+    case Esr.Routing.Resolver.resolve(msg, session_uri) do
+      [] -> Map.keys(slice.members)
+      routed -> routed
+    end
+  end
 
   defp dispatch_receive(recipient_uri, %Message{} = msg, session_uri) do
     target = URI.new!("#{URI.to_string(recipient_uri)}/behavior/chat/receive")

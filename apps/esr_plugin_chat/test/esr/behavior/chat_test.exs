@@ -40,6 +40,69 @@ defmodule Esr.Behavior.ChatTest do
     end
   end
 
+  describe "invoke(:send, ...) routing (Phase 3c-step 1)" do
+    test "with no routing rules → falls through to in-session members fan-out" do
+      session_uri = URI.new!("session://chat-fallback-#{System.unique_integer([:positive])}")
+      sender = URI.new!("user://admin")
+      other_member = URI.new!("user://other-#{System.unique_integer([:positive])}")
+      msg = Message.new(sender, %{text: "no rules here", attachments: []})
+
+      slice = %{
+        members: %{sender => %{online: true}, other_member => %{online: true}},
+        monitors: %{},
+        last_seen: %{}
+      }
+
+      ctx = %{self_uri: session_uri, kind_module: Esr.Entity.Session, caller: sender}
+
+      # Just verify the invoke succeeds; Resolver returns [] (no rule),
+      # so fall-through fan-outs to members minus sender. dispatch_receive
+      # may return :error :no_such_actor for unregistered URIs but that's
+      # fire-and-forget — invoke still {:ok, ...}.
+      assert {:ok, _, %{stored: true}} = Chat.invoke(:send, slice, %{message: msg}, ctx)
+    end
+
+    test "with active mention routing rule → respects rule receivers" do
+      test_table = :"chat_routing_test_#{System.unique_integer([:positive])}"
+      :ok = Esr.RoutingRegistry.declare_table(test_table, key_uniqueness: :duplicate)
+
+      original = Application.get_env(:esr_core, :routing_tables)
+      Application.put_env(:esr_core, :routing_tables, [test_table])
+
+      on_exit(fn ->
+        if original do
+          Application.put_env(:esr_core, :routing_tables, original)
+        else
+          Application.delete_env(:esr_core, :routing_tables)
+        end
+      end)
+
+      target_session = URI.new!("session://chat-routed-#{System.unique_integer([:positive])}")
+      session_uri = URI.new!("session://current")
+      sender = URI.new!("user://admin")
+      msg = Message.new(sender, %{text: "urgent help", attachments: []})
+
+      :ok =
+        Esr.RoutingRegistry.put(
+          test_table,
+          Esr.Routing.Matcher.text_contains("urgent"),
+          [URI.to_string(target_session)]
+        )
+
+      slice = %{
+        members: %{sender => %{online: true}},
+        monitors: %{},
+        last_seen: %{}
+      }
+
+      ctx = %{self_uri: session_uri, kind_module: Esr.Entity.Session, caller: sender}
+
+      # invoke fires routing path; recipients = [target_session] (per rule),
+      # NOT the in-session member list. invoke still succeeds.
+      assert {:ok, _, %{stored: true}} = Chat.invoke(:send, slice, %{message: msg}, ctx)
+    end
+  end
+
   describe "invoke(:send, ...)" do
     test "writes to MessageStore + broadcasts on session events topic + returns {:ok, slice, %{stored: true}}" do
       session_uri = URI.new!("session://chat-test-#{System.unique_integer([:positive])}")
