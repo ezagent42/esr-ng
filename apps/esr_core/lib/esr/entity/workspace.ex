@@ -1,0 +1,77 @@
+defmodule Esr.Entity.Workspace do
+  @moduledoc """
+  Workspace Kind — Phase 4 first-class entity for declaring what a
+  cluster instance should run.
+
+  Per Phase 4 D3 / D4 / D5: a Workspace is a `workspace://<name>` URI
+  that carries (a) a set of member Entity URIs that should be alive
+  whenever the Workspace is "instantiated", (b) a list of session
+  templates (recipes for creating Sessions with declared members and
+  routing rules), and (c) routing rules scoped to this Workspace.
+
+  It is the **plugin-isolation north star** in action: a future plugin
+  author adds a new Kind X, declares it in a Workspace template, and
+  on cluster restart their Kind X comes back without any change to
+  esr_core.
+
+  ## Phase 4b scope (this PR)
+
+  - Kind module + Behavior (state shape + actions)
+  - `persistence :ephemeral` — Phase 4c flips to `{:snapshot, :on_change}`
+    once the `workspaces` table + Loader exist
+  - `:instantiate` returns the children list as data (no actual spawn
+    yet — 4c's Loader walks the list)
+
+  ## Phase 4c follow-up
+
+  - SQLite `workspaces` table + Ecto schema
+  - `Esr.Workspace.Loader` queries DB on app start, dispatches
+    `:instantiate` per Workspace, walks children + spawns via
+    plugin-registered spawn functions
+  - The plugin-isolation invariant test lives here
+
+  ## Phase 4d follow-up
+
+  - LV UI: Workspace list + detail + member-picker
+
+  ## Why Workspace lives in esr_core (not a separate plugin)
+
+  Workspace is the foundation for plugin authors to declare their
+  Kinds. It must be present before any plugin can use it, so it
+  belongs in esr_core (alongside User, the other foundational Entity).
+  The actual SPAWN logic stays decoupled — `:instantiate` returns
+  `{Kind, args, URI}` tuples and the caller decides how to spawn
+  (typically via a plugin-registered spawn fn in Phase 4c).
+  """
+
+  @behaviour Esr.Kind
+
+  @impl Esr.Kind
+  def type_name, do: :workspace
+
+  @impl Esr.Kind
+  def behaviors, do: [Esr.Behavior.Workspace]
+
+  # Phase 4b: ephemeral (in-memory). Phase 4c flips to snapshot
+  # once the workspaces table + Loader exist.
+  @impl Esr.Kind
+  def persistence, do: :ephemeral
+
+  @impl Esr.Kind
+  def uri_from_args(args), do: Map.fetch!(args, :uri)
+
+  @doc """
+  Build a `workspace://<name>` URI from a short name.
+
+  Per Phase 4 D4 — Workspaces are first-class URIs that participate
+  in cap checks and KindRegistry lookups, identical pattern to
+  `session://<name>` and `agent://<name>`.
+
+      iex> Esr.Entity.Workspace.uri_for("default") |> URI.to_string()
+      "workspace://default"
+  """
+  @spec uri_for(String.t()) :: URI.t()
+  def uri_for(name) when is_binary(name) and name != "" do
+    URI.parse("workspace://#{name}")
+  end
+end
