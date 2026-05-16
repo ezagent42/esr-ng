@@ -59,10 +59,13 @@ defmodule EsrPluginEcho.Integration.F1DirectInvokeTest do
     assert {:ok, %{echo: "hello"}} = Invocation.dispatch(inv)
 
     # Step 2: audit handler broadcasts to esr:audit:stream.
-    assert_receive {:audit_event, audit_event}, 500
-    assert audit_event.event == [:esr, :invoke, :stop]
-    assert audit_event.metadata.target == "agent://echo/behavior/echo/say"
-    assert audit_event.metadata.action == :say
+    # Phase 3d: dispatch emits two audit events — :authz :granted first
+    # (when cap check passes) then :invoke :stop (when invoke succeeds).
+    # Both arrive; we care about the :stop event's metadata.
+    assert_receive {:audit_event, %{event: [:esr, :authz, :granted]}}, 500
+    assert_receive {:audit_event, %{event: [:esr, :invoke, :stop]} = stop_event}, 500
+    assert stop_event.metadata.target == "agent://echo/behavior/echo/say"
+    assert stop_event.metadata.action == :say
 
     # Step 3: wait for Audit.Writer batch flush (100ms) + 50ms slack,
     # then query invocations table.
@@ -77,7 +80,10 @@ defmodule EsrPluginEcho.Integration.F1DirectInvokeTest do
     assert [[target_col, action_col, authz_col, duration_col]] = rows
     assert target_col == "agent://echo/behavior/echo/say"
     assert action_col == "say"
-    assert authz_col == "stub_grant"
+    # Phase 3d: hard flip removed :stub_grant in favor of real "granted"
+    # from cap check. invocations.authz column is "granted" for the
+    # success path (caller had matching cap).
+    assert authz_col == "granted"
     assert is_integer(duration_col) and duration_col > 0
   end
 

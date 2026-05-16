@@ -30,7 +30,7 @@ defmodule Esr.DLQTest do
       target: URI.parse("agent://dlq-test/behavior/echo/say"),
       mode: :call,
       args: %{msg: "lost"},
-      ctx: %{caller: URI.parse("user://admin"), caps: MapSet.new(), reply: :ignore}
+      ctx: %{caller: URI.parse("user://admin"), caps: Esr.Entity.User.admin_caps(), reply: :ignore}
     }
 
     assert :ok = DLQ.put(:unroutable, payload)

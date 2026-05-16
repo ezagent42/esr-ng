@@ -290,6 +290,9 @@ defmodule Esr.Behavior.Chat do
     maybe_emit_ref_mismatch(ref_str_or_nil, session_uris)
 
     # Dispatch chat/send per session_uri. Message envelope shared.
+    # Phase 3d: agent's reply dispatch runs under admin caps for the
+    # same reason as Session fan-out — the reply path is system-routed
+    # from the bridge. Phase 4 will give Agents their own send caps.
     for session_uri_str <- session_uris do
       target = URI.new!("#{session_uri_str}/behavior/chat/send")
 
@@ -300,7 +303,7 @@ defmodule Esr.Behavior.Chat do
           args: %{message: msg},
           ctx: %{
             caller: agent_uri,
-            caps: MapSet.new(),
+            caps: Esr.Entity.User.admin_caps(),
             reply: :ignore
           }
         })
@@ -406,13 +409,17 @@ defmodule Esr.Behavior.Chat do
   defp dispatch_receive(recipient_uri, %Message{} = msg, session_uri) do
     target = URI.new!("#{URI.to_string(recipient_uri)}/behavior/chat/receive")
 
+    # Phase 3d: Session's fan-out to recipients runs under admin caps —
+    # the Session is acting on behalf of the system-routed message.
+    # Phase 4+ will refine to a dedicated "system-internal" cap when
+    # multi-user authorization arrives.
     Invocation.dispatch(%Invocation{
       target: target,
       mode: :cast,
       args: %{message: msg},
       ctx: %{
         caller: session_uri,
-        caps: MapSet.new(),
+        caps: Esr.Entity.User.admin_caps(),
         reply: :ignore
       }
     })

@@ -714,11 +714,24 @@ defmodule EsrWebLiveview.AdminLive do
   defp client_label(%{info: %{claude_info: %{"name" => name}}}), do: name
   defp client_label(_), do: "—"
 
-  defp authz_label([:esr, :invoke, :stop]), do: "stub_grant"
+  # Phase 3d: :stub_grant gone (hard flip). Real cap path emits
+  # :granted / :denied via a separate authz event; :invoke :stop only
+  # fires for the success branch (denied short-circuits with :error
+  # :unauthorized at dispatch step 5.5).
+  defp authz_label([:esr, :authz, :granted]), do: "granted"
+  defp authz_label([:esr, :authz, :denied]), do: "denied"
+  defp authz_label([:esr, :invoke, :stop]), do: "granted"
   defp authz_label([:esr, :invoke, :error]), do: "—"
   defp authz_label(_), do: "—"
 
+  defp result_label([:esr, :authz, :granted], _meta), do: "granted"
+  defp result_label([:esr, :authz, :denied], %{caller: c}), do: "denied (caller=#{c})"
+  defp result_label([:esr, :authz, :denied], _meta), do: "denied"
   defp result_label([:esr, :invoke, :stop], _meta), do: "ok"
+
+  defp result_label([:esr, :invoke, :error], %{reason: :unauthorized}),
+    do: "denied"
+
   defp result_label([:esr, :invoke, :error], %{reason: r}), do: "err: #{inspect(r)}"
   defp result_label(_, _), do: "—"
 
