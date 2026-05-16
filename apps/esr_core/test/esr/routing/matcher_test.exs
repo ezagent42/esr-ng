@@ -109,5 +109,4 @@ defmodule Esr.Routing.MatcherTest do
                Matcher.from_json(%{"type" => "exotic", "arg" => "x"})
     end
   end
-
 end
