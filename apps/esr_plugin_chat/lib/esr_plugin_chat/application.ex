@@ -52,13 +52,15 @@ defmodule EsrPluginChat.Application do
 
   use Application
 
-  alias Esr.{BehaviorRegistry, Invocation}
+  alias Esr.{BehaviorRegistry, Invocation, RoutingRegistry}
   alias Esr.Entity.{Agent, Session, User}
   alias Esr.Behavior.Chat
+  alias EsrPluginChat.Routing.{MentionRouting, SessionRouting}
 
   @impl true
   def start(_type, _args) do
     :ok = register_chat_behaviors()
+    :ok = declare_routing_tables()
 
     children = [
       {DynamicSupervisor, name: EsrPluginChat.AgentSupervisor, strategy: :one_for_one},
@@ -69,6 +71,7 @@ defmodule EsrPluginChat.Application do
     case Supervisor.start_link(children, strategy: :one_for_one, name: __MODULE__) do
       {:ok, sup_pid} ->
         :ok = admin_user_joins_default_session()
+        :ok = EsrPluginChat.DefaultRules.bootstrap()
         {:ok, sup_pid}
 
       other ->
@@ -82,6 +85,17 @@ defmodule EsrPluginChat.Application do
     :ok = BehaviorRegistry.register(Session, :leave, Chat)
     :ok = BehaviorRegistry.register(User, :receive, Chat)
     :ok = BehaviorRegistry.register(Agent, :receive, Chat)
+    :ok
+  end
+
+  # Phase 3a-step 4: declare 2 RoutingRegistry tables that this plugin
+  # owns. MentionRouting is :duplicate (one matcher can fire on many
+  # messages; one matcher → list of receivers; one rule per row).
+  # SessionRouting is :unique (bridge_id → session_uri). Both declared
+  # in this Application process — it owns writes.
+  defp declare_routing_tables do
+    :ok = RoutingRegistry.declare_table(MentionRouting, key_uniqueness: :duplicate)
+    :ok = RoutingRegistry.declare_table(SessionRouting, key_uniqueness: :unique)
     :ok
   end
 

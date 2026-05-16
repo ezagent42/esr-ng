@@ -30,7 +30,7 @@ defmodule Esr.Routing.Resolver do
   alias Esr.{Message, RoutingRegistry}
   alias Esr.Routing.Matcher
 
-  @routing_tables [
+  @default_routing_tables [
     EsrPluginChat.Routing.MentionRouting,
     EsrPluginChat.Routing.SessionRouting
   ]
@@ -41,10 +41,14 @@ defmodule Esr.Routing.Resolver do
   Returns a deduplicated list of recipient URI structs. Empty list
   means "no routing rule fired — caller should fall through to
   in-session default fan-out".
+
+  Table list is read from `Application.get_env(:esr_core, :routing_tables,
+  @default_routing_tables)` so tests can override without conflicting
+  with the live chat plugin's owned tables.
   """
   @spec resolve(Message.t(), URI.t()) :: [URI.t()]
   def resolve(%Message{} = message, %URI{} = _current_session_uri) do
-    @routing_tables
+    Application.get_env(:esr_core, :routing_tables, @default_routing_tables)
     |> Enum.flat_map(&query_table(&1, message))
     |> Enum.uniq()
     |> Enum.map(&parse_uri_string/1)
