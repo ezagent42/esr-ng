@@ -30,7 +30,13 @@ defmodule EsrCore.Application do
       {Phoenix.PubSub, name: EsrCore.PubSub},
 
       # ⑥ Audit batch writer — must come after Repo + PubSub.
-      Esr.Audit.Writer
+      Esr.Audit.Writer,
+
+      # ⑦ Workspace DynamicSupervisor (Phase 4b) — holds spawned
+      # `workspace://<name>` Kinds. Phase 4c's Loader queries the
+      # `workspaces` table at app start and dispatches spawn_workspace
+      # per row.
+      {DynamicSupervisor, name: Esr.Workspace.Supervisor, strategy: :one_for_one}
     ]
 
     result = Supervisor.start_link(children, strategy: :one_for_one, name: EsrCore.Supervisor)
@@ -38,7 +44,24 @@ defmodule EsrCore.Application do
     # Attach telemetry handlers after the writer is up. Idempotent on restart.
     :ok = Esr.Audit.attach()
 
+    # Phase 4b: register Workspace Behavior. Workspace is foundational
+    # enough to live in esr_core (cross-plugin Entity, like User), so its
+    # K-path wiring happens here rather than in a plugin Application.
+    :ok = register_workspace_behavior()
+
     result
+  end
+
+  defp register_workspace_behavior do
+    alias Esr.BehaviorRegistry
+    alias Esr.Behavior.Workspace, as: WB
+    alias Esr.Entity.Workspace, as: WK
+
+    Enum.each(WB.actions(), fn action ->
+      :ok = BehaviorRegistry.register(WK, action, WB)
+    end)
+
+    :ok
   end
 
   defp skip_migrations?() do
