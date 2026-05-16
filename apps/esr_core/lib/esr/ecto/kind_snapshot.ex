@@ -38,6 +38,16 @@ defmodule Esr.Ecto.KindSnapshot do
   def get(uri_str) when is_binary(uri_str), do: Repo.get(__MODULE__, uri_str)
 
   @doc """
+  List all snapshot rows (for `/admin/snapshots` LV + `mix esr.snapshot.list`).
+  Ordered by `updated_at` desc so most-recently-active Kinds appear first.
+  """
+  @spec list_all() :: [%__MODULE__{}]
+  def list_all do
+    from(s in __MODULE__, order_by: [desc: s.updated_at])
+    |> Repo.all()
+  end
+
+  @doc """
   Upsert (insert or update) the snapshot for `uri_str`.
   """
   @spec upsert(String.t(), String.t(), binary(), non_neg_integer()) ::
