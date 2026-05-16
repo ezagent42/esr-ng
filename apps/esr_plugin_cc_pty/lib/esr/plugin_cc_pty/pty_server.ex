@@ -96,6 +96,20 @@ defmodule Esr.PluginCcPty.PtyServer do
             "PtyServer spawned os_pid=#{os_pid} for agent=#{URI.to_string(state.agent_uri)}"
           )
 
+          # Per old esr's PR-24 lesson: claude's TUI queries TIOCGWINSZ
+          # to learn terminal size and BLOCKS rendering past initial
+          # control sequences until it gets a non-zero size. erlexec
+          # :pty doesn't set winsize by default — operator's
+          # connecting terminal would normally provide it on connect,
+          # but our headless spawn has no client. Send a default
+          # 120×40 winsize ~500ms after spawn (gives claude time to
+          # finish initial DA query).
+          #
+          # Per memory `feedback_verify_ffi_arg_order`: `:exec.winsz/3`
+          # signature is `(os_pid, rows, cols)` — rows FIRST, cols
+          # second. Old esr's PR-22 burned 3 PRs swapping these.
+          Process.send_after(self(), :send_default_winsize, 500)
+
           {:noreply, %{state | exec_pid: exec_pid, os_pid: os_pid}}
 
         {:error, reason} ->
@@ -156,6 +170,23 @@ defmodule Esr.PluginCcPty.PtyServer do
     state = %{state | pty_buffer: new_buffer}
 
     state = maybe_confirm_dev_channels(state)
+
+    {:noreply, state}
+  end
+
+  def handle_info(:send_default_winsize, %__MODULE__{os_pid: nil} = state),
+    do: {:noreply, state}
+
+  def handle_info(:send_default_winsize, %__MODULE__{os_pid: os_pid} = state) do
+    # Per `feedback_verify_ffi_arg_order`: rows first, cols second.
+    try do
+      :exec.winsz(os_pid, 40, 120)
+    catch
+      kind, why ->
+        Logger.warning(
+          "PtyServer: winsz send failed (#{inspect(kind)}, #{inspect(why)})"
+        )
+    end
 
     {:noreply, state}
   end
