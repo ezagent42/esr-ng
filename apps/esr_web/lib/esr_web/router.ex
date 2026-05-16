@@ -23,11 +23,17 @@ defmodule EsrWeb.Router do
     pipe_through :browser
 
     live "/", HomeLive
+
+    # Phase 4-completion Spec 05 §A.2.3 — controller-rendered login.
+    get "/login", SessionController, :new
+    post "/login", SessionController, :create
+    delete "/logout", SessionController, :delete
+    post "/logout", SessionController, :delete
   end
 
-  # /admin is owned by the esr_web_liveview plugin (Phase 1 step 5).
+  # /admin* requires login (Phase 4-completion Spec 05 §A.2.3).
   scope "/", EsrWebLiveview do
-    pipe_through :browser
+    pipe_through [:browser, EsrWeb.Plugs.RequireUser]
 
     live "/admin", AdminLive
 

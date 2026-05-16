@@ -8,7 +8,13 @@ defmodule EsrWebLiveview.WorkspacesLiveTest do
   setup do
     :ok = Ecto.Adapters.SQL.Sandbox.checkout(EsrCore.Repo)
     Ecto.Adapters.SQL.Sandbox.mode(EsrCore.Repo, {:shared, self()})
-    {:ok, conn: Phoenix.ConnTest.build_conn()}
+    conn =
+      Phoenix.ConnTest.build_conn()
+      |> Plug.Test.init_test_session(%{
+        "current_user_uri" => URI.to_string(Esr.Entity.User.admin_uri())
+      })
+
+    {:ok, conn: conn}
   end
 
   test "GET /admin/workspaces shows empty state when no workspaces", %{conn: conn} do

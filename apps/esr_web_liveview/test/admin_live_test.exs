@@ -11,7 +11,14 @@ defmodule EsrWebLiveview.AdminLiveTest do
     :ok = Ecto.Adapters.SQL.Sandbox.checkout(EsrCore.Repo)
     Ecto.Adapters.SQL.Sandbox.mode(EsrCore.Repo, {:shared, self()})
 
-    conn = Phoenix.ConnTest.build_conn()
+    # Phase 4-completion Spec 05: /admin requires login. Pre-set the
+    # session cookie so tests skip the /login redirect.
+    conn =
+      Phoenix.ConnTest.build_conn()
+      |> Plug.Test.init_test_session(%{
+        "current_user_uri" => URI.to_string(Esr.Entity.User.admin_uri())
+      })
+
     {:ok, conn: conn}
   end
 
