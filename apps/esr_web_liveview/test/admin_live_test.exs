@@ -112,7 +112,7 @@ defmodule EsrWebLiveview.AdminLiveTest do
     Phoenix.PubSub.broadcast(
       EsrCore.PubSub,
       Esr.Behavior.Chat.session_events_topic(URI.new!("session://main")),
-      {:chat_message, agent_msg}
+      {:chat_message, URI.new!("session://main"), agent_msg}
     )
 
     assert wait_until_html(lv, "agent reply test")

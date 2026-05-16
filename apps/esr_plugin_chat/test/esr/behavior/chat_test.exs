@@ -60,7 +60,7 @@ defmodule Esr.Behavior.ChatTest do
       assert loaded.session_uri == session_uri
 
       # Subscribers receive the chat_message broadcast
-      assert_receive {:chat_message, %Message{uri: stored_uri}}, 500
+      assert_receive {:chat_message, _session_uri, %Message{uri: stored_uri}}, 500
       assert stored_uri == msg.uri
     end
 

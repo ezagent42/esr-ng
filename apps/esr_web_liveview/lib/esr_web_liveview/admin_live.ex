@@ -50,7 +50,12 @@ defmodule EsrWebLiveview.AdminLive do
     if connected?(socket) do
       Phoenix.PubSub.subscribe(EsrCore.PubSub, Esr.Audit.stream_topic())
       Phoenix.PubSub.subscribe(EsrCore.PubSub, bridge_topic_safely())
-      Phoenix.PubSub.subscribe(EsrCore.PubSub, session_events_topic(current_session_uri))
+      # Phase 3b: subscribe to ALL known sessions so floating/member updates
+      # land for any session (not just current). Per-session message filtering
+      # is done in handle_info for {:chat_message, session_uri, msg}.
+      for session_uri <- EsrPluginChat.list_sessions() do
+        Phoenix.PubSub.subscribe(EsrCore.PubSub, session_events_topic(session_uri))
+      end
     end
 
     socket =
@@ -242,6 +247,20 @@ defmodule EsrWebLiveview.AdminLive do
       {:noreply,
        assign(socket, :session_members, read_session_members(socket.assigns.current_session_uri))}
 
+  # Phase 3: chat_message carries the source session_uri; filter to
+  # current_session_uri before inserting to the stream. Other sessions'
+  # messages are visible if/when user switches to that session (mount
+  # reloads stream from MessageStore via load_session_messages).
+  def handle_info({:chat_message, source_session_uri, %Esr.Message{} = msg}, socket) do
+    if URI.to_string(source_session_uri) == URI.to_string(socket.assigns.current_session_uri) do
+      {:noreply, stream_insert(socket, :messages, message_to_row(msg), at: -1)}
+    else
+      # Future: increment unread badge for source_session_uri here
+      {:noreply, socket}
+    end
+  end
+
+  # Phase 2 backward-compat (in case any code still emits the old shape)
   def handle_info({:chat_message, %Esr.Message{} = msg}, socket) do
     {:noreply, stream_insert(socket, :messages, message_to_row(msg), at: -1)}
   end
@@ -313,16 +332,9 @@ defmodule EsrWebLiveview.AdminLive do
   def handle_event("switch_session", %{"session_uri" => session_uri_str}, socket) do
     case URI.new(session_uri_str) do
       {:ok, new_uri} ->
-        # Re-subscribe: unsub old, sub new
-        if connected?(socket) do
-          Phoenix.PubSub.unsubscribe(
-            EsrCore.PubSub,
-            session_events_topic(socket.assigns.current_session_uri)
-          )
-
-          Phoenix.PubSub.subscribe(EsrCore.PubSub, session_events_topic(new_uri))
-        end
-
+        # LV is subscribed to all sessions' events (mount + create_session
+        # both subscribe), so no need to re-sub here. Just update current
+        # focus + reload stream from MessageStore.
         {:noreply,
          socket
          |> assign(:current_session_uri, new_uri)
@@ -337,7 +349,11 @@ defmodule EsrWebLiveview.AdminLive do
   def handle_event("create_session", %{"new_session" => %{"short_name" => name}}, socket)
       when is_binary(name) and name != "" do
     case EsrPluginChat.create_session(String.trim(name), Esr.Entity.User.admin_uri()) do
-      {:ok, _session_uri} ->
+      {:ok, session_uri} ->
+        if connected?(socket) do
+          Phoenix.PubSub.subscribe(EsrCore.PubSub, session_events_topic(session_uri))
+        end
+
         {:noreply,
          socket
          |> assign(:sessions, EsrPluginChat.list_sessions())
@@ -357,7 +373,8 @@ defmodule EsrWebLiveview.AdminLive do
         "add_agent_to_session",
         %{"agent_uri" => agent_uri_str, "session_uri" => session_uri_str},
         socket
-      ) do
+      )
+      when session_uri_str != "" do
     with {:ok, agent_uri} <- URI.new(agent_uri_str),
          {:ok, session_uri} <- URI.new(session_uri_str) do
       target = URI.new!("#{URI.to_string(session_uri)}/behavior/chat/join")
@@ -376,6 +393,10 @@ defmodule EsrWebLiveview.AdminLive do
       _ -> {:noreply, assign(socket, :flash_error, "Bad URI for add-to-session")}
     end
   end
+
+  # phx-change fires for every form update; ignore empty selection (e.g.
+  # initial state or user re-opens dropdown without choosing).
+  def handle_event("add_agent_to_session", _params, socket), do: {:noreply, socket}
 
   def handle_event(
         "manual_dispatch",
@@ -455,7 +476,7 @@ defmodule EsrWebLiveview.AdminLive do
             <h4 style="font-size: 11px; color: #57606a; font-weight: 500; margin: 0 0 6px 0;">Floating agents</h4>
             <div :for={agent <- @floating_agents} style="margin-bottom: 8px; padding: 4px; border: 1px dashed #d1d5da; border-radius: 4px; font-size: 11px;">
               <div style="font-family: monospace;">{agent}</div>
-              <form phx-submit="add_agent_to_session" style="margin-top: 2px;">
+              <form phx-change="add_agent_to_session" style="margin-top: 2px;">
                 <input type="hidden" name="agent_uri" value={agent} />
                 <select
                   name="session_uri"

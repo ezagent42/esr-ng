@@ -91,10 +91,12 @@ defmodule Esr.Behavior.Chat do
     case MessageStore.write(msg, session_uri) do
       {:ok, _stored} ->
         # 2. Broadcast for in-session subscribers (LV chat stream).
+        # Phase 3: include session_uri in payload so multi-session LV
+        # subscribers can filter by current session.
         Phoenix.PubSub.broadcast(
           EsrCore.PubSub,
           session_events_topic(session_uri),
-          {:chat_message, msg}
+          {:chat_message, session_uri, msg}
         )
 
         # 3. Fan out :receive to recipients. mentions = [] means
