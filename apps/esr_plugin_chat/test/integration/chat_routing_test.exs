@@ -62,7 +62,7 @@ defmodule EsrPluginChat.Integration.ChatRoutingTest do
       })
 
     # Session-level broadcast (for LV chat stream)
-    assert_receive {:chat_message, %Message{uri: received_uri}}, 500
+    assert_receive {:chat_message, _session_uri, %Message{uri: received_uri}}, 500
     assert received_uri == msg.uri
 
     # Message landed in MessageStore

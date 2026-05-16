@@ -8,12 +8,29 @@ defmodule Esr.MessageStore do
   `in_session_since/2` derives the replay set; no duplicate pending
   queue is maintained (memory `feedback_converge_to_uri_list`).
 
-  ## Phase 2 API surface
+  ## Phase 3 multi-session persist (#P1-4 fix)
+
+  Phase 2 wrote `messages` table with `session_uri` column directly.
+  Phase 3 D8 (reply to multiple sessions) needs same `message_uri` to
+  appear in multiple sessions, but `messages.uri` is PK (Decision #40
+  identity invariant). Resolution:
+
+  - `messages` table: still 1 row per `message_uri`. `session_uri`
+    column kept (set on first write only) for Phase 2 backward compat;
+    queries in Phase 3 use the join table instead.
+  - `message_routings` table (new): one row per `(message_uri, session_uri)`
+    — the canonical per-session presence record.
+  - `write/2` upserts messages (on_conflict: :nothing) + always inserts
+    a fresh message_routings row.
+  - `recent_in_session/2` + `in_session_since/2`: JOIN message_routings → messages.
+
+  ## API surface
 
   - `write/2(message, session_uri)` — persist Message in a session
     context. Synchronous (Phase 2 messages are first-class; write
     failure means caller's send fails, no silent degrade per
-    DECISIONS impl-time §write-failure)
+    DECISIONS impl-time §write-failure). Idempotent on (message_uri,
+    session_uri) pair via upsert + unique index.
   - `in_session_since/2(session_uri, since)` — messages in this
     session strictly after `since`. Ascending order. Used by
     `Session.Chat.invoke(:join, ...)` on rejoin to replay. Bounded
@@ -28,7 +45,7 @@ defmodule Esr.MessageStore do
   """
 
   import Ecto.Query
-  alias Esr.Message
+  alias Esr.{Message, MessageRouting}
   alias EsrCore.Repo
 
   @replay_cap 1000
@@ -36,52 +53,81 @@ defmodule Esr.MessageStore do
   @doc """
   Persist a Message in the given session context.
 
-  `session_uri` is set on the schema row (not in the Message struct's
-  identity per Decision #40); caller passes it explicitly so the
-  Message envelope stays immutable across forwards.
+  Phase 3:
+  - First-time write: insert `messages` row (with messages.session_uri
+    set to this session) + insert `message_routings` row
+  - Subsequent writes of same `message_uri` to a different session:
+    upsert messages = noop (PK conflict on `:nothing`) + add
+    `message_routings` row (different session_uri makes composite PK
+    unique)
 
-  Returns `{:ok, message}` on success or `{:error, changeset_or_term}`
-  on failure (caller decides what to do; per impl-time policy, send
-  should fail rather than continue with partial state).
+  Returns `{:ok, message}` on success or `{:error, _}` on failure.
   """
   @spec write(Message.t(), URI.t()) :: {:ok, Message.t()} | {:error, term()}
   def write(%Message{} = msg, %URI{} = session_uri) do
-    msg
-    |> Map.put(:session_uri, session_uri)
-    |> Repo.insert()
+    msg_with_session = Map.put(msg, :session_uri, session_uri)
+    now = msg.inserted_at || DateTime.utc_now()
+
+    # Two-step write: messages (upsert) + message_routings (insert).
+    # Wrapped in a transaction so we don't end up with messages row
+    # but missing routing, or vice versa.
+    Repo.transaction(fn ->
+      case Repo.insert(msg_with_session, on_conflict: :nothing, conflict_target: :uri) do
+        {:ok, _} ->
+          routing = %MessageRouting{
+            message_uri: msg.uri,
+            session_uri: URI.to_string(session_uri),
+            inserted_at: now
+          }
+
+          case Repo.insert(routing,
+                 on_conflict: :nothing,
+                 conflict_target: [:message_uri, :session_uri]
+               ) do
+            {:ok, _} -> msg_with_session
+            {:error, reason} -> Repo.rollback(reason)
+          end
+
+        {:error, reason} ->
+          Repo.rollback(reason)
+      end
+    end)
   end
 
   @doc """
   Messages in `session_uri` strictly after `since` (timestamp comparison).
   Ascending order. Used for rejoin replay.
 
-  Bounded to `@replay_cap` rows (1000) per DECISIONS P2-D3 failure mode
-  (4). Older messages remain in the table but won't be replayed all at
-  once on a long-offline member's rejoin. Phase 3 will add
-  pagination / explicit catch-up controls.
+  JOINs message_routings → messages. Bounded to `@replay_cap` rows.
   """
   @spec in_session_since(URI.t(), DateTime.t()) :: [Message.t()]
   def in_session_since(%URI{} = session_uri, %DateTime{} = since) do
+    session_str = URI.to_string(session_uri)
+
     from(m in Message,
-      where: m.session_uri == ^session_uri and m.inserted_at > ^since,
-      order_by: [asc: m.inserted_at],
+      join: r in MessageRouting,
+      on: r.message_uri == m.uri,
+      where: r.session_uri == ^session_str and r.inserted_at > ^since,
+      order_by: [asc: r.inserted_at],
       limit: @replay_cap
     )
     |> Repo.all()
   end
 
   @doc """
-  N most-recent messages in `session_uri`, descending. Used by LV
-  /admin mount to populate the chat stream with history.
+  N most-recent messages in `session_uri`, descending.
 
-  Returns at most `limit` rows; caller should reverse if it wants
-  ascending order for display.
+  JOINs message_routings → messages. Returns at most `limit`.
   """
   @spec recent_in_session(URI.t(), pos_integer()) :: [Message.t()]
   def recent_in_session(%URI{} = session_uri, limit) when is_integer(limit) and limit > 0 do
+    session_str = URI.to_string(session_uri)
+
     from(m in Message,
-      where: m.session_uri == ^session_uri,
-      order_by: [desc: m.inserted_at],
+      join: r in MessageRouting,
+      on: r.message_uri == m.uri,
+      where: r.session_uri == ^session_str,
+      order_by: [desc: r.inserted_at],
       limit: ^limit
     )
     |> Repo.all()
@@ -92,6 +138,9 @@ defmodule Esr.MessageStore do
 
   Used for `ref` chain following — if `msg.ref == "message://X"` and
   a consumer wants the original referenced message, this is the lookup.
+  Returns the message with its **first-written** session_uri (Phase 2
+  semantics) — for Phase 3 multi-session presence, query
+  `message_routings` directly.
   """
   @spec by_uri(String.t()) :: {:ok, Message.t()} | :error
   def by_uri(message_uri) when is_binary(message_uri) do
@@ -99,5 +148,20 @@ defmodule Esr.MessageStore do
       nil -> :error
       %Message{} = m -> {:ok, m}
     end
+  end
+
+  @doc """
+  List all session URIs this message has been routed into.
+
+  Phase 3 multi-session helper — for D8 ref/session_uris consistency
+  check in `Esr.Behavior.Chat.handle_kind_message/3`.
+  """
+  @spec sessions_for_message(String.t()) :: [String.t()]
+  def sessions_for_message(message_uri) when is_binary(message_uri) do
+    from(r in MessageRouting,
+      where: r.message_uri == ^message_uri,
+      select: r.session_uri
+    )
+    |> Repo.all()
   end
 end

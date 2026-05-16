@@ -52,23 +52,31 @@ defmodule EsrPluginChat.Application do
 
   use Application
 
-  alias Esr.{BehaviorRegistry, Invocation}
+  alias Esr.{BehaviorRegistry, Invocation, RoutingRegistry}
   alias Esr.Entity.{Agent, Session, User}
-  alias Esr.Behavior.Chat
+  alias Esr.Behavior.{Chat, Identity}
+  alias EsrPluginChat.Routing.{MentionRouting, SessionRouting}
 
   @impl true
   def start(_type, _args) do
     :ok = register_chat_behaviors()
+    :ok = declare_routing_tables()
 
     children = [
       {DynamicSupervisor, name: EsrPluginChat.AgentSupervisor, strategy: :one_for_one},
+      {DynamicSupervisor, name: EsrPluginChat.SessionSupervisor, strategy: :one_for_one},
       kind_server_spec(:session_main, Session, Session.default_uri()),
-      kind_server_spec(:user_admin, User, User.admin_uri())
+      # Phase 3d (#B1): admin User spawn passes initial_caps so Identity
+      # slice starts with admin's all-cap MapSet (vs. empty default).
+      kind_server_spec(:user_admin, User, User.admin_uri(), %{
+        initial_caps: User.admin_caps()
+      })
     ]
 
     case Supervisor.start_link(children, strategy: :one_for_one, name: __MODULE__) do
       {:ok, sup_pid} ->
         :ok = admin_user_joins_default_session()
+        :ok = EsrPluginChat.DefaultRules.bootstrap()
         {:ok, sup_pid}
 
       other ->
@@ -82,12 +90,35 @@ defmodule EsrPluginChat.Application do
     :ok = BehaviorRegistry.register(Session, :leave, Chat)
     :ok = BehaviorRegistry.register(User, :receive, Chat)
     :ok = BehaviorRegistry.register(Agent, :receive, Chat)
+
+    # Phase 3d: Identity Behavior actions on every Entity Kind that
+    # carries it (User + Agent). Adapters call list_caps/has_cap? via
+    # dispatch to read live cap state from slice.
+    :ok = BehaviorRegistry.register(User, :list_caps, Identity)
+    :ok = BehaviorRegistry.register(User, :has_cap?, Identity)
+    :ok = BehaviorRegistry.register(Agent, :list_caps, Identity)
+    :ok = BehaviorRegistry.register(Agent, :has_cap?, Identity)
     :ok
   end
 
-  defp kind_server_spec(child_id, kind_module, uri) do
+  # Phase 3a-step 4: declare 2 RoutingRegistry tables that this plugin
+  # owns. MentionRouting is :duplicate (one matcher can fire on many
+  # messages; one matcher → list of receivers; one rule per row).
+  # SessionRouting is :unique (bridge_id → session_uri). Both declared
+  # in this Application process — it owns writes.
+  defp declare_routing_tables do
+    :ok = RoutingRegistry.declare_table(MentionRouting, key_uniqueness: :duplicate)
+    :ok = RoutingRegistry.declare_table(SessionRouting, key_uniqueness: :unique)
+    :ok
+  end
+
+  # Phase 3d (#B1): accept extra_args map so callers can pass keys like
+  # `:initial_caps` for Identity init_slice. Merges into `%{uri: uri}`.
+  defp kind_server_spec(child_id, kind_module, uri, extra_args \\ %{}) do
+    args = Map.merge(%{uri: uri}, extra_args)
+
     Supervisor.child_spec(
-      {Esr.Kind.Server, {kind_module, %{uri: uri}}},
+      {Esr.Kind.Server, {kind_module, args}},
       id: child_id
     )
   end

@@ -39,52 +39,59 @@ defmodule EsrWebLiveview.AdminLive do
   import Phoenix.Component
 
   @echo_target URI.parse("agent://echo/behavior/echo/say")
-  @session_uri URI.new!("session://main")
+  @main_session_uri URI.new!("session://main")
   @message_limit 50
 
   @impl true
   def mount(_params, _session, socket) do
     connected_bridges = list_bridges_safely()
+    current_session_uri = @main_session_uri
 
     if connected?(socket) do
       Phoenix.PubSub.subscribe(EsrCore.PubSub, Esr.Audit.stream_topic())
       Phoenix.PubSub.subscribe(EsrCore.PubSub, bridge_topic_safely())
-      Phoenix.PubSub.subscribe(EsrCore.PubSub, session_events_topic())
+      # Phase 3b: subscribe to ALL known sessions so floating/member updates
+      # land for any session (not just current). Per-session message filtering
+      # is done in handle_info for {:chat_message, session_uri, msg}.
+      for session_uri <- EsrPluginChat.list_sessions() do
+        Phoenix.PubSub.subscribe(EsrCore.PubSub, session_events_topic(session_uri))
+      end
     end
-
-    historical_invocations = load_recent_invocations(50)
-
-    # Load chat history — newest at top of DB, render in ascending order
-    # so the most recent appears at the bottom (chat-window convention).
-    historical_messages =
-      @session_uri
-      |> Esr.MessageStore.recent_in_session(@message_limit)
-      |> Enum.reverse()
-      |> Enum.map(&message_to_row/1)
 
     socket =
       socket
-      |> stream(:invocations, historical_invocations, limit: 50)
-      |> stream(:messages, historical_messages, limit: @message_limit)
+      |> stream(:invocations, load_recent_invocations(50), limit: 50)
+      |> stream(:messages, load_session_messages(current_session_uri), limit: @message_limit)
       |> assign(:caller_uri_str, URI.to_string(Esr.Entity.User.admin_uri()))
       |> assign(:flash_error, nil)
       |> assign(:connected_bridges, connected_bridges)
-      |> assign(:session_members, read_session_members())
+      |> assign(:current_session_uri, current_session_uri)
+      |> assign(:sessions, EsrPluginChat.list_sessions())
+      |> assign(:session_members, read_session_members(current_session_uri))
       |> assign(:agent_options, list_agent_uris())
+      |> assign(:floating_agents, list_floating_agents())
       |> assign(:form,
         to_form(%{"target" => "", "args" => "", "mode" => "call"}, as: "manual_dispatch")
       )
       |> assign(:compose_form, to_form(%{"text" => "", "agent_uri" => ""}, as: "chat"))
+      |> assign(:new_session_form, to_form(%{"short_name" => ""}, as: "new_session"))
 
     {:ok, socket}
   end
 
-  defp session_events_topic do
-    Esr.Behavior.Chat.session_events_topic(@session_uri)
+  defp session_events_topic(%URI{} = uri) do
+    Esr.Behavior.Chat.session_events_topic(uri)
   end
 
-  defp read_session_members do
-    case Esr.KindRegistry.lookup(@session_uri) do
+  defp load_session_messages(%URI{} = session_uri) do
+    session_uri
+    |> Esr.MessageStore.recent_in_session(@message_limit)
+    |> Enum.reverse()
+    |> Enum.map(&message_to_row/1)
+  end
+
+  defp read_session_members(%URI{} = session_uri) do
+    case Esr.KindRegistry.lookup(session_uri) do
       {:ok, pid} ->
         try do
           %{state: %{chat: slice}} = :sys.get_state(pid, 1_000)
@@ -110,6 +117,22 @@ defmodule EsrWebLiveview.AdminLive do
     Esr.KindRegistry.list_all()
     |> Enum.filter(fn {uri_str, _pid} -> String.starts_with?(uri_str, "agent://") end)
     |> Enum.map(fn {uri_str, _pid} -> uri_str end)
+    |> Enum.sort()
+  end
+
+  # Floating = agent in KindRegistry but not in any Session.chat.members.
+  defp list_floating_agents do
+    all_agents = list_agent_uris() |> MapSet.new()
+
+    joined =
+      EsrPluginChat.list_sessions()
+      |> Enum.flat_map(fn session_uri ->
+        read_session_members(session_uri)
+        |> Enum.map(& &1.uri)
+      end)
+      |> MapSet.new()
+
+    MapSet.difference(all_agents, joined)
     |> Enum.sort()
   end
 
@@ -207,19 +230,37 @@ defmodule EsrWebLiveview.AdminLive do
     do:
       {:noreply,
        socket
-       |> assign(:session_members, read_session_members())
-       |> assign(:agent_options, list_agent_uris())}
+       |> assign(:session_members, read_session_members(socket.assigns.current_session_uri))
+       |> assign(:agent_options, list_agent_uris())
+       |> assign(:floating_agents, list_floating_agents())}
 
   def handle_info({:member_left, _uri}, socket),
     do:
       {:noreply,
        socket
-       |> assign(:session_members, read_session_members())
-       |> assign(:agent_options, list_agent_uris())}
+       |> assign(:session_members, read_session_members(socket.assigns.current_session_uri))
+       |> assign(:agent_options, list_agent_uris())
+       |> assign(:floating_agents, list_floating_agents())}
 
   def handle_info({:member_offline, _uri, _at}, socket),
-    do: {:noreply, assign(socket, :session_members, read_session_members())}
+    do:
+      {:noreply,
+       assign(socket, :session_members, read_session_members(socket.assigns.current_session_uri))}
 
+  # Phase 3: chat_message carries the source session_uri; filter to
+  # current_session_uri before inserting to the stream. Other sessions'
+  # messages are visible if/when user switches to that session (mount
+  # reloads stream from MessageStore via load_session_messages).
+  def handle_info({:chat_message, source_session_uri, %Esr.Message{} = msg}, socket) do
+    if URI.to_string(source_session_uri) == URI.to_string(socket.assigns.current_session_uri) do
+      {:noreply, stream_insert(socket, :messages, message_to_row(msg), at: -1)}
+    else
+      # Future: increment unread badge for source_session_uri here
+      {:noreply, socket}
+    end
+  end
+
+  # Phase 2 backward-compat (in case any code still emits the old shape)
   def handle_info({:chat_message, %Esr.Message{} = msg}, socket) do
     {:noreply, stream_insert(socket, :messages, message_to_row(msg), at: -1)}
   end
@@ -255,7 +296,7 @@ defmodule EsrWebLiveview.AdminLive do
     admin_uri = Esr.Entity.User.admin_uri()
     msg = Esr.Message.new(admin_uri, %{text: text, attachments: []}, mentions: mentions)
 
-    target = URI.new!("#{URI.to_string(@session_uri)}/behavior/chat/send")
+    target = URI.new!("#{URI.to_string(socket.assigns.current_session_uri)}/behavior/chat/send")
 
     inv = %Esr.Invocation{
       target: target,
@@ -285,6 +326,77 @@ defmodule EsrWebLiveview.AdminLive do
   def handle_event("chat_compose", _params, socket) do
     {:noreply, assign(socket, :flash_error, "Message text is required.")}
   end
+
+  # --- Phase 3b: multi-session UX events --------------------------------
+
+  def handle_event("switch_session", %{"session_uri" => session_uri_str}, socket) do
+    case URI.new(session_uri_str) do
+      {:ok, new_uri} ->
+        # LV is subscribed to all sessions' events (mount + create_session
+        # both subscribe), so no need to re-sub here. Just update current
+        # focus + reload stream from MessageStore.
+        {:noreply,
+         socket
+         |> assign(:current_session_uri, new_uri)
+         |> assign(:session_members, read_session_members(new_uri))
+         |> stream(:messages, load_session_messages(new_uri), reset: true, limit: @message_limit)}
+
+      _ ->
+        {:noreply, assign(socket, :flash_error, "Bad session URI: #{session_uri_str}")}
+    end
+  end
+
+  def handle_event("create_session", %{"new_session" => %{"short_name" => name}}, socket)
+      when is_binary(name) and name != "" do
+    case EsrPluginChat.create_session(String.trim(name), Esr.Entity.User.admin_uri()) do
+      {:ok, session_uri} ->
+        if connected?(socket) do
+          Phoenix.PubSub.subscribe(EsrCore.PubSub, session_events_topic(session_uri))
+        end
+
+        {:noreply,
+         socket
+         |> assign(:sessions, EsrPluginChat.list_sessions())
+         |> assign(:new_session_form, to_form(%{"short_name" => ""}, as: "new_session"))
+         |> assign(:flash_error, nil)}
+
+      {:error, reason} ->
+        {:noreply, assign(socket, :flash_error, "Create failed: #{inspect(reason)}")}
+    end
+  end
+
+  def handle_event("create_session", _params, socket) do
+    {:noreply, assign(socket, :flash_error, "Session name is required.")}
+  end
+
+  def handle_event(
+        "add_agent_to_session",
+        %{"agent_uri" => agent_uri_str, "session_uri" => session_uri_str},
+        socket
+      )
+      when session_uri_str != "" do
+    with {:ok, agent_uri} <- URI.new(agent_uri_str),
+         {:ok, session_uri} <- URI.new(session_uri_str) do
+      target = URI.new!("#{URI.to_string(session_uri)}/behavior/chat/join")
+
+      _ =
+        Esr.Invocation.dispatch(%Esr.Invocation{
+          target: target,
+          mode: :cast,
+          args: %{member: agent_uri},
+          ctx: ctx()
+        })
+
+      # member_joined broadcast will refresh assigns
+      {:noreply, assign(socket, :flash_error, nil)}
+    else
+      _ -> {:noreply, assign(socket, :flash_error, "Bad URI for add-to-session")}
+    end
+  end
+
+  # phx-change fires for every form update; ignore empty selection (e.g.
+  # initial state or user re-opens dropdown without choosing).
+  def handle_event("add_agent_to_session", _params, socket), do: {:noreply, socket}
 
   def handle_event(
         "manual_dispatch",
@@ -317,7 +429,7 @@ defmodule EsrWebLiveview.AdminLive do
   @impl true
   def render(assigns) do
     ~H"""
-    <div style="max-width: 1000px; margin: 0 auto; padding: 24px; font-family: -apple-system, sans-serif;">
+    <div style="max-width: 1200px; margin: 0 auto; padding: 24px; font-family: -apple-system, sans-serif;">
       <header>
         <h1 style="font-size: 22px; font-weight: 600;">Admin</h1>
         <p style="font-size: 13px; color: #666;">
@@ -325,10 +437,62 @@ defmodule EsrWebLiveview.AdminLive do
         </p>
       </header>
 
-      <section id="session" style="margin-top: 24px; display: grid; grid-template-columns: 1fr 240px; gap: 16px;">
+      <section id="layout" style="margin-top: 24px; display: grid; grid-template-columns: 200px 1fr 240px; gap: 16px;">
+        <aside id="sessions-sidebar" style="border-right: 1px solid #eaeef2; padding-right: 16px;">
+          <h3 style="font-size: 14px; font-weight: 500; margin: 0 0 8px 0;">Sessions</h3>
+          <ul id="sessions-list" style="list-style: none; padding: 0; margin: 0;">
+            <li :for={uri <- @sessions} style="margin-bottom: 4px;">
+              <button
+                type="button"
+                phx-click="switch_session"
+                phx-value-session_uri={URI.to_string(uri)}
+                style={session_button_style(URI.to_string(uri) == URI.to_string(@current_session_uri))}
+              >
+                {URI.to_string(uri)}
+              </button>
+            </li>
+          </ul>
+
+          <div id="new-session-form" style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #eaeef2;">
+            <.form for={@new_session_form} phx-submit="create_session">
+              <label style="display: block; font-size: 11px; color: #57606a;" for="new_session_short_name">+ New session</label>
+              <input
+                type="text"
+                name="new_session[short_name]"
+                id="new_session_short_name"
+                placeholder="architect-review"
+                style="width: 100%; padding: 4px 6px; margin-top: 2px; font-size: 12px; border: 1px solid #d1d5da; border-radius: 4px;"
+              />
+              <button
+                type="submit"
+                style="margin-top: 4px; width: 100%; padding: 4px; font-size: 11px; background: white; color: #0969da; border: 1px solid #0969da; border-radius: 4px; cursor: pointer;"
+              >
+                Create
+              </button>
+            </.form>
+          </div>
+
+          <div id="floating-agents" :if={@floating_agents != []} style="margin-top: 16px; padding-top: 12px; border-top: 1px solid #eaeef2;">
+            <h4 style="font-size: 11px; color: #57606a; font-weight: 500; margin: 0 0 6px 0;">Floating agents</h4>
+            <div :for={agent <- @floating_agents} style="margin-bottom: 8px; padding: 4px; border: 1px dashed #d1d5da; border-radius: 4px; font-size: 11px;">
+              <div style="font-family: monospace;">{agent}</div>
+              <form phx-change="add_agent_to_session" style="margin-top: 2px;">
+                <input type="hidden" name="agent_uri" value={agent} />
+                <select
+                  name="session_uri"
+                  style="width: 100%; font-size: 10px; padding: 2px;"
+                >
+                  <option value="">Add to session…</option>
+                  <option :for={s <- @sessions} value={URI.to_string(s)}>{URI.to_string(s)}</option>
+                </select>
+              </form>
+            </div>
+          </div>
+        </aside>
+
         <div>
           <h2 style="font-size: 16px; font-weight: 500; margin: 0 0 8px 0;">
-            Session: <code>session://main</code>
+            Session: <code>{URI.to_string(@current_session_uri)}</code>
           </h2>
 
           <div
@@ -550,11 +714,24 @@ defmodule EsrWebLiveview.AdminLive do
   defp client_label(%{info: %{claude_info: %{"name" => name}}}), do: name
   defp client_label(_), do: "—"
 
-  defp authz_label([:esr, :invoke, :stop]), do: "stub_grant"
+  # Phase 3d: :stub_grant gone (hard flip). Real cap path emits
+  # :granted / :denied via a separate authz event; :invoke :stop only
+  # fires for the success branch (denied short-circuits with :error
+  # :unauthorized at dispatch step 5.5).
+  defp authz_label([:esr, :authz, :granted]), do: "granted"
+  defp authz_label([:esr, :authz, :denied]), do: "denied"
+  defp authz_label([:esr, :invoke, :stop]), do: "granted"
   defp authz_label([:esr, :invoke, :error]), do: "—"
   defp authz_label(_), do: "—"
 
+  defp result_label([:esr, :authz, :granted], _meta), do: "granted"
+  defp result_label([:esr, :authz, :denied], %{caller: c}), do: "denied (caller=#{c})"
+  defp result_label([:esr, :authz, :denied], _meta), do: "denied"
   defp result_label([:esr, :invoke, :stop], _meta), do: "ok"
+
+  defp result_label([:esr, :invoke, :error], %{reason: :unauthorized}),
+    do: "denied"
+
   defp result_label([:esr, :invoke, :error], %{reason: r}), do: "err: #{inspect(r)}"
   defp result_label(_, _), do: "—"
 
@@ -590,6 +767,14 @@ defmodule EsrWebLiveview.AdminLive do
 
   defp member_status_style(true), do: "font-size: 11px; color: #1f883d; font-weight: 600;"
   defp member_status_style(false), do: "font-size: 11px; color: #999;"
+
+  defp session_button_style(true) do
+    "width: 100%; text-align: left; padding: 6px 8px; background: #0969da; color: white; border: none; border-radius: 4px; cursor: pointer; font-family: monospace; font-size: 11px;"
+  end
+
+  defp session_button_style(false) do
+    "width: 100%; text-align: left; padding: 6px 8px; background: white; color: #0969da; border: 1px solid #d1d5da; border-radius: 4px; cursor: pointer; font-family: monospace; font-size: 11px;"
+  end
 
   # Chat row backgrounds — admin浅蓝, agent浅绿. SAME DOM SHAPE — only
   # the wrapper bg colour differs. Phase 2 visual invariant.

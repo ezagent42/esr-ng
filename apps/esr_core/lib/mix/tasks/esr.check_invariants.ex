@@ -19,7 +19,11 @@ defmodule Mix.Tasks.Esr.CheckInvariants do
     `PubSub.broadcast` allowlist: only `:events` topics and
     `esr:audit:stream` may broadcast), **#6** (audit async — no
     direct SQL in `audit.ex`), and **#7** (zero-match → DLQ)
-  - Phase 2+ will add **#5** (snapshot on slice change) and **#8**
+  - **Phase 3d**: adds **#9** (`:stub_grant` atom no longer appears
+    in runtime code — hard flip enforcement) and **#10** (Capability
+    .matches? is grep-present in dispatch step 5.5; runtime invariant
+    test in runtime_phase3d_test.exs is the real cap-deny gate)
+  - Phase 5+ will add **#5** (snapshot on slice change) and **#8**
     (CC channel via stdio)
 
   ## Exit semantics
@@ -44,7 +48,9 @@ defmodule Mix.Tasks.Esr.CheckInvariants do
         check_invariant_3(),
         check_invariant_4(),
         check_invariant_6(),
-        check_invariant_7()
+        check_invariant_7(),
+        check_invariant_9(),
+        check_invariant_10()
       ]
       |> Enum.reject(&match?(:ok, &1))
 
@@ -213,6 +219,68 @@ defmodule Mix.Tasks.Esr.CheckInvariants do
       {:error, 7, "Esr.DLQ does not declare :unroutable reason"}
     else
       Mix.shell().info("  ✓ #7 zero-match → DLQ :unroutable (API present)")
+      :ok
+    end
+  end
+
+  # Invariant #9: Phase 3d hard flip alarm — `:stub_grant` atom no longer
+  # appears in code paths (Phase 3d hard flip per P3-D6). Allowlist:
+  # NOT this checker file (mentions atom in docstring), NOT docstrings
+  # in general (lines starting `#` or inside `"""`). Hits = bug.
+  defp check_invariant_9 do
+    {output, _exit_code} =
+      System.cmd(
+        "bash",
+        [
+          "-c",
+          # Match :stub_grant only outside backtick-quoted prose. Allowlist
+          # files that legitimately mention the atom in their moduledoc
+          # to explain the Phase 3d hard-flip rationale.
+          "grep -rnE ':stub_grant' apps/esr_core/lib apps/esr_plugin_chat/lib " <>
+            "apps/esr_plugin_echo/lib apps/esr_web/lib apps/esr_web_liveview/lib " <>
+            "--include='*.ex' 2>/dev/null " <>
+            "| grep -v 'esr.check_invariants.ex' " <>
+            "| grep -v 'lib/esr/telemetry.ex' " <>
+            "| grep -v 'lib/esr/kind/runtime.ex' " <>
+            "| grep -v 'lib/esr/audit.ex' " <>
+            "| grep -v '^[^:]*:[0-9]*:[[:space:]]*#' " <>
+            "| grep -v ' `:stub_grant`' || true"
+        ],
+        stderr_to_stdout: true
+      )
+
+    if String.trim(output) == "" do
+      Mix.shell().info("  ✓ #9 :stub_grant atom not in code (Phase 3d hard flip enforced)")
+      :ok
+    else
+      {:error, 9, output}
+    end
+  end
+
+  # Invariant #10: dispatch step 5.5 grep tripwire — `Capability.matches?`
+  # must be called inside `kind/runtime.ex`. Single-grep is presence-only;
+  # the real cap-deny gate is `runtime_phase3d_test.exs` (per memory
+  # `feedback_completion_requires_invariant_test`).
+  defp check_invariant_10 do
+    {output, _exit_code} =
+      System.cmd(
+        "bash",
+        [
+          "-c",
+          "grep -E 'Capability\\.matches\\?' " <>
+            "apps/esr_core/lib/esr/kind/runtime.ex || true"
+        ],
+        stderr_to_stdout: true
+      )
+
+    if String.trim(output) == "" do
+      {:error, 10, "Capability.matches? not found in kind/runtime.ex — cap stub revived?"}
+    else
+      Mix.shell().info(
+        "  ✓ #10 Capability.matches? present in dispatch path (real cap check, see " <>
+          "runtime_phase3d_test.exs for runtime gate)"
+      )
+
       :ok
     end
   end

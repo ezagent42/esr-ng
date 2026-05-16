@@ -78,7 +78,7 @@ defmodule EsrWebLiveview.AdminLiveTest do
     text = "lv chat compose test #{System.unique_integer([:positive])}"
 
     lv
-    |> form("section#session form", %{"chat" => %{"text" => text, "agent_uri" => ""}})
+    |> form("form[phx-submit=chat_compose]", %{"chat" => %{"text" => text, "agent_uri" => ""}})
     |> render_submit()
 
     # Give cast time to dispatch + broadcast back through session:events
@@ -95,13 +95,15 @@ defmodule EsrWebLiveview.AdminLiveTest do
     # render in the same #messages container with same DOM structure.
     {:ok, lv, _html} = live(conn, "/admin")
 
-    admin_text = "admin says #{System.unique_integer()}"
+    admin_text = "admin-says-#{System.unique_integer([:positive])}"
 
     lv
-    |> form("section#session form", %{"chat" => %{"text" => admin_text, "agent_uri" => ""}})
+    |> form("form[phx-submit=chat_compose]", %{"chat" => %{"text" => admin_text, "agent_uri" => ""}})
     |> render_submit()
 
-    Process.sleep(100)
+    # Poll until admin text shows in the stream (dispatch → MessageStore →
+    # broadcast → handle_info → stream_insert can be slow under sandbox).
+    assert wait_until_html(lv, admin_text)
 
     # Simulate an agent reply landing via the chat_message broadcast.
     agent_uri = URI.new!("agent://test-#{System.unique_integer([:positive])}")
@@ -110,16 +112,28 @@ defmodule EsrWebLiveview.AdminLiveTest do
     Phoenix.PubSub.broadcast(
       EsrCore.PubSub,
       Esr.Behavior.Chat.session_events_topic(URI.new!("session://main")),
-      {:chat_message, agent_msg}
+      {:chat_message, URI.new!("session://main"), agent_msg}
     )
 
-    Process.sleep(50)
-    html = render(lv)
+    assert wait_until_html(lv, "agent reply test")
 
+    html = render(lv)
     # Both senders appear in the messages container
     assert html =~ admin_text
     assert html =~ "agent reply test"
     assert html =~ ~s(id="messages")
+  end
+
+  defp wait_until_html(lv, substr, retries \\ 50)
+  defp wait_until_html(_lv, _substr, 0), do: false
+
+  defp wait_until_html(lv, substr, retries) do
+    if render(lv) =~ substr do
+      true
+    else
+      Process.sleep(20)
+      wait_until_html(lv, substr, retries - 1)
+    end
   end
 
   test "Manual dispatch with invalid URI shows error message", %{conn: conn} do

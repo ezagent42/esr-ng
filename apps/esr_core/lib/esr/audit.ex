@@ -24,9 +24,21 @@ defmodule Esr.Audit do
   @handler_id "esr-audit"
   @audit_stream_topic "esr:audit:stream"
 
+  # Phase 3d hard flip (per P3-D6 + #B5):
+  # - [:esr, :authz, :granted] / :denied REPLACE the Phase 1-2 :stub_grant
+  #   marker. New audit rows carry "granted" / "denied" in the authz
+  #   column; check_invariants #9 enforces :stub_grant atom no longer
+  #   appears in code (only allowed in this audit.ex if we needed
+  #   backward-compat decoding, which we don't — Phase 3d hard flip).
   @events [
     [:esr, :invoke, :stop],
-    [:esr, :invoke, :error]
+    [:esr, :invoke, :error],
+    [:esr, :authz, :granted],
+    [:esr, :authz, :denied],
+    # Phase 3d quality hotfix: chat reply dispatch fail visibility
+    # (was silent before — real-claude e2e exposed wrong session_uri
+    # disappearing into the void).
+    [:esr, :chat, :reply_dispatch_failed]
   ]
 
   @doc """
@@ -72,13 +84,27 @@ defmodule Esr.Audit do
       args: nil,
       result: nil,
       duration_us: us,
-      authz: "stub_grant",
+      # Phase 3d: authz column from real cap check. :granted event has
+      # already fired before this :invoke :stop, so we record "granted"
+      # for success. The :denied path never reaches :invoke :stop
+      # because dispatch short-circuits with {:error, :unauthorized}.
+      authz: "granted",
       exception: nil,
       inserted_at: DateTime.utc_now()
     }
   end
 
   defp build_row([:esr, :invoke, :error], %{duration_us: us}, meta) do
+    reason = Map.get(meta, :reason)
+
+    # Distinguish authz denied from other errors so the audit row's
+    # authz column is meaningful for operators debugging permissions.
+    authz =
+      case reason do
+        :unauthorized -> "denied"
+        _ -> "n/a"
+      end
+
     %{
       trace_id: nil,
       caller: uri_to_str(Map.get(meta, :caller)),
@@ -87,9 +113,48 @@ defmodule Esr.Audit do
       args: nil,
       result: nil,
       duration_us: us,
-      authz: "stub_grant",
+      authz: authz,
       # JSON-encode for ecto_sqlite3 schemaless insert_all (see Esr.DLQ).
-      exception: Jason.encode!(%{reason: inspect(Map.get(meta, :reason))}),
+      exception: Jason.encode!(%{reason: inspect(reason)}),
+      inserted_at: DateTime.utc_now()
+    }
+  end
+
+  # Phase 3d: :authz events also persist a row so the audit log shows
+  # the granted/denied decision separately from invoke success/error.
+  defp build_row([:esr, :authz, decision], _measurements, meta) do
+    %{
+      trace_id: nil,
+      caller: uri_to_str(Map.get(meta, :caller)),
+      target: uri_to_str(Map.get(meta, :target)),
+      action: stringify(Map.get(meta, :action)),
+      args: nil,
+      result: nil,
+      duration_us: 0,
+      authz: Atom.to_string(decision),
+      exception: nil,
+      inserted_at: DateTime.utc_now()
+    }
+  end
+
+  # Phase 3d quality hotfix: chat reply dispatch failure (agent's chat/send
+  # targeting a non-existent session). Persisted so admin can see why a
+  # claude reply silently disappeared.
+  defp build_row([:esr, :chat, :reply_dispatch_failed], _measurements, meta) do
+    %{
+      trace_id: nil,
+      caller: Map.get(meta, :agent),
+      target: "#{Map.get(meta, :target_session)}/behavior/chat/send",
+      action: "send",
+      args: nil,
+      result: nil,
+      duration_us: 0,
+      authz: "n/a",
+      exception:
+        Jason.encode!(%{
+          reason: inspect(Map.get(meta, :reason)),
+          message_uri: Map.get(meta, :message_uri)
+        }),
       inserted_at: DateTime.utc_now()
     }
   end

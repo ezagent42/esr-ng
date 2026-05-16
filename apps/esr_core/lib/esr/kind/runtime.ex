@@ -6,9 +6,11 @@ defmodule Esr.Kind.Runtime do
   specific pid by `Esr.Invocation.dispatch/1`:
 
   - **5**: `BehaviorRegistry.lookup({kind_module, action})`
-  - **5.5**: authz gate (Phase 1 stub — always grant + emit
-    `:stub_grant` telemetry; replaced in-place at Phase 3d per
-    Decision #82, hence the `PHASE-3D-STUB: DO NOT REMOVE` marker)
+  - **5.5**: authz gate — `Esr.Capability.matches?` against ctx.caps
+    (Phase 3d hard flip per P3-D6). Emits `[:esr, :authz, :granted]`
+    or `[:esr, :authz, :denied]`. The Phase 1-2 permissive stub
+    (emit `:stub_grant` + always grant) is GONE; check_invariants #9
+    enforces the atom no longer appears in code.
   - **5.7**: validate args against `behavior.interface()[action].args`
   - **6**: extract slice = `state[behavior.state_slice()]`
   - **7**: `behavior.invoke(action, slice, args, ctx)`
@@ -53,7 +55,7 @@ defmodule Esr.Kind.Runtime do
 
     with {:ok, {behavior_name_atom, action}} <- Esr.URI.behavior_action(target),
          {:ok, behavior_module} <- lookup_behavior(kind_module, action),
-         :ok <- authz_stub(kind_module, behavior_module, target, enriched_ctx),
+         :ok <- authz_check(kind_module, action, target, enriched_ctx),
          :ok <- validate_args(behavior_module, action, args),
          slice_key <- behavior_module.state_slice(),
          slice <- Map.get(state, slice_key, %{}),
@@ -100,25 +102,35 @@ defmodule Esr.Kind.Runtime do
     end
   end
 
-  # PHASE-3D-STUB: DO NOT REMOVE.
-  # Per Decision #82: this is the explicit permissive stub. It always
-  # grants (Phase 1 has no real CapBAC) but emits `:stub_grant`
-  # telemetry so the path is observable. Phase 3d replaces the body
-  # with real cap matching in-place — DO NOT delete the function or
-  # change its signature.
-  defp authz_stub(kind_module, behavior_module, target, ctx) do
-    :telemetry.execute(
-      [:esr, :authz, :stub_grant],
-      %{},
-      %{
-        kind_module: kind_module,
-        behavior_module: behavior_module,
-        target: target,
-        caller: Map.get(ctx, :caller)
-      }
-    )
+  # Phase 3d hard flip (per P3-D6): real cap check via Capability.matches?.
+  # `:stub_grant` telemetry is GONE — replaced with `:granted` (success)
+  # and `:denied` (failure). Per memory feedback_let_it_crash_no_workarounds:
+  # no feature flag, no parallel paths; the alarm path is "this function
+  # ever emits :stub_grant" which check_invariants #9 enforces.
+  defp authz_check(kind_module, action, target, ctx) do
+    needed = Esr.Capability.cap_for_action(kind_module, action, target)
+    caps = Map.get(ctx, :caps, MapSet.new())
 
-    :ok
+    granted? =
+      Enum.any?(caps, fn cap ->
+        Esr.Capability.matches?(cap, needed)
+      end)
+
+    meta = %{
+      kind_module: kind_module,
+      action: action,
+      target: target,
+      caller: Map.get(ctx, :caller),
+      needed: needed
+    }
+
+    if granted? do
+      :telemetry.execute([:esr, :authz, :granted], %{}, meta)
+      :ok
+    else
+      :telemetry.execute([:esr, :authz, :denied], %{}, meta)
+      {:error, :unauthorized}
+    end
   end
 
   defp validate_args(behavior_module, action, args) do

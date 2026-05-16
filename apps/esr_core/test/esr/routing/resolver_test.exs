@@ -1,0 +1,77 @@
+defmodule Esr.Routing.ResolverTest do
+  @moduledoc """
+  Phase 3a-step 3: Resolver tests.
+
+  Each test declares its OWN routing table (unique per test, owned by
+  the test process) and configures `Esr.Routing.Resolver` to query
+  that table via `Application.put_env(:esr_core, :routing_tables, ...)`.
+  This avoids conflict with the live `EsrPluginChat.Application` which
+  owns `MentionRouting` and `SessionRouting` for the running app.
+  """
+
+  use ExUnit.Case, async: false
+  alias Esr.{Message, RoutingRegistry}
+  alias Esr.Routing.{Matcher, Resolver}
+
+  setup do
+    test_table = :"resolver_test_#{System.unique_integer([:positive])}"
+    :ok = RoutingRegistry.declare_table(test_table, key_uniqueness: :duplicate)
+
+    original = Application.get_env(:esr_core, :routing_tables)
+    Application.put_env(:esr_core, :routing_tables, [test_table])
+
+    on_exit(fn ->
+      if original do
+        Application.put_env(:esr_core, :routing_tables, original)
+      else
+        Application.delete_env(:esr_core, :routing_tables)
+      end
+    end)
+
+    {:ok, table: test_table}
+  end
+
+  defp msg(text \\ "hello", mentions \\ []) do
+    Message.new(URI.new!("user://admin"), %{text: text, attachments: []}, mentions: mentions)
+  end
+
+  describe "resolve/2" do
+    test "returns [] when no rule matches → caller falls through to in-session default" do
+      assert [] = Resolver.resolve(msg(), URI.new!("session://main"))
+    end
+
+    test "mention(X) rule fires when message mentions X — returns receivers", %{table: t} do
+      target = URI.new!("agent://cc-builder")
+      :ok = RoutingRegistry.put(t, Matcher.mention(target), ["session://oncall"])
+
+      result = Resolver.resolve(msg("hi", [target]), URI.new!("session://main"))
+      assert result == [URI.new!("session://oncall")]
+    end
+
+    test "additive: multiple rules matching → union receivers, deduplicated", %{table: t} do
+      target = URI.new!("agent://X")
+
+      :ok = RoutingRegistry.put(t, Matcher.mention(target), ["session://A", "session://B"])
+      :ok = RoutingRegistry.put(t, Matcher.always(), ["session://B", "session://C"])
+
+      result = Resolver.resolve(msg("hi", [target]), URI.new!("session://main"))
+      uris = result |> Enum.map(&URI.to_string/1) |> Enum.sort()
+      assert uris == ["session://A", "session://B", "session://C"]
+    end
+
+    test "text_contains rule matches body", %{table: t} do
+      :ok = RoutingRegistry.put(t, Matcher.text_contains("urgent"), ["session://oncall"])
+
+      assert Resolver.resolve(msg("server urgent down"), URI.new!("session://main")) ==
+               [URI.new!("session://oncall")]
+
+      # No match if word absent
+      assert Resolver.resolve(msg("all green"), URI.new!("session://main")) == []
+    end
+
+    test "table not declared in app env → silently skip (returns [])" do
+      Application.put_env(:esr_core, :routing_tables, [:nonexistent_table])
+      assert [] = Resolver.resolve(msg(), URI.new!("session://main"))
+    end
+  end
+end

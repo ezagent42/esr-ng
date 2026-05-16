@@ -108,9 +108,22 @@ def post_disconnect() -> bool:
         return False
 
 
-def post_reply(text: str) -> bool:
-    """Forward claude's reply tool call to esrd."""
-    body = json.dumps({"bridge_id": BRIDGE_ID, "text": text}).encode("utf-8")
+def post_reply(session_uris, text: str, ref=None) -> bool:
+    """Forward claude's reply tool call to esrd.
+
+    Phase 3c: D8 contract — must include session_uris (list) and may
+    include ref (optional). esrd's controller routes via Agent Kind
+    (per session_uri) so reply lands in the chat router.
+    """
+    payload = {
+        "bridge_id": BRIDGE_ID,
+        "session_uris": list(session_uris),
+        "text": text,
+    }
+    if ref:
+        payload["ref"] = ref
+
+    body = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
         f"{ESRD_URL}/api/cc-bridge/reply",
         data=body,
@@ -226,25 +239,49 @@ def handle(msg: dict):
                         "description": (
                             "Send a reply back through the esr-bridge channel. "
                             "Use this whenever you want to respond to a "
-                            "<channel source=\"esr-bridge\"> message."
+                            "<channel source=\"esr-bridge\"> message. "
+                            "MUST include session_uris (list of target session URIs) "
+                            "and text. Optionally include ref (URI of message being "
+                            "replied to)."
                         ),
                         "inputSchema": {
                             "type": "object",
                             "properties": {
+                                "session_uris": {
+                                    "type": "array",
+                                    "items": {"type": "string"},
+                                    "description": (
+                                        "Target session URI(s). Phase 3 multi-session: "
+                                        "you may target multiple sessions in one reply. "
+                                        "Look for the source session in the inbound "
+                                        '<channel> tag meta.'
+                                    ),
+                                },
                                 "text": {
                                     "type": "string",
                                     "description": "The message text to send back.",
-                                }
+                                },
+                                "ref": {
+                                    "type": "string",
+                                    "description": (
+                                        "Optional URI of the message being replied to. "
+                                        "If provided, esrd verifies its session matches "
+                                        "session_uris (soft warning on mismatch)."
+                                    ),
+                                },
                             },
-                            "required": ["text"],
+                            "required": ["session_uris", "text"],
                         },
                     }
                 ]
             },
         )
     elif method == "tools/call" and params.get("name") == "reply":
-        text = params.get("arguments", {}).get("text", "")
-        ok = post_reply(text)
+        args = params.get("arguments", {})
+        text = args.get("text", "")
+        session_uris = args.get("session_uris", [])
+        ref = args.get("ref")
+        ok = post_reply(session_uris, text, ref)
         respond(
             req_id,
             {

@@ -91,18 +91,38 @@ defmodule Esr.Behavior.Chat do
     case MessageStore.write(msg, session_uri) do
       {:ok, _stored} ->
         # 2. Broadcast for in-session subscribers (LV chat stream).
+        # Phase 3: include session_uri in payload so multi-session LV
+        # subscribers can filter by current session.
         Phoenix.PubSub.broadcast(
           EsrCore.PubSub,
           session_events_topic(session_uri),
-          {:chat_message, msg}
+          {:chat_message, session_uri, msg}
         )
 
-        # 3. Fan out :receive to recipients. mentions = [] means
-        # "everyone in the room"; mentions = [...] means just those URIs.
-        recipients = derive_recipients(msg, slice)
+        # 3. Fan out routing decisions in two flavors:
+        # (a) cross-session targets from Resolver → dispatch chat/send to
+        #     that target session (it'll handle its own member fan-out)
+        # (b) in-session members fan-out:
+        #     - if Resolver returned any cross-session targets: still
+        #       do in-session fan-out too (additive — message belongs
+        #       to current session too)
+        #     - if Resolver returned []: members-only (default)
+        cross_session_targets = Esr.Routing.Resolver.resolve(msg, session_uri)
+        in_session_members = Map.keys(slice.members)
 
-        for recipient_uri <- recipients, recipient_uri != msg.sender do
-          dispatch_receive(recipient_uri, msg, session_uri)
+        # Avoid recursion: don't dispatch to the current session as a
+        # cross-session target (would loop forever).
+        cross_filtered =
+          Enum.reject(cross_session_targets, fn target ->
+            URI.to_string(target) == URI.to_string(session_uri)
+          end)
+
+        for target_session <- cross_filtered do
+          dispatch_cross_session(target_session, msg)
+        end
+
+        for member_uri <- in_session_members, member_uri != msg.sender do
+          dispatch_receive(member_uri, msg, session_uri)
         end
 
         {:ok, slice, %{stored: true}}
@@ -126,19 +146,28 @@ defmodule Esr.Behavior.Chat do
         {:ok, slice}
 
       Esr.Entity.Agent ->
-        # 2c-step 1: look up the bridge bound to this Agent's URI and
-        # push the body text to claude via the SSE topic. If no bridge
-        # is bound (Agent spawned but bridge already disconnected),
-        # silently drop — the message stays in MessageStore so a
-        # reconnecting bridge can replay it via rejoin's in_session_since.
+        # 2c-step 1 (+ Phase 3 P3-D8 source session in meta): look up
+        # the bridge bound to this Agent's URI and push the body text
+        # to claude via the SSE topic. Phase 3: include `session` in
+        # meta so claude knows which session to fill in reply
+        # `session_uris` field. ctx.caller is the Session that
+        # dispatched this :receive (set in Chat.dispatch_receive).
         case Esr.Bridge.V1Prototype.Server.bridge_for_agent(ctx.self_uri) do
           {:ok, bridge_id} ->
+            source_session =
+              case Map.get(ctx, :caller) do
+                %URI{} = u -> URI.to_string(u)
+                s when is_binary(s) -> s
+                _ -> ""
+              end
+
             Esr.Bridge.V1Prototype.Server.push_to_claude(
               bridge_id,
               body_text(msg.body),
               %{
                 "sender" => URI.to_string(msg.sender),
-                "message_uri" => msg.uri
+                "message_uri" => msg.uri,
+                "session" => source_session
               }
             )
 
@@ -245,39 +274,133 @@ defmodule Esr.Behavior.Chat do
     end
   end
 
-  # Bridge → Agent reply path (2c-step 1). When the controller's
-  # forward_reply_to_agent/2 lands on the Agent's mailbox, this clause
-  # constructs the chat envelope + dispatches send through Session so
-  # the reply walks the same router as any other chat message.
+  # Bridge → Agent reply path (Phase 3c-step 2/3, P3-D8 contract).
   #
-  # Guarded on ctx.kind_module = Agent: other Kinds would not normally
-  # receive {:reply_received, _}, but the guard makes intent explicit
-  # and prevents a misrouted message from re-dispatching from User.
-  def handle_kind_message({:reply_received, text}, _slice, %{kind_module: Esr.Entity.Agent} = ctx)
-      when is_binary(text) do
+  # When the controller's forward_reply_to_agent/4 lands on the Agent's
+  # mailbox, this clause constructs ONE chat envelope (identity invariant
+  # per Decision #40) and dispatches `chat/send` once per session_uri in
+  # the target list. Same Message URI lands in multiple sessions via
+  # MessageStore.write upsert + message_routings rows (per #P1-4 fix).
+  #
+  # ref consistency soft warn (P3-D8): if `ref` is provided, look up the
+  # ref'd Message's session presence and check it overlaps with the
+  # supplied session_uris. Mismatch emits telemetry + audit warn but
+  # STILL routes per the explicit session_uris (trust claude's choice).
+  def handle_kind_message(
+        {:reply_received, session_uris, text, ref_str_or_nil},
+        _slice,
+        %{kind_module: Esr.Entity.Agent} = ctx
+      )
+      when is_list(session_uris) and is_binary(text) do
     agent_uri = ctx.self_uri
-    session_uri = Esr.Entity.Session.default_uri()
 
-    msg = Message.new(agent_uri, %{text: text, attachments: []})
-    target = URI.new!("#{URI.to_string(session_uri)}/behavior/chat/send")
+    # Construct envelope once (identity invariant). ref is string at
+    # wire boundary; parse to %URI{} for the Message struct.
+    ref_uri =
+      case ref_str_or_nil do
+        nil -> nil
+        "" -> nil
+        s when is_binary(s) -> URI.new!(s)
+      end
 
-    _ =
-      Invocation.dispatch(%Invocation{
-        target: target,
-        mode: :cast,
-        args: %{message: msg},
-        ctx: %{
-          caller: agent_uri,
-          caps: MapSet.new(),
-          reply: :ignore
-        }
-      })
+    msg =
+      Message.new(agent_uri, %{text: text, attachments: []},
+        ref: ref_uri
+      )
+
+    # Soft consistency check: ref'd message should have been seen in at
+    # least one of the target sessions. Mismatch = noisy emit, not block.
+    maybe_emit_ref_mismatch(ref_str_or_nil, session_uris)
+
+    # Dispatch chat/send per session_uri. Message envelope shared.
+    # Phase 3d: agent's reply dispatch runs under admin caps for the
+    # same reason as Session fan-out — the reply path is system-routed
+    # from the bridge. Phase 4 will give Agents their own send caps.
+    #
+    # Phase 3d quality fix: if dispatch fails (e.g. claude filled
+    # session_uris with a non-existent session), emit telemetry +
+    # audit warn instead of silently dropping. Real-claude e2e
+    # exposed this — early replies before the meta-session fix
+    # targeted "session://admin" which didn't exist and disappeared
+    # silently.
+    for session_uri_str <- session_uris do
+      target = URI.new!("#{session_uri_str}/behavior/chat/send")
+
+      result =
+        Invocation.dispatch(%Invocation{
+          target: target,
+          mode: :cast,
+          args: %{message: msg},
+          ctx: %{
+            caller: agent_uri,
+            caps: Esr.Entity.User.admin_caps(),
+            reply: :ignore
+          }
+        })
+
+      case result do
+        :ok ->
+          :ok
+
+        {:ok, _} ->
+          :ok
+
+        {:error, reason} ->
+          :telemetry.execute(
+            [:esr, :chat, :reply_dispatch_failed],
+            %{},
+            %{
+              agent: URI.to_string(agent_uri),
+              target_session: session_uri_str,
+              reason: reason,
+              message_uri: msg.uri
+            }
+          )
+      end
+    end
 
     # Slice unchanged — Agent has no chat state of its own.
     :ignore
   end
 
   def handle_kind_message(_other_message, _slice, _ctx), do: :ignore
+
+  defp maybe_emit_ref_mismatch(nil, _), do: :ok
+  defp maybe_emit_ref_mismatch("", _), do: :ok
+
+  defp maybe_emit_ref_mismatch(ref_str, session_uris) when is_binary(ref_str) do
+    case Esr.MessageStore.by_uri(ref_str) do
+      :error ->
+        # Ref points to unknown message — still warn (claude may have
+        # made up a ref or referenced a pruned message).
+        :telemetry.execute(
+          [:esr, :chat, :reply_session_mismatch],
+          %{},
+          %{ref: ref_str, target_sessions: session_uris, reason: :ref_not_found}
+        )
+
+      {:ok, _msg} ->
+        # Compare against actual presence (via message_routings join).
+        actual_sessions = Esr.MessageStore.sessions_for_message(ref_str)
+
+        intersection = MapSet.intersection(MapSet.new(actual_sessions), MapSet.new(session_uris))
+
+        if MapSet.size(intersection) == 0 do
+          :telemetry.execute(
+            [:esr, :chat, :reply_session_mismatch],
+            %{},
+            %{
+              ref: ref_str,
+              target_sessions: session_uris,
+              ref_actual_sessions: actual_sessions,
+              reason: :no_overlap
+            }
+          )
+        end
+    end
+
+    :ok
+  end
 
   # --- Interface schema --------------------------------------------------
 
@@ -323,19 +446,37 @@ defmodule Esr.Behavior.Chat do
 
   # --- Internals ---------------------------------------------------------
 
-  defp derive_recipients(%Message{mentions: []}, slice), do: Map.keys(slice.members)
-  defp derive_recipients(%Message{mentions: mentions}, _slice), do: mentions
-
-  defp dispatch_receive(recipient_uri, %Message{} = msg, session_uri) do
-    target = URI.new!("#{URI.to_string(recipient_uri)}/behavior/chat/receive")
+  defp dispatch_cross_session(target_session_uri, %Message{} = msg) do
+    # Recursively dispatch chat/send on the target session — that
+    # session handles its own member fan-out + further routing rules.
+    target = URI.new!("#{URI.to_string(target_session_uri)}/behavior/chat/send")
 
     Invocation.dispatch(%Invocation{
       target: target,
       mode: :cast,
       args: %{message: msg},
       ctx: %{
+        caller: msg.sender,
+        caps: Esr.Entity.User.admin_caps(),
+        reply: :ignore
+      }
+    })
+  end
+
+  defp dispatch_receive(recipient_uri, %Message{} = msg, session_uri) do
+    target = URI.new!("#{URI.to_string(recipient_uri)}/behavior/chat/receive")
+
+    # Phase 3d: Session's fan-out to recipients runs under admin caps —
+    # the Session is acting on behalf of the system-routed message.
+    # Phase 4+ will refine to a dedicated "system-internal" cap when
+    # multi-user authorization arrives.
+    Invocation.dispatch(%Invocation{
+      target: target,
+      mode: :cast,
+      args: %{message: msg},
+      ctx: %{
         caller: session_uri,
-        caps: MapSet.new(),
+        caps: Esr.Entity.User.admin_caps(),
         reply: :ignore
       }
     })

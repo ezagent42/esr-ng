@@ -35,7 +35,11 @@ defmodule Esr.Kind.ServerTest do
       target: URI.parse("#{URI.to_string(uri)}/behavior/test/noop"),
       mode: :call,
       args: %{msg: "hello"},
-      ctx: %{caller: URI.parse("user://admin"), caps: MapSet.new(), reply: :ignore}
+      ctx: %{
+        caller: URI.parse("user://admin"),
+        caps: Esr.Entity.User.admin_caps(),
+        reply: :ignore
+      }
     }
 
     assert {:ok, %{echoed: "hello"}} = GenServer.call(pid, {:esr_dispatch, inv})
@@ -51,7 +55,7 @@ defmodule Esr.Kind.ServerTest do
       args: %{msg: "via-cast"},
       ctx: %{
         caller: URI.parse("user://admin"),
-        caps: MapSet.new(),
+        caps: Esr.Entity.User.admin_caps(),
         reply: {:caller_inbox, self()}
       }
     }
@@ -70,7 +74,7 @@ defmodule Esr.Kind.ServerTest do
       args: %{msg: "pre-ready"},
       ctx: %{
         caller: URI.parse("user://admin"),
-        caps: MapSet.new(),
+        caps: Esr.Entity.User.admin_caps(),
         reply: {:caller_inbox, self()}
       }
     }

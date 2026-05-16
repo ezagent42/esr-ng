@@ -1,0 +1,91 @@
+defmodule Esr.Behavior.IdentityTest do
+  use ExUnit.Case, async: true
+  alias Esr.Behavior.Identity
+  alias Esr.{Capability, Entity.User}
+
+  describe "init_slice/1" do
+    test "default initial_caps is empty MapSet" do
+      assert %{caps: caps} = Identity.init_slice(%{uri: URI.new!("user://x")})
+      assert MapSet.size(caps) == 0
+    end
+
+    test "accepts initial_caps as MapSet (admin path)" do
+      admin_caps = User.admin_caps()
+      assert %{caps: caps} = Identity.init_slice(%{initial_caps: admin_caps})
+      assert caps == admin_caps
+    end
+
+    test "accepts initial_caps as list" do
+      [cap] = MapSet.to_list(User.admin_caps())
+      assert %{caps: caps} = Identity.init_slice(%{initial_caps: [cap]})
+      assert MapSet.size(caps) == 1
+    end
+  end
+
+  describe "invoke(:list_caps, ...)" do
+    test "returns list of all caps in slice" do
+      slice = Identity.init_slice(%{initial_caps: User.admin_caps()})
+
+      assert {:ok, ^slice, %{caps: list}} = Identity.invoke(:list_caps, slice, %{}, %{})
+      assert length(list) == MapSet.size(slice.caps)
+    end
+  end
+
+  describe "invoke(:has_cap?, ...)" do
+    test "returns true for admin all-cap match" do
+      slice = Identity.init_slice(%{initial_caps: User.admin_caps()})
+
+      needed = %{
+        kind: :session,
+        behavior: Esr.Behavior.Chat,
+        instance: URI.new!("session://main")
+      }
+
+      assert {:ok, ^slice, %{has: true}} = Identity.invoke(:has_cap?, slice, %{cap: needed}, %{})
+    end
+
+    test "returns false when no caps match" do
+      slice = Identity.init_slice(%{})
+
+      needed = %{
+        kind: :session,
+        behavior: Esr.Behavior.Chat,
+        instance: URI.new!("session://main")
+      }
+
+      assert {:ok, ^slice, %{has: false}} = Identity.invoke(:has_cap?, slice, %{cap: needed}, %{})
+    end
+  end
+
+  describe "Behavior contract" do
+    test "actions/0" do
+      assert Identity.actions() == [:list_caps, :has_cap?]
+    end
+
+    test "state_slice/0" do
+      assert Identity.state_slice() == :identity
+    end
+
+    test "interface/0 declares both actions with :call mode" do
+      iface = Identity.interface()
+      assert Map.has_key?(iface, :list_caps)
+      assert Map.has_key?(iface, :has_cap?)
+      assert iface[:list_caps].modes == [:call]
+      assert iface[:has_cap?].modes == [:call]
+    end
+  end
+
+  describe "Capability.matches? integration sanity" do
+    test "admin all-cap matches arbitrary needed cap (the gate Phase 3d uses)" do
+      slice = Identity.init_slice(%{initial_caps: User.admin_caps()})
+
+      [admin_cap] = MapSet.to_list(slice.caps)
+
+      assert Capability.matches?(admin_cap, %{
+               kind: :anything,
+               behavior: SomeMod,
+               instance: URI.new!("agent://X")
+             })
+    end
+  end
+end

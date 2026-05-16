@@ -74,4 +74,37 @@ defmodule Esr.Capability do
       do: true
 
   def admin_invariant?(%__MODULE__{}), do: false
+
+  @doc """
+  Compute the `needed` cap shape for a given (Kind module, action,
+  target URI) tuple — for dispatch step 5.5 to feed into `matches?/2`.
+
+  Phase 3d (P3-D6 hard flip + #P1-8): the target URI is required so
+  we can extract the `instance` part (e.g. `session://main` from
+  `session://main/behavior/chat/send`). `behavior` is looked up via
+  `BehaviorRegistry.lookup(kind_module, action)` — same lookup
+  `Kind.Runtime` does for invoke routing.
+
+  Returns the 3-field map `Capability.matches?/2` expects:
+  `%{kind: atom, behavior: module, instance: %URI{}}`.
+  """
+  @spec cap_for_action(module(), atom(), URI.t()) :: %{
+          kind: atom(),
+          behavior: module(),
+          instance: URI.t()
+        }
+  def cap_for_action(kind_module, action, %URI{} = target_uri)
+      when is_atom(kind_module) and is_atom(action) do
+    behavior =
+      case Esr.BehaviorRegistry.lookup(kind_module, action) do
+        {:ok, behavior_module} -> behavior_module
+        :error -> :unknown
+      end
+
+    %{
+      kind: kind_module.type_name(),
+      behavior: behavior,
+      instance: Esr.URI.instance(target_uri)
+    }
+  end
 end

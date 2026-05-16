@@ -116,4 +116,40 @@ defmodule Esr.CapabilityTest do
       assert {:ok, _new_caps} = Capability.revoke(caps, cap)
     end
   end
+
+  describe "cap_for_action/3 (Phase 3d)" do
+    test "extracts kind type name + behavior from registry + instance from URI" do
+      # Echo plugin pre-registers BehaviorRegistry at boot
+      target = URI.new!("agent://echo/behavior/echo/say")
+
+      needed = Capability.cap_for_action(Esr.Entity.Echo, :say, target)
+
+      assert needed.kind == :echo
+      assert needed.behavior == Esr.Behavior.Echo
+      assert needed.instance == URI.new!("agent://echo")
+    end
+
+    test "unknown action returns :unknown behavior" do
+      target = URI.new!("agent://echo/behavior/echo/say")
+      needed = Capability.cap_for_action(Esr.Entity.Echo, :nonexistent_action, target)
+      assert needed.behavior == :unknown
+    end
+
+    test "session://main/behavior/chat/send → :session + Chat + session://main instance" do
+      target = URI.new!("session://main/behavior/chat/send")
+      needed = Capability.cap_for_action(Esr.Entity.Session, :send, target)
+
+      assert needed.kind == :session
+      assert needed.behavior == Esr.Behavior.Chat
+      assert needed.instance == URI.new!("session://main")
+    end
+
+    test "admin all-cap matches the needed shape (closed-loop integration)" do
+      [admin_cap] = MapSet.to_list(Esr.Entity.User.admin_caps())
+      target = URI.new!("session://main/behavior/chat/send")
+      needed = Capability.cap_for_action(Esr.Entity.Session, :send, target)
+
+      assert Capability.matches?(admin_cap, needed)
+    end
+  end
 end

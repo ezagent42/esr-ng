@@ -13,11 +13,13 @@ defmodule Esr.Kind.SnapshotTest do
   end
 
   test "load_or_init for :on_change Kind without prior snapshot also init_fresh" do
-    # Esr.Entity.User has persistence {:snapshot, :on_change}, no
-    # Behaviors. Phase 1 snapshot fetch always misses, so we still
-    # get an empty initial state.
+    # Phase 3d: Esr.Entity.User has Identity behavior; init_fresh runs
+    # Identity.init_slice/1 with the args (no :initial_caps here →
+    # MapSet.new()). Snapshot fetch always misses (Phase 1 stub), so
+    # we get fresh Identity slice.
     uri = Esr.Entity.User.admin_uri()
-    assert %{} == Snapshot.load_or_init(uri, Esr.Entity.User, %{uri: uri})
+    state = Snapshot.load_or_init(uri, Esr.Entity.User, %{uri: uri})
+    assert state == %{identity: %{caps: MapSet.new()}}
   end
 
   test "maybe_save no-op for :ephemeral" do
