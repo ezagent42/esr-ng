@@ -1,0 +1,79 @@
+defmodule EsrWebLiveview.WorkspaceAddTemplateLiveTest do
+  @moduledoc """
+  Phase 5 PR 1 invariant test: Workspace LV add-template (form mode)
+  results in a Session spawned via GenericSession Template Class
+  end-to-end (LV → Workspace.add_template → trigger_instantiate →
+  TemplateRegistry → Class.instantiate → SpawnRegistry).
+  """
+
+  use ExUnit.Case
+  import Phoenix.ConnTest
+  import Phoenix.LiveViewTest
+
+  @endpoint EsrWeb.Endpoint
+
+  setup do
+    :ok = Ecto.Adapters.SQL.Sandbox.checkout(EsrCore.Repo)
+    Ecto.Adapters.SQL.Sandbox.mode(EsrCore.Repo, {:shared, self()})
+
+    conn =
+      Phoenix.ConnTest.build_conn()
+      |> Plug.Test.init_test_session(%{
+        "current_user_uri" => URI.to_string(Esr.Entity.User.admin_uri())
+      })
+
+    {:ok, conn: conn}
+  end
+
+  test "add-template form mode → GenericSession Class spawns Session live", %{conn: conn} do
+    ws_name = "add-tmpl-test-#{System.unique_integer([:positive])}"
+    {:ok, _} = Esr.Workspace.create(ws_name)
+
+    session_name = "test-#{System.unique_integer([:positive])}"
+
+    {:ok, lv, _html} = live(conn, "/admin/workspaces/#{ws_name}")
+
+    lv
+    |> form("#add-template form",
+      add_template: %{
+        tmpl_name: "main",
+        session_name: session_name,
+        members_csv: "user://admin"
+      }
+    )
+    |> render_submit()
+
+    # Verify persistence
+    assert %{session_templates: %{"main" => tmpl}} =
+             Esr.Workspace.Store.get_by_name(ws_name)
+
+    assert tmpl["class"] == "session.generic"
+    assert tmpl["session_name"] == session_name
+
+    # Wait for the Session Kind to be alive in KindRegistry
+    session_uri = URI.parse("session://#{session_name}")
+    Process.sleep(100)
+    assert {:ok, _pid} = Esr.KindRegistry.lookup(session_uri)
+  end
+
+  test "remove_template drops the entry from persisted Workspace", %{conn: conn} do
+    ws_name = "rm-tmpl-test-#{System.unique_integer([:positive])}"
+    {:ok, _} = Esr.Workspace.create(ws_name)
+
+    :ok =
+      Esr.Workspace.add_template(ws_name, "foo", %{
+        "class" => "session.generic",
+        "session_name" => "foosession-#{System.unique_integer([:positive])}",
+        "members" => []
+      })
+
+    {:ok, lv, _html} = live(conn, "/admin/workspaces/#{ws_name}")
+
+    lv
+    |> element("button[phx-click='remove_template'][phx-value-name='foo']")
+    |> render_click()
+
+    assert %{session_templates: tmpls} = Esr.Workspace.Store.get_by_name(ws_name)
+    refute Map.has_key?(tmpls, "foo")
+  end
+end

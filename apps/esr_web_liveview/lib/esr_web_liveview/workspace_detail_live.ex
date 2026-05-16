@@ -32,7 +32,21 @@ defmodule EsrWebLiveview.WorkspaceDetailLive do
          |> assign(:name, name)
          |> assign(:workspace, ws)
          |> assign(:flash_error, nil)
+         |> assign(:template_mode, "form")
          |> assign(:add_form, to_form(%{"member_uri" => ""}, as: "add_member"))
+         |> assign(
+           :add_template_form,
+           to_form(
+             %{
+               "tmpl_name" => "",
+               "class" => "session.generic",
+               "session_name" => "",
+               "members_csv" => "",
+               "json" => ""
+             },
+             as: "add_template"
+           )
+         )
          |> assign(:registered_template_classes, Esr.TemplateRegistry.registered_template_names())}
     end
   end
@@ -62,6 +76,12 @@ defmodule EsrWebLiveview.WorkspaceDetailLive do
   defp template_status_style(_),
     do: "font-size: 11px; color: #cf222e;"
 
+  defp tmpl_mode_btn_style(true),
+    do: "padding: 4px 12px; background: #0969da; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 11px;"
+
+  defp tmpl_mode_btn_style(false),
+    do: "padding: 4px 12px; background: white; color: #0969da; border: 1px solid #d1d5da; border-radius: 4px; cursor: pointer; font-size: 11px;"
+
   @impl true
   def handle_event("add_member", %{"add_member" => %{"member_uri" => uri_str}}, socket)
       when is_binary(uri_str) and uri_str != "" do
@@ -86,6 +106,127 @@ defmodule EsrWebLiveview.WorkspaceDetailLive do
 
   def handle_event("add_member", _params, socket) do
     {:noreply, assign(socket, :flash_error, "Member URI is required.")}
+  end
+
+  def handle_event("toggle_template_mode", %{"mode" => mode}, socket)
+      when mode in ["form", "json"] do
+    {:noreply, assign(socket, :template_mode, mode)}
+  end
+
+  def handle_event(
+        "add_template",
+        %{"add_template" => params},
+        %{assigns: %{template_mode: "form"}} = socket
+      ) do
+    tmpl_name = Map.get(params, "tmpl_name", "") |> String.trim()
+    session_name = Map.get(params, "session_name", "") |> String.trim()
+
+    members =
+      Map.get(params, "members_csv", "")
+      |> String.split(",", trim: true)
+      |> Enum.map(&String.trim/1)
+      |> Enum.reject(&(&1 == ""))
+
+    cond do
+      tmpl_name == "" ->
+        {:noreply, assign(socket, :flash_error, "template name required")}
+
+      session_name == "" ->
+        {:noreply, assign(socket, :flash_error, "session_name required for session.generic")}
+
+      true ->
+        tmpl = %{
+          "class" => "session.generic",
+          "session_name" => session_name,
+          "members" => members
+        }
+
+        do_add_template(socket, tmpl_name, tmpl)
+    end
+  end
+
+  def handle_event(
+        "add_template",
+        %{"add_template" => params},
+        %{assigns: %{template_mode: "json"}} = socket
+      ) do
+    tmpl_name = Map.get(params, "tmpl_name", "") |> String.trim()
+    json = Map.get(params, "json", "")
+
+    case {tmpl_name, Jason.decode(json)} do
+      {"", _} ->
+        {:noreply, assign(socket, :flash_error, "template name required")}
+
+      {_, {:ok, tmpl}} when is_map(tmpl) ->
+        do_add_template(socket, tmpl_name, tmpl)
+
+      {_, {:ok, _}} ->
+        {:noreply, assign(socket, :flash_error, "JSON must be an object")}
+
+      {_, {:error, _}} ->
+        {:noreply, assign(socket, :flash_error, "invalid JSON")}
+    end
+  end
+
+  defp do_add_template(socket, tmpl_name, tmpl) do
+    case Esr.Workspace.add_template(socket.assigns.name, tmpl_name, tmpl) do
+      :ok ->
+        # Trigger Class.instantiate so the Session goes live immediately
+        # (Loader path runs on boot; this is the runtime path).
+        _ = trigger_instantiate(socket.assigns.name, tmpl_name, tmpl)
+
+        {:noreply,
+         socket
+         |> assign(:workspace, Esr.Workspace.Store.get_by_name(socket.assigns.name))
+         |> assign(
+           :add_template_form,
+           to_form(
+             %{
+               "tmpl_name" => "",
+               "class" => "session.generic",
+               "session_name" => "",
+               "members_csv" => "",
+               "json" => ""
+             },
+             as: "add_template"
+           )
+         )
+         |> assign(:flash_error, nil)}
+
+      {:error, reason} ->
+        {:noreply, assign(socket, :flash_error, "add_template failed: #{inspect(reason)}")}
+    end
+  end
+
+  defp trigger_instantiate(workspace_name, tmpl_name, tmpl) do
+    workspace_uri = Esr.Entity.Workspace.uri_for(workspace_name)
+
+    case tmpl["class"] do
+      class_name when is_binary(class_name) ->
+        case Esr.TemplateRegistry.lookup(class_name) do
+          {:ok, class_module} ->
+            class_module.instantiate(tmpl_name, tmpl, workspace_uri)
+
+          :error ->
+            {:error, {:no_template_class, class_name}}
+        end
+
+      _ ->
+        {:error, :missing_class}
+    end
+  end
+
+  def handle_event("remove_template", %{"name" => tmpl_name}, socket) do
+    case Esr.Workspace.remove_template(socket.assigns.name, tmpl_name) do
+      :ok ->
+        {:noreply,
+         socket
+         |> assign(:workspace, Esr.Workspace.Store.get_by_name(socket.assigns.name))
+         |> assign(:flash_error, nil)}
+
+      {:error, reason} ->
+        {:noreply, assign(socket, :flash_error, "remove_template failed: #{inspect(reason)}")}
+    end
   end
 
   def handle_event("remove_member", %{"member_uri" => uri_str}, socket) do
@@ -175,9 +316,6 @@ defmodule EsrWebLiveview.WorkspaceDetailLive do
       <section id="templates" style="margin-top: 24px; padding: 16px; border: 1px solid #d1d5da; border-radius: 6px;">
         <h2 style="font-size: 14px; font-weight: 500; margin: 0 0 12px 0;">
           Session templates ({map_size(@workspace.session_templates)})
-          <span style="font-size: 11px; color: #57606a; font-weight: normal;">
-            (read-only here — add via <code>mix esr.workspace.add_template</code>; LV editor Phase 5)
-          </span>
         </h2>
         <p :if={@workspace.session_templates == %{}} id="templates-empty" style="color: #57606a; font-style: italic;">
           No session templates declared.
@@ -189,6 +327,7 @@ defmodule EsrWebLiveview.WorkspaceDetailLive do
               <th style="text-align: left;">Class</th>
               <th style="text-align: left;">Members</th>
               <th style="text-align: left;">Status</th>
+              <th></th>
             </tr>
           </thead>
           <tbody>
@@ -197,12 +336,86 @@ defmodule EsrWebLiveview.WorkspaceDetailLive do
               <td style="font-family: monospace; font-size: 11px;">{template_class_name(tmpl_data)}</td>
               <td>{template_member_count(tmpl_data)}</td>
               <td style={template_status_style(template_status(tmpl_data))}>{template_status_label(template_status(tmpl_data))}</td>
+              <td>
+                <button
+                  type="button"
+                  phx-click="remove_template"
+                  phx-value-name={tmpl_name}
+                  style="padding: 3px 8px; background: white; color: #cf222e; border: 1px solid #cf222e; border-radius: 4px; cursor: pointer; font-size: 10px;"
+                  data-confirm="Remove this template? (already-spawned Kinds stay alive)"
+                >Remove</button>
+              </td>
             </tr>
           </tbody>
         </table>
         <p :if={@registered_template_classes != []} id="registered-classes" style="margin-top: 12px; font-size: 11px; color: #57606a;">
           Registered Template Classes: <code>{Enum.join(@registered_template_classes, ", ")}</code>
         </p>
+
+        <div id="add-template" style="margin-top: 16px; padding-top: 16px; border-top: 1px solid #eaeef2;">
+          <h3 style="font-size: 13px; font-weight: 500; margin: 0 0 8px 0;">Add template</h3>
+
+          <div style="margin-bottom: 8px; display: flex; gap: 8px;">
+            <button
+              type="button"
+              phx-click="toggle_template_mode"
+              phx-value-mode="form"
+              style={tmpl_mode_btn_style(@template_mode == "form")}
+            >Form (session.generic)</button>
+            <button
+              type="button"
+              phx-click="toggle_template_mode"
+              phx-value-mode="json"
+              style={tmpl_mode_btn_style(@template_mode == "json")}
+            >JSON (custom class)</button>
+          </div>
+
+          <.form for={@add_template_form} phx-submit="add_template">
+            <div style="display: grid; grid-template-columns: 200px 1fr; gap: 6px; margin-bottom: 8px;">
+              <input
+                type="text"
+                name="add_template[tmpl_name]"
+                placeholder="template name (e.g. main)"
+                style="padding: 5px 8px; border: 1px solid #d1d5da; border-radius: 4px; font-size: 12px;"
+              />
+              <span :if={@template_mode == "form"} style="font-size: 11px; color: #57606a; align-self: center;">Class = session.generic (form mode)</span>
+              <span :if={@template_mode == "json"} style="font-size: 11px; color: #57606a; align-self: center;">Class is read from JSON's "class" field</span>
+            </div>
+
+            <div :if={@template_mode == "form"} style="display: grid; grid-template-columns: 200px 1fr; gap: 6px; margin-bottom: 8px;">
+              <input
+                type="text"
+                name="add_template[session_name]"
+                placeholder="session_name (becomes session://X)"
+                style="padding: 5px 8px; border: 1px solid #d1d5da; border-radius: 4px; font-size: 12px; font-family: monospace;"
+              />
+              <input
+                type="text"
+                name="add_template[members_csv]"
+                placeholder="members CSV (user://admin,agent://x)"
+                style="padding: 5px 8px; border: 1px solid #d1d5da; border-radius: 4px; font-size: 12px; font-family: monospace;"
+              />
+            </div>
+
+            <div :if={@template_mode == "json"} style="margin-bottom: 8px;">
+              <textarea
+                name="add_template[json]"
+                rows="5"
+                placeholder={~s({"class":"cc.pty","agent_uri":"agent://cc-architect","cwd":"/path/to/project"})}
+                style="width: 100%; padding: 6px 10px; border: 1px solid #d1d5da; border-radius: 4px; font-family: monospace; font-size: 11px;"
+              ></textarea>
+              <p style="font-size: 10px; color: #57606a; margin: 4px 0 0;">
+                Full template JSON. Class must be one of the registered Classes above.
+                For cc.pty: <code>"class":"cc.pty","agent_uri":"agent://X","cwd":"/path"</code>
+              </p>
+            </div>
+
+            <button
+              type="submit"
+              style="padding: 5px 14px; background: #1f883d; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;"
+            >Add template</button>
+          </.form>
+        </div>
       </section>
 
       <section id="routing-rules" style="margin-top: 24px; padding: 16px; border: 1px solid #d1d5da; border-radius: 6px;">
