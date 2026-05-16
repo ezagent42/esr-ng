@@ -42,7 +42,7 @@ defmodule EsrWebLiveview.AdminLive do
   @message_limit 50
 
   @impl true
-  def mount(_params, _session, socket) do
+  def mount(_params, session, socket) do
     connected_bridges = list_bridges_safely()
     current_session_uri = @main_session_uri
 
@@ -57,11 +57,29 @@ defmodule EsrWebLiveview.AdminLive do
       end
     end
 
+    # Phase 4-completion Spec 05: derive caller from session cookie set
+    # by SessionController. Falls back to admin if no session (e.g. test
+    # paths that bypass login).
+    caller_uri =
+      case Map.get(session || %{}, "current_user_uri") do
+        nil -> Esr.Entity.User.admin_uri()
+        uri_str -> URI.parse(uri_str)
+      end
+
+    caller_caps =
+      if URI.to_string(caller_uri) == URI.to_string(Esr.Entity.User.admin_uri()) do
+        Esr.Entity.User.admin_caps()
+      else
+        Esr.Identity.list_caps_for(caller_uri)
+      end
+
     socket =
       socket
       |> stream(:invocations, load_recent_invocations(50), limit: 50)
       |> stream(:messages, load_session_messages(current_session_uri), limit: @message_limit)
-      |> assign(:caller_uri_str, URI.to_string(Esr.Entity.User.admin_uri()))
+      |> assign(:caller_uri, caller_uri)
+      |> assign(:caller_caps, caller_caps)
+      |> assign(:caller_uri_str, URI.to_string(caller_uri))
       |> assign(:flash_error, nil)
       |> assign(:connected_bridges, connected_bridges)
       |> assign(:current_session_uri, current_session_uri)
@@ -146,7 +164,7 @@ defmodule EsrWebLiveview.AdminLive do
       target: @echo_target,
       mode: :call,
       args: %{msg: "hello"},
-      ctx: ctx()
+      ctx: ctx(socket)
     }
 
     case Esr.Invocation.dispatch(inv) do
@@ -166,8 +184,10 @@ defmodule EsrWebLiveview.AdminLive do
         uri_str -> [URI.new!(uri_str)]
       end
 
-    admin_uri = Esr.Entity.User.admin_uri()
-    msg = Esr.Message.new(admin_uri, %{text: text, attachments: []}, mentions: mentions)
+    msg =
+      Esr.Message.new(socket.assigns.caller_uri, %{text: text, attachments: []},
+        mentions: mentions
+      )
 
     target = URI.new!("#{URI.to_string(socket.assigns.current_session_uri)}/behavior/chat/send")
 
@@ -175,7 +195,7 @@ defmodule EsrWebLiveview.AdminLive do
       target: target,
       mode: :cast,
       args: %{message: msg},
-      ctx: ctx()
+      ctx: ctx(socket)
     }
 
     case Esr.Invocation.dispatch(inv) do
@@ -192,13 +212,20 @@ defmodule EsrWebLiveview.AdminLive do
          |> assign(:compose_form, to_form(%{"text" => "", "agent_uri" => ""}, as: "chat"))}
 
       {:error, reason} ->
-        {:noreply, assign(socket, :flash_error, "Send failed: #{inspect(reason)}")}
+        {:noreply, assign(socket, :flash_error, friendly_error("Send", reason))}
     end
   end
 
   def handle_event("chat_compose", _params, socket) do
     {:noreply, assign(socket, :flash_error, "Message text is required.")}
   end
+
+  # Phase 4-completion Spec 05 §A.2.4 — friendly flash for cap-deny.
+  defp friendly_error(_action, :unauthorized) do
+    "You don't have permission for this action. Contact admin for cap grant."
+  end
+
+  defp friendly_error(action, reason), do: "#{action} failed: #{inspect(reason)}"
 
   def handle_event("switch_session", %{"session_uri" => session_uri_str}, socket) do
     case URI.new(session_uri_str) do
@@ -253,7 +280,7 @@ defmodule EsrWebLiveview.AdminLive do
           target: target,
           mode: :cast,
           args: %{member: agent_uri},
-          ctx: ctx()
+          ctx: ctx(socket)
         })
 
       # member_joined broadcast will refresh assigns
@@ -278,7 +305,7 @@ defmodule EsrWebLiveview.AdminLive do
         target: target_uri,
         mode: mode_atom,
         args: args_map,
-        ctx: ctx()
+        ctx: ctx(socket)
       }
 
       case Esr.Invocation.dispatch(inv) do
@@ -470,10 +497,10 @@ defmodule EsrWebLiveview.AdminLive do
   defp body_text(%{"text" => t}) when is_binary(t), do: t
   defp body_text(_), do: ""
 
-  defp ctx do
+  defp ctx(socket) do
     %{
-      caller: Esr.Entity.User.admin_uri(),
-      caps: Esr.Entity.User.admin_caps(),
+      caller: socket.assigns.caller_uri,
+      caps: socket.assigns.caller_caps,
       reply: :ignore
     }
   end
