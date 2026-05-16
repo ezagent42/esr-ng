@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# Stub written by cc-bridge-attach-as.sh; original at /Users/h2oslabs/Workspace/esr-ng/.claude/worktrees/phase-2/scripts/cc-bridge-attach.local.sh.bak-as-4173.
+# Proxy + ESR_AGENT_URI already exported in parent shell.
