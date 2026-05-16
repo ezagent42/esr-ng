@@ -37,3 +37,5 @@ scripts/cc-bridge-attach.local.sh
 # Phase 1 v1_prototype: generated MCP config for cc-bridge-attach.
 # Each operator has their own ESRD_URL / proxy; gitignored.
 .mcp.json
+scripts/cc-bridge-attach.local.sh.bak-*
+phase-specs/phase3/artifacts/phase3-multi-agent*
