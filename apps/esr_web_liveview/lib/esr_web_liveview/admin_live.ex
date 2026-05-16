@@ -332,6 +332,7 @@ defmodule EsrWebLiveview.AdminLive do
           <a href="/admin/workspaces" style="margin-left: 16px; color: #0969da;">Workspaces →</a>
           <a href="/admin/routing" style="margin-left: 16px; color: #0969da;">Routing →</a>
           <a href="/admin/users" style="margin-left: 16px; color: #0969da;">Users →</a>
+          <a href="/admin/snapshots" style="margin-left: 16px; color: #0969da;">Snapshots →</a>
         </p>
       </header>
 
