@@ -146,19 +146,28 @@ defmodule Esr.Behavior.Chat do
         {:ok, slice}
 
       Esr.Entity.Agent ->
-        # 2c-step 1: look up the bridge bound to this Agent's URI and
-        # push the body text to claude via the SSE topic. If no bridge
-        # is bound (Agent spawned but bridge already disconnected),
-        # silently drop — the message stays in MessageStore so a
-        # reconnecting bridge can replay it via rejoin's in_session_since.
+        # 2c-step 1 (+ Phase 3 P3-D8 source session in meta): look up
+        # the bridge bound to this Agent's URI and push the body text
+        # to claude via the SSE topic. Phase 3: include `session` in
+        # meta so claude knows which session to fill in reply
+        # `session_uris` field. ctx.caller is the Session that
+        # dispatched this :receive (set in Chat.dispatch_receive).
         case Esr.Bridge.V1Prototype.Server.bridge_for_agent(ctx.self_uri) do
           {:ok, bridge_id} ->
+            source_session =
+              case Map.get(ctx, :caller) do
+                %URI{} = u -> URI.to_string(u)
+                s when is_binary(s) -> s
+                _ -> ""
+              end
+
             Esr.Bridge.V1Prototype.Server.push_to_claude(
               bridge_id,
               body_text(msg.body),
               %{
                 "sender" => URI.to_string(msg.sender),
-                "message_uri" => msg.uri
+                "message_uri" => msg.uri,
+                "session" => source_session
               }
             )
 
@@ -307,10 +316,17 @@ defmodule Esr.Behavior.Chat do
     # Phase 3d: agent's reply dispatch runs under admin caps for the
     # same reason as Session fan-out — the reply path is system-routed
     # from the bridge. Phase 4 will give Agents their own send caps.
+    #
+    # Phase 3d quality fix: if dispatch fails (e.g. claude filled
+    # session_uris with a non-existent session), emit telemetry +
+    # audit warn instead of silently dropping. Real-claude e2e
+    # exposed this — early replies before the meta-session fix
+    # targeted "session://admin" which didn't exist and disappeared
+    # silently.
     for session_uri_str <- session_uris do
       target = URI.new!("#{session_uri_str}/behavior/chat/send")
 
-      _ =
+      result =
         Invocation.dispatch(%Invocation{
           target: target,
           mode: :cast,
@@ -321,6 +337,26 @@ defmodule Esr.Behavior.Chat do
             reply: :ignore
           }
         })
+
+      case result do
+        :ok ->
+          :ok
+
+        {:ok, _} ->
+          :ok
+
+        {:error, reason} ->
+          :telemetry.execute(
+            [:esr, :chat, :reply_dispatch_failed],
+            %{},
+            %{
+              agent: URI.to_string(agent_uri),
+              target_session: session_uri_str,
+              reason: reason,
+              message_uri: msg.uri
+            }
+          )
+      end
     end
 
     # Slice unchanged — Agent has no chat state of its own.

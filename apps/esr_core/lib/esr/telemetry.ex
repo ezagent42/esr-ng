@@ -17,6 +17,7 @@ defmodule Esr.Telemetry do
   | `[:esr, :dispatch, :no_actor]`         | `Esr.Invocation`       | (empty)           | target |
   | `[:esr, :dlq, :write]`                 | `Esr.DLQ`              | (empty)           | reason, payload |
   | `[:esr, :chat, :reply_session_mismatch]` | `Esr.Behavior.Chat`  | (empty)           | ref, target_sessions, ref_actual_sessions, reason |
+  | `[:esr, :chat, :reply_dispatch_failed]`  | `Esr.Behavior.Chat`  | (empty)           | agent, target_session, reason, message_uri |
 
   Phase 1-2 `:authz` event was `:stub_grant` (permissive stub). Phase 3d
   hard flip (P3-D6) replaces with real `:granted` / `:denied`. The
@@ -33,7 +34,8 @@ defmodule Esr.Telemetry do
       [:esr, :authz, :denied],
       [:esr, :dispatch, :no_actor],
       [:esr, :dlq, :write],
-      [:esr, :chat, :reply_session_mismatch]
+      [:esr, :chat, :reply_session_mismatch],
+      [:esr, :chat, :reply_dispatch_failed]
     ]
   end
 end

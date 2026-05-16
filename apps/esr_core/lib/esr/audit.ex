@@ -34,7 +34,11 @@ defmodule Esr.Audit do
     [:esr, :invoke, :stop],
     [:esr, :invoke, :error],
     [:esr, :authz, :granted],
-    [:esr, :authz, :denied]
+    [:esr, :authz, :denied],
+    # Phase 3d quality hotfix: chat reply dispatch fail visibility
+    # (was silent before — real-claude e2e exposed wrong session_uri
+    # disappearing into the void).
+    [:esr, :chat, :reply_dispatch_failed]
   ]
 
   @doc """
@@ -129,6 +133,28 @@ defmodule Esr.Audit do
       duration_us: 0,
       authz: Atom.to_string(decision),
       exception: nil,
+      inserted_at: DateTime.utc_now()
+    }
+  end
+
+  # Phase 3d quality hotfix: chat reply dispatch failure (agent's chat/send
+  # targeting a non-existent session). Persisted so admin can see why a
+  # claude reply silently disappeared.
+  defp build_row([:esr, :chat, :reply_dispatch_failed], _measurements, meta) do
+    %{
+      trace_id: nil,
+      caller: Map.get(meta, :agent),
+      target: "#{Map.get(meta, :target_session)}/behavior/chat/send",
+      action: "send",
+      args: nil,
+      result: nil,
+      duration_us: 0,
+      authz: "n/a",
+      exception:
+        Jason.encode!(%{
+          reason: inspect(Map.get(meta, :reason)),
+          message_uri: Map.get(meta, :message_uri)
+        }),
       inserted_at: DateTime.utc_now()
     }
   end
