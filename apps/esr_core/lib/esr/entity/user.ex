@@ -1,26 +1,23 @@
 defmodule Esr.Entity.User do
   @moduledoc """
-  User Kind — Phase 1 stub.
+  User Kind — Phase 4-completion stable form.
 
-  Implements the `Esr.Kind` `@behaviour` contract with empty Behaviors
-  list (Phase 3d will add `Esr.Behavior.Identity`). Holds the
-  admin-bootstrap constants `admin_uri/0` and `admin_caps/0` per
-  Decision P1-D5 (no separate `Esr.Bootstrap` module — admin-specific
-  knowledge is User-Kind-shaped).
+  Implements `Esr.Kind` with Identity Behavior (Phase 3d added,
+  Decision #24). Holds the admin-bootstrap constants `admin_uri/0` and
+  `admin_caps/0` per Decision P1-D5 (no separate `Esr.Bootstrap` module
+  — admin-specific knowledge is User-Kind-shaped).
 
-  Phase 1 does **not** spawn any User Kind instance — there is no
-  Identity Behavior yet, and dispatch reply paths in Phase 1 use
-  `ctx.reply = {:caller_inbox, self()}` so no `KindRegistry.lookup`
-  on `user://admin` happens.
+  - `type_name :user`
+  - `behaviors [Esr.Behavior.Identity]` — caps live in slice state
+  - `persistence {:snapshot, :on_change}` — Phase 4-completion PR 2
+    landed real snapshot impl; granted caps survive restart
 
-  Phase 2 forward note (DECISIONS P1-D5): if Chat Behavior arrives,
-  decide spawn-admin-on-boot vs special-case-admin-URI-in-reply.
-
-  ## Phase 1 callbacks left intentionally trivial
-
-  `type_name :user`, `behaviors []`, `persistence {:snapshot, :on_change}`.
-  Phase 3d will append `Esr.Behavior.Identity` to `behaviors/0` and add
-  `bootstrap_admin_if_needed/0` — append-only evolution per P1-D5.
+  Non-admin Users (Phase 4-completion PR 4-5):
+  - Provisioned via `mix esr.user.create user://X --password Y --caps ...`
+  - Authenticated via `/login` (`EsrWeb.SessionController` +
+    `Esr.Users.verify_password/2`)
+  - Their caps live in `Esr.Users.caps_json` SQLite column AND mirror
+    into Identity slice via `init_slice/1`
   """
 
   @admin_uri URI.parse("user://admin")
