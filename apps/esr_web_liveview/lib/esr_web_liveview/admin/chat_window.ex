@@ -13,6 +13,7 @@ defmodule EsrWebLiveview.Admin.ChatWindow do
   attr :agent_options, :list, required: true
   attr :compose_form, :map, required: true
   attr :flash_error, :string, default: nil
+  attr :oldest_cursor, :any, default: nil
 
   def chat_window(assigns) do
     ~H"""
@@ -20,6 +21,17 @@ defmodule EsrWebLiveview.Admin.ChatWindow do
       <h2 style="font-size: 16px; font-weight: 500; margin: 0 0 8px 0;">
         Session: <code>{URI.to_string(@current_session_uri)}</code>
       </h2>
+
+      <div :if={@oldest_cursor} style="text-align: center; margin-bottom: 6px;">
+        <button
+          type="button"
+          id="load-older-btn"
+          phx-click="load_older_messages"
+          style="padding: 4px 12px; background: white; color: #0969da; border: 1px solid #d1d5da; border-radius: 4px; cursor: pointer; font-size: 12px;"
+        >
+          ↑ Load older
+        </button>
+      </div>
 
       <div
         id="messages"

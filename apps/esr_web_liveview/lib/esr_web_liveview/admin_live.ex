@@ -73,10 +73,17 @@ defmodule EsrWebLiveview.AdminLive do
         Esr.Identity.list_caps_for(caller_uri)
       end
 
+    initial_messages = load_session_messages(current_session_uri)
+
+    # Phase 5 PR 5: drop the per-stream `limit:` on :messages so
+    # "Load older" prepends aren't immediately evicted from the front.
+    # DOM size is bounded by how many times the operator clicks the
+    # button (worst case ~few hundred rows in an admin debug view).
     socket =
       socket
       |> stream(:invocations, load_recent_invocations(50), limit: 50)
-      |> stream(:messages, load_session_messages(current_session_uri), limit: @message_limit)
+      |> stream(:messages, initial_messages)
+      |> assign(:oldest_cursor, oldest_cursor(initial_messages))
       |> assign(:caller_uri, caller_uri)
       |> assign(:caller_caps, caller_caps)
       |> assign(:caller_uri_str, URI.to_string(caller_uri))
@@ -230,12 +237,15 @@ defmodule EsrWebLiveview.AdminLive do
   def handle_event("switch_session", %{"session_uri" => session_uri_str}, socket) do
     case URI.new(session_uri_str) do
       {:ok, new_uri} ->
+        new_messages = load_session_messages(new_uri)
+
         {:noreply,
          socket
          |> assign(:current_session_uri, new_uri)
          |> assign(:session_members, read_session_members(new_uri))
          |> assign(:agent_options, list_session_agent_uris(new_uri))
-         |> stream(:messages, load_session_messages(new_uri), reset: true, limit: @message_limit)}
+         |> assign(:oldest_cursor, oldest_cursor(new_messages))
+         |> stream(:messages, new_messages, reset: true)}
 
       _ ->
         {:noreply, assign(socket, :flash_error, "Bad session URI: #{session_uri_str}")}
@@ -292,6 +302,32 @@ defmodule EsrWebLiveview.AdminLive do
 
   # phx-change fires for every form update; ignore empty selection.
   def handle_event("add_agent_to_session", _params, socket), do: {:noreply, socket}
+
+  # Phase 5 PR 5: paginate history backwards. Reads oldest visible
+  # `inserted_at` cursor from assigns, queries MessageStore.older_than/3,
+  # prepends results to the stream (ascending). Cursor advances to the
+  # new oldest row; when the query returns empty, cursor stays so the
+  # button no-ops on subsequent clicks.
+  def handle_event("load_older_messages", _params, socket) do
+    case socket.assigns.oldest_cursor do
+      nil ->
+        {:noreply, socket}
+
+      %DateTime{} = cursor ->
+        older =
+          socket.assigns.current_session_uri
+          |> Esr.MessageStore.older_than(cursor, @message_limit)
+          |> Enum.reverse()
+          |> Enum.map(&message_to_row/1)
+
+        socket =
+          Enum.reduce(older, socket, fn row, acc ->
+            stream_insert(acc, :messages, row, at: 0)
+          end)
+
+        {:noreply, assign(socket, :oldest_cursor, oldest_cursor(older) || cursor)}
+    end
+  end
 
   def handle_event(
         "manual_dispatch",
@@ -350,6 +386,7 @@ defmodule EsrWebLiveview.AdminLive do
           agent_options={@agent_options}
           compose_form={@compose_form}
           flash_error={@flash_error}
+          oldest_cursor={@oldest_cursor}
         />
 
         <.member_panel members={@session_members} />
@@ -375,6 +412,15 @@ defmodule EsrWebLiveview.AdminLive do
     |> Esr.MessageStore.recent_in_session(@message_limit)
     |> Enum.reverse()
     |> Enum.map(&message_to_row/1)
+  end
+
+  # Phase 5 PR 5: derive oldest cursor (inserted_at of earliest visible row)
+  # for the "Load older" button. Returns nil if no messages.
+  defp oldest_cursor(rows) do
+    case rows do
+      [%{at: %DateTime{} = at} | _] -> at
+      _ -> nil
+    end
   end
 
   defp read_session_members(%URI{} = session_uri) do

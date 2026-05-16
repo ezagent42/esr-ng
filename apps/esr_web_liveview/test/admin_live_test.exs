@@ -145,6 +145,55 @@ defmodule EsrWebLiveview.AdminLiveTest do
     end
   end
 
+  test "Load older button paginates history (Phase 5 PR 5 invariant)", %{conn: conn} do
+    # Spec 5 PR 5 invariant: send 100 messages → "Load older" reveals
+    # msgs 1-50; no duplicates; second click no-ops at the start.
+    session_uri = URI.new!("session://main")
+    base = ~U[2026-05-17 09:00:00.000000Z]
+
+    for i <- 1..100 do
+      msg =
+        Esr.Message.new(
+          URI.new!("user://admin"),
+          %{text: "histmsg-#{i}", attachments: []},
+          inserted_at: DateTime.add(base, i, :second)
+        )
+
+      {:ok, _} = Esr.MessageStore.write(msg, session_uri)
+    end
+
+    {:ok, lv, html} = live(conn, "/admin")
+
+    # Match on the trailing newline-tag boundary in the rendered <div>
+    # so "histmsg-1" doesn't substring-match "histmsg-100".
+    msg = fn i -> "histmsg-#{i}</div>" end
+
+    # Initial mount shows newest 50 (histmsg-51..histmsg-100).
+    assert html =~ msg.(100)
+    assert html =~ msg.(51)
+    refute html =~ msg.(50)
+    refute html =~ msg.(1)
+
+    # First click reveals histmsg-1..histmsg-50.
+    lv |> element("#load-older-btn") |> render_click()
+    html = render(lv)
+    assert html =~ msg.(1)
+    assert html =~ msg.(50)
+    # Newer messages still present (no duplicates / no eviction).
+    assert html =~ msg.(100)
+
+    # Sanity — each histmsg-NN appears exactly once.
+    for i <- 1..100 do
+      assert length(String.split(html, msg.(i))) - 1 == 1,
+             "#{msg.(i)} appeared more than once after load_older click"
+    end
+
+    # Second click — already at start, no-op (no crash, no duplicates).
+    lv |> element("#load-older-btn") |> render_click()
+    html2 = render(lv)
+    assert html2 =~ msg.(1)
+  end
+
   test "Manual dispatch with invalid URI shows error message", %{conn: conn} do
     {:ok, lv, _html} = live(conn, "/admin")
 
