@@ -38,6 +38,21 @@ defmodule EsrPluginCcPty.Application do
     case Supervisor.start_link(children, strategy: :one_for_one, name: __MODULE__) do
       {:ok, sup_pid} ->
         :ok = register_template_class()
+
+        # Boot-ordering fix: chat plugin's Application.start calls
+        # Esr.Workspace.Loader.load_all/0 BEFORE this plugin starts —
+        # at that point cc.pty Template Class isn't registered yet, so
+        # any Workspace declaring `"class" => "cc.pty"` gets logged
+        # "no Template Class registered" + skipped. Re-run Loader now
+        # that we're registered to pick up those Workspaces.
+        #
+        # Loader is idempotent: Workspace Kinds return :already_started;
+        # SpawnRegistry.spawn returns existing pid; Template.instantiate
+        # uses idempotent SpawnRegistry — safe to re-run. Phase 5+ may
+        # introduce an explicit "all-plugins-ready" gate (per Spec 01
+        # Q4 note) and remove this per-plugin re-run.
+        _ = Esr.Workspace.Loader.load_all()
+
         {:ok, sup_pid}
 
       other ->
