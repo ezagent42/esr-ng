@@ -4,7 +4,7 @@
 > **Last updated**: 2026-05-15(Phase 1 完成 + §12.8 重写)
 > **Owner**: Allen / ezagent42
 > **Changes from v0.3**: 顶层加"ESR 是 router 不是 req/resp app"framing;Resource Kind 加"shared referent needs identity"判定原则;Template 升级为双层模型(Class / Instance,Workspace 是 Instance 示范);加 reliability primitives 三件套(ReadyGate / PendingDelivery / Idempotency);RoutingRegistry 加 `put_new` 语义(unique-key only)+ `reverse_index` 反查;Matcher 边界按"读 core 数据 → core"画线;Plugin 判定原则显式化;5 个事故坑全部 design-in;LOC 校准 475/595 → ~870 → 920;feishu-cc 切片 4 张参考表入 spec;ES 从 deferred 改为已决不做;dev 两轮 review 闭环
-> **Impl-period 更新**: §5.7.4 承认 Kind 生命周期两条等价实现路径(宏 / 共享 Server,Decision #84);**§12.8 重写反映 "Channel = MCP + 1 capability" 协议层简化**(Phase 1b 实证,Decision #86);Phase 2 加 K-path Behavior 模型 / `handle_kind_message` Kind.Server 转发器 / `ctx.kind_module` + `ctx.self_uri` 注入 / MessageStore 单一真相源 / `:uri` primitive / `session://` scheme + 两条 PubSub `:events` 通道(Decision #88-#94);Decision Log 当前到 #94
+> **Impl-period 更新**: §5.7.4 承认 Kind 生命周期两条等价实现路径(宏 / 共享 Server,Decision #84);**§12.8 重写反映 "Channel = MCP + 1 capability" 协议层简化**(Phase 1b 实证,Decision #86);Phase 2 加 K-path Behavior 模型 / `handle_kind_message` Kind.Server 转发器 / `ctx.kind_module` + `ctx.self_uri` 注入 / MessageStore 单一真相源 / `:uri` primitive / `session://` scheme + 两条 PubSub `:events` 通道(Decision #88-#94);**Phase 3 加 RoutingRegistry 第 3 个 Registry 家族 / Matcher 5 leaf + JSON serde / Resolver 双层 fan-out / message_routings 关联表(保 #40 identity invariant 同时支持多 session) / Identity Behavior in slice(admin_caps 从 module function 迁 slice state)/ `cap_for_action/3` helper / dispatch step 5.5 hard flip(`:stub_grant` 永久死亡)+ check_invariants #9 #10 / Reply 契约 D8 / Bridge↔Agent floating + LV @-dropdown 只列 session 成员 / push_to_claude meta 必含 "session"(Decision #95-#104)**;Decision Log 当前到 #104
 
 ---
 
@@ -2248,6 +2248,28 @@ esr_core/
 
 Plugin 不在此 budget 内——plugin 想多大都行,但应该自己有内部模块边界纪律。
 
+### Phase 3 实测校准(impl,2026-05-16)
+
+**目前 esr_core/lib 实测 3,467 LOC,远超 v0.4 red line 1150**。诚实拆账:
+
+| 来源 | 增量 LOC | 注释 |
+|---|---|---|
+| 原 v0.4 estimate(以 LOC-only,不含 moduledoc) | ~920 | 设计期估计 |
+| 实测 v0.4 + comments / moduledoc(每模块 30-100 行) | ~1,400 | 现实是每个文件有详细 moduledoc + section comments |
+| Phase 3 加 `routing/`(matcher 169 + resolver 86 + rule_store 132) | +387 | 完全新增,设计期没算 |
+| Phase 3 加 `routing_registry.ex`(211 vs cap 80) | +131 | 比 cap 大,因为 3-table-family + owner-pid check 比 BehaviorRegistry 复杂 |
+| Phase 3 加 `behavior/identity.ex` | +86 | Identity Behavior |
+| Phase 3 加 `message_routing.ex`(关联表 schema) | +37 | #98 fix |
+| `mix/tasks/esr.check_invariants.ex`(8 invariants + grep filters) | +319 | mix task,不计 lib |
+| `audit.ex` 实测 178(cap 45) | +130 | telemetry handler + 4 build_row clauses + serialization |
+
+**判断**:v0.4 budget 是从 "lib 行数(无 docs)" 视角估的,实测含 moduledoc/comments 3x 是正常。**Phase 3 跑完不动 §14 budget 数字**,因为:
+1. 没有单文件超 1000 LOC(top: routing_registry.ex 211)— per-module cap 信号还有意义
+2. 实测合计 3,467 跟 v0.4 估的 870 数量级差,但跟 "1,400 v0.4 实际 + Phase 3 增量 ~650 + audit/telemetry 增长 ~500 + dev moduledoc 增长" 加起来吻合
+3. 真正的纪律 = **plugin 边界严** + **每个文件 single responsibility** — 而非 LOC 数字本身
+
+**Phase 4 起新原则**:LOC budget 改为 "**每个 sub-system 总和 + 单文件 cap**" 双指标,sub-system = routing / audit / kind / message,而不是整个 esr_core 一个数字。Phase 4 spec 时确定。
+
 ---
 
 ## 15. Dependencies (mix.exs)
@@ -2664,6 +2686,16 @@ Adapter           Esr.Invocation        Kind GenServer     Behavior       :telem
 | 92 | **`InterfaceValidator` 加 `:uri` primitive**(§6.2 type-spec 语法扩展)— Chat 的 `@interface` schema 声明 `sender: :uri, mentions: {:list, :uri}` 等典型 URI 字段,validator 在 dispatch 边界要求 `%URI{}` struct,**拒绝裸字符串**。配 `Esr.Ecto.URI` 自定义 Ecto type 实现 URI 跨进程/跨持久化层都是 struct | impl |
 | 93 | **`session://` URI scheme + 两条新 PubSub `:events` 通道**(§3.5 URI types + §5.7.6 topic taxonomy 扩展)— Phase 2 新增 `session://` 作为 Kind URI scheme(Session Kind 用)。`esr:session:<uri>:events` 用于 chat stream 订阅(消息/成员变更/online-offline)+ `esr:user:<uri>:events` 用于个人 inbox 通知。两个 topic 都是 §5.7.6 的 view fan-out 合法用法(已加入 `check_invariants` #1 allowlist) | impl |
 | 94 | **Bridge↔Agent dual map**(v1_prototype 实现层模式,Phase 5 channel 重写时复用)— `Esr.Bridge.V1Prototype.Server` 同时维护 `bridge_to_agent: %{bridge_id => pid}` + `agent_to_bridge: %{agent_uri_str => bridge_id}`。出站(Agent.invoke(:receive) → claude)用 `bridge_for_agent/1`;入站(claude reply → Agent)用 `forward_reply_to_agent/2` 找 pid → `send/2`。模式本质:wire-id 和 business-URI 解耦,routing 层不感知 wire 协议 | impl |
+| 95 | **RoutingRegistry 作第 3 个 Registry 家族 + owner-pid check**(Phase 3a 落地 Decision #28/#37/#65)— `Esr.RoutingRegistry` 跟 `KindRegistry` / `BehaviorRegistry` 并列;独有 owner-pid check(declare_table 时记 owner,只该 pid 能写)— admin 是运行时写 routing rules,不像 BehaviorRegistry 是 boot-only。Plugin X 不能 stomp plugin Y 的 routing table | impl |
+| 96 | **Matcher AST 5 leaf + JSON serde**(Decision #41/#42/#70 落地)— `Esr.Routing.Matcher` 5 个 leaf(`mention/from/text_contains/text_matches/always`);plain tuple 形态无 macro;`to_json/1` + `from_json/1` 让 matcher 进 SQLite `routing_rules.matcher_data` 列。组合子(and/or/not)Phase 4+(P3-D3 决定单层规则 + 多条规则 additive 已覆盖 demo)| impl |
+| 97 | **Resolver 双层 fan-out:cross-session 走规则 + in-session 走 members fall-through**(P3-D impl 决策 b)— `Chat.invoke(:send)` 先调 `Resolver.resolve/2` 拿 cross-session targets,再 always 加上 in-session members。Recursion guard:不 re-dispatch 到 current session。router 真正能"在 main 发的 urgent 消息同时落 oncall" | impl |
+| 98 | **`message_routings` 关联表保 Decision #40 identity invariant + 多 session 持久化**(#P1-4 spec review 修复)— `messages.uri` 是 PK,Phase 3 D8 reply 可同时 target N session → PK 冲突。新 `message_routings` 复合 PK `(message_uri, session_uri)`:messages 保 1 行/uri,per-session 路由信息走 routings 表。MessageStore.write/2 transaction upsert messages + insert message_routings + 新加 sessions_for_message/1 给 ref 一致性 soft warn 用 | impl |
+| 99 | **Identity Behavior in slice + admin_caps 注入 init_slice**(Phase 3d step 1 / Decision #24 落地)— admin_caps 从 module function 硬编码迁到 slice state;`Esr.Behavior.Identity` 加 User Kind.behaviors;chat plugin spawn admin User 传 `extra_args: %{initial_caps: User.admin_caps()}`(per #B1 — kind_server_spec/4 加 extra_args 参数)。caps 现在在 `:sys.get_state(admin_user_pid).state.identity.caps` 可观测 | impl |
+| 100 | **`Esr.Capability.cap_for_action/3` helper**(#P1-8)— dispatch step 5.5 需要的"action → cap_needed" 反查,签名加 `target_uri`(必填)以从中提取 `instance`(via Esr.URI.instance/1)。返 `%{kind, behavior, instance}` 喂 matches?/2 | impl |
+| 101 | **Phase 3d hard flip:`:stub_grant` 永久死亡 + check_invariants #9 #10 invariant test gate**(P3-D6 落地)— authz_stub/4 整个删除,替换 authz_check/4(真 Capability.matches? + `:granted`/`:denied` telemetry)。`:stub_grant` atom 全 codebase 清空(audit.ex/telemetry.ex/admin_live.ex 全改 granted/denied)。runtime invariant test 是 #10 的语义 gate(grep 只是 tripwire,per `feedback_completion_requires_invariant_test`)| impl |
+| 102 | **Reply 契约 D8:`{session_uris: [URI], text, ref?}`** — Python bridge `reply` MCP tool 三字段;session_uris 是 list;ref optional 支持 proactive reply。Agent.handle_kind_message 用同一 envelope dispatch chat/send per session_uri(identity invariant 配合 #98)。ref + session_uris 不一致 emit `[:esr, :chat, :reply_session_mismatch]` 但仍按 session_uris 路由(soft warn,信任 claude)| impl |
+| 103 | **Bridge↔Agent floating (P3-D9 contract change) + LV @-dropdown 只列 session 成员**(real-claude e2e exposed)— bridge announce 改为 spawn Agent Kind 但不 join 任何 session(floating),admin 通过 LV "Add to session..." 显式拉入。配合 LV compose 区 @ agent dropdown 只列 current_session_uri 的 members,空时显 hint。multi-agent demo 暴露的 UX 问题(@ floating agent 后 message 静默 drop)的根本修复 | impl |
+| 104 | **push_to_claude meta 必含 `"session"` 字段 + reply dispatch failure 可见**(real-claude e2e hotfix)— Chat.invoke(:receive) Agent 分支构造 push_to_claude meta 时必须包含 `"session" => URI.to_string(ctx.caller)`(源 session URI),claude 才能正确填 reply 的 session_uris。配 Chat.handle_kind_message dispatch chat/send 返 `{:error, _}` 时 emit `[:esr, :chat, :reply_dispatch_failed]` telemetry(以前静默 drop) | impl |
 
 ---
 
