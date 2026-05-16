@@ -33,6 +33,11 @@ defmodule EsrWebLiveview.RoutingLive do
 
   alias Esr.Routing.{Matcher, RuleStore}
 
+  # Phase 5 PR 4: dispatch routing mutations through RoutingAdmin Kind
+  # so CapBAC check fires at dispatch step 5.5. Admin's all-cap passes;
+  # non-admin without explicit routing_admin cap gets :unauthorized.
+  @routing_admin_uri Esr.Entity.RoutingAdmin.default_uri()
+
   @tables [
     {"MentionRouting", EsrPluginChat.Routing.MentionRouting},
     {"SessionRouting", EsrPluginChat.Routing.SessionRouting}
@@ -47,8 +52,22 @@ defmodule EsrWebLiveview.RoutingLive do
   ]
 
   @impl true
-  def mount(_params, _session, socket) do
+  def mount(_params, session, socket) do
     [{_, first_table} | _] = @tables
+
+    # Phase 5 PR 4: derive caller from session for CapBAC dispatch
+    caller_uri =
+      case Map.get(session || %{}, "current_user_uri") do
+        nil -> Esr.Entity.User.admin_uri()
+        uri_str -> URI.parse(uri_str)
+      end
+
+    caller_caps =
+      if URI.to_string(caller_uri) == URI.to_string(Esr.Entity.User.admin_uri()) do
+        Esr.Entity.User.admin_caps()
+      else
+        Esr.Identity.list_caps_for(caller_uri)
+      end
 
     {:ok,
      socket
@@ -58,6 +77,8 @@ defmodule EsrWebLiveview.RoutingLive do
      |> assign(:rules, load_rules(first_table))
      |> assign(:flash_error, nil)
      |> assign(:matcher_mode, "form")
+     |> assign(:caller_uri, caller_uri)
+     |> assign(:caller_caps, caller_caps)
      |> assign(
        :add_form,
        to_form(
@@ -118,8 +139,12 @@ defmodule EsrWebLiveview.RoutingLive do
          receivers when is_list(receivers) <-
            parse_receivers(Map.get(params, "receivers", "")),
          true <- length(receivers) > 0 || {:error, :no_receivers},
-         {:ok, _row} <- RuleStore.add(table, matcher, receivers, nil),
-         :ok <- RuleStore.load_into_registry(table) do
+         {:ok, _r} <-
+           dispatch_routing_admin(socket, :add_rule, %{
+             table: table,
+             matcher_json: Matcher.to_json(matcher),
+             receivers: receivers
+           }) do
       {:noreply,
        socket
        |> assign(:current_table, table)
@@ -139,6 +164,12 @@ defmodule EsrWebLiveview.RoutingLive do
          )
        )}
     else
+      {:error, :unauthorized} ->
+        {:noreply,
+         assign(socket, :flash_error,
+           "You don't have routing_admin cap. Ask admin to grant via mix esr.user.create."
+         )}
+
       {:error, reason} ->
         {:noreply, assign(socket, :flash_error, "add failed: #{inspect(reason)}")}
 
@@ -148,25 +179,32 @@ defmodule EsrWebLiveview.RoutingLive do
   end
 
   def handle_event("delete_rule", %{"id" => id_str}, socket),
-    do: rule_action(id_str, &RuleStore.delete/1, socket)
+    do: rule_action(id_str, :delete_rule, socket)
 
   def handle_event("disable_rule", %{"id" => id_str}, socket),
-    do: rule_action(id_str, &RuleStore.disable/1, socket)
+    do: rule_action(id_str, :disable_rule, socket)
 
   def handle_event("enable_rule", %{"id" => id_str}, socket),
-    do: rule_action(id_str, &RuleStore.enable/1, socket)
+    do: rule_action(id_str, :enable_rule, socket)
 
-  defp rule_action(id_str, fun, socket) do
+  defp rule_action(id_str, action, socket) do
     case Integer.parse(id_str) do
       {id, ""} ->
-        case fun.(id) do
-          :ok ->
-            :ok = RuleStore.load_into_registry(socket.assigns.current_table)
-
+        case dispatch_routing_admin(socket, action, %{
+               id: id,
+               table: socket.assigns.current_table
+             }) do
+          {:ok, _result} ->
             {:noreply,
              socket
              |> assign(:rules, load_rules(socket.assigns.current_table))
              |> assign(:flash_error, nil)}
+
+          {:error, :unauthorized} ->
+            {:noreply,
+             assign(socket, :flash_error,
+               "You don't have routing_admin cap to perform this action."
+             )}
 
           {:error, reason} ->
             {:noreply, assign(socket, :flash_error, "failed: #{inspect(reason)}")}
@@ -175,6 +213,25 @@ defmodule EsrWebLiveview.RoutingLive do
       _ ->
         {:noreply, assign(socket, :flash_error, "bad id: #{id_str}")}
     end
+  end
+
+  # Phase 5 PR 4: dispatch routing mutations via Invocation → CapBAC fires
+  defp dispatch_routing_admin(socket, action, args) do
+    target =
+      URI.parse(
+        "#{URI.to_string(@routing_admin_uri)}/behavior/routing_admin/#{Atom.to_string(action)}"
+      )
+
+    Esr.Invocation.dispatch(%Esr.Invocation{
+      target: target,
+      mode: :call,
+      args: args,
+      ctx: %{
+        caller: socket.assigns.caller_uri,
+        caps: socket.assigns.caller_caps,
+        reply: {:caller_inbox, self()}
+      }
+    })
   end
 
   defp parse_table(""), do: {:error, :missing_table}
