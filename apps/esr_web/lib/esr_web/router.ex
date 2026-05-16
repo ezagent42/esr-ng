@@ -30,6 +30,12 @@ defmodule EsrWeb.Router do
     pipe_through :browser
 
     live "/admin", AdminLive
+
+    # Phase 4d: Workspace management surfaces. Separate LV (not a tab
+    # inside admin_live) per Phase 4 D2 — cluster-shape config is a
+    # different surface than per-session chat.
+    live "/admin/workspaces", WorkspacesLive
+    live "/admin/workspaces/:name", WorkspaceDetailLive
   end
 
   # Liveness probe — plain JSON, no ESR dispatch path involved.
