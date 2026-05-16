@@ -414,6 +414,14 @@ Kind 三子类之一。**被操作,无 cap**。例:`workspace://...` / `resource
 
 参考: ARCHITECTURE.md §3.1
 
+### RoutingAdmin
+
+Synthetic singleton Kind(`routing-admin://default`,Phase 5 PR 4 落地 Decision #125)— 不是真实业务实体,而是把 RoutingRegistry 的 add/delete/disable/enable 操作包成 Behavior(`Esr.Behavior.RoutingAdmin`),从而让 routing 规则修改也走 `Invocation.dispatch` → 命中 CapBAC step 5.5。non-admin 没有 `routing_admin` cap 调用 → `:unauthorized` + audit row。
+
+⚠️ 是 "**operation-as-Kind**" 模式实例 — 当某类高权限操作没有自然 owner Kind 时,合成一个 singleton 把它们集中到一处 cap-gate。RoutingLive(`/admin/routing`)dispatches 经此走;CLI mix task 也走同路径。
+
+参考: ARCHITECTURE.md Decision #125,SPEC Phase 5 P5-D6
+
 ### RoutingRegistry
 
 外部 key → URI(s) 的运行时映射。Plugin 自声明 table(`declare_table/3`,含 `duplicate_keys: boolean` + 可选 `reverse_index`)。

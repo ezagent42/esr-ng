@@ -1,6 +1,8 @@
 # Phase 5 — Operator/Admin Tools Maturity + Observability
 
-**Status:** drafted 2026-05-16 (Allen AFK; autonomous one-shot)
+**Status:** **completed 2026-05-17** (autonomous one-shot; 5/5 PRs merged: #27, #28, #29, #30, #31 + closeout `ScrollOnUpdate` prepend fix). All invariant tests green; demo recorded.
+
+**Status (drafted):** 2026-05-16 (Allen AFK; autonomous one-shot)
 **Theme:** Every operator action that today requires `mix` CLI gets an LV equivalent. Plus snapshot observability + completing the routing cap-protect.
 
 ## North star (per memory `feedback_production_usability_is_selection_criterion`)
