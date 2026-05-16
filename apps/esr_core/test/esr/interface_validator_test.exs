@@ -25,6 +25,14 @@ defmodule Esr.InterfaceValidatorTest do
                  m: :map
                })
     end
+
+    test ":uri accepts %URI{} struct, rejects bare string" do
+      uri = URI.new!("agent://cc-builder")
+      assert :ok = InterfaceValidator.validate(%{u: uri}, %{u: :uri})
+
+      assert {:error, {:invalid_args, [{[:u], {:type_mismatch, _}}]}} =
+               InterfaceValidator.validate(%{u: "agent://cc-builder"}, %{u: :uri})
+    end
   end
 
   describe "missing fields" do

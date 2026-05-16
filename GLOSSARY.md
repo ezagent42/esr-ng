@@ -112,8 +112,17 @@ ESR 项目的**单一真相源**(single source of truth)for:
 | 83 | **§14 LOC budget round-2 校准** — `message_store.ex` 之前漏列;补进清单 ~50 LOC;target 870 → 920;red line 1100 → 1150 | v0.4 |
 | 84 | **Phase 1 采用路径 B(`@behaviour Esr.Kind` + 共享 `Esr.Kind.Server`)** 不用宏 — register→subscribe→announce_ready property 等价 Decision #66 但 means 不同;共享 Server 把 Kind 隔离从 compile time 推到 runtime;`Esr.Kind.Runtime.handle_dispatch/3` 必须 defensive 处理多 Kind state shape;Phase 1 接受 trade-off 因为只有 Echo 一个业务 Kind;Phase 2+ 若 state shape 假设冲突再评估(详见 ARCHITECTURE.md §5.7.4) | impl |
 | 85 | **`.claude/` 暂用 plain dir 不 vendor+submodule**(Phase 0 实施期决策)— 短期符合"少发明多装配"+ 镜像老 esr 实际结构;trigger 迁 vendor: (a) 出现 skill 需要 upstream 更新需求,或 (b) Phase 5 完成后整理 tech debt | impl |
+| 86 | **CC channel 协议层简化:Channel = MCP server + 1 capability**(Phase 1b 实证)— v0.3 §12.8 之前假设 channel 是独立通信协议(独立 server 进程 + 类似 WebSocket 的 wire),Phase 1b 发现 Channels 是 MCP 协议扩展(`capabilities.experimental['claude/channel']` + `notifications/claude/channel` + 标准 MCP tools/call)。`esr_plugin_cc_bridge_v1_prototype` ~250 LOC Python。**LOC 对比的诚实表述**:老 esr `cc_channel_runner`(973 LOC)和 cc-openclaw `channel_server`(4164 LOC)包含 channel 之外功能(多 session / persistence / permission relay 等),直接拿 4164 vs 250 对比是**不公平的**;**协议层简化是真的**,LOC 简化幅度模糊。Phase 5 `esr_plugin_cc_channel` 走简化路径(详见 ARCHITECTURE.md §12.8) | impl |
+| 87 | **`--dangerously-load-development-channels server:<name>` 需要项目根 `.mcp.json`**(per-operator,gitignored,通过 `git rev-parse --show-toplevel` 锚定)— 否则 claude 启动期 lookup 失败打印 warning;`--mcp-config <abs>` 只读 session-level,**不**满足 dev-channels lookup。`Esr.Bridge.V1Prototype.McpConfigWriter.write!/0` 同时写 session-level 和 project-level | impl |
+| 88 | **K-path Behavior 模型**(Phase 2 落地 Decision #61)— 一个 Behavior 模块同时挂在多个 Kind 上,每个 Kind 通过 `BehaviorRegistry.register(kind, action, behavior)` 注册自己消费的 **action subset**(Chat: Session→send/join/leave, User+Agent→receive)。`Kind.behaviors/0` 从"action 路由权威"降级为"`init_slice` 用的列表",真正权威是 BehaviorRegistry per-Kind 表。User Kind 可以 `behaviors() = []` 但仍接收 `:receive` 分发(实现细节见 `apps/esr_plugin_chat/`)。这是 plugin isolation 北极星的核心原语:加新 Behavior(语音/file 等)不动 Kind 模块 | impl |
+| 89 | **`Esr.Kind.Server.handle_info/2` 统一 Behavior 消息转发器**(新合约面)— 任何非 dispatch 入站(Process.monitor `:DOWN`, bridge `send/2` 回调, 未来 timer tick 等)都进 Kind.Server 单 mailbox,转发到每个 composing Behavior 的可选回调 `handle_kind_message(message, slice, ctx)`,返 `{:ok, new_slice}` 或 `:ignore`。Kind.Server 仍完全不感知任何业务 Behavior。Phase 2 Chat 用这个 hook 实现 offline 状态机(:DOWN→last_seen)和 bridge→Agent reply 回路。在 §5.7.4 Kind.Server 节增补合约 | impl |
+| 90 | **`ctx.kind_module` + `ctx.self_uri` 在 Kind.Runtime 注入**(Invocation flow 增补)— Behavior 跨 Kind 时(Chat 的 :receive 要分支 User vs Agent / Session 的 :send 要 broadcast topic 含自己 URI)需要这两个值,Phase 1 没有。Kind.Runtime.handle_dispatch/4 在 `invoke_behavior` 前单点 `Map.put` 注入,plugin 作者永远不需要手 plumb。`Invocation.ctx` type spec 同步:这两 key 是 runtime-injected,Behavior 内可见,adapter 构造 Invocation 时不需要填 | impl |
+| 91 | **MessageStore 为聊天历史的单一真相源**(Phase 2 P2-D3)— Session.Chat slice 只持 ephemeral 在线状态(members/monitors/last_seen),offline 期消息从不维护 pending queue;rejoin 时通过 `MessageStore.in_session_since(session_uri, last_seen[uri])` 派生 replay 集,SQL `LIMIT 1000` 兜底超长 backlog。理由跟 memory `feedback_converge_to_uri_list` 同源(可派生的不该独立维护)。详见 `apps/esr_core/lib/esr/message_store.ex` | impl |
+| 92 | **`InterfaceValidator` 加 `:uri` primitive**(§6.2 type-spec 语法扩展)— Chat 的 `@interface` schema 声明 `sender: :uri, mentions: {:list, :uri}` 等典型 URI 字段,validator 在 dispatch 边界要求 `%URI{}` struct,**拒绝裸字符串**。配合 `Esr.Ecto.URI` 自定义 Ecto type 实现 URI 跨进程/跨持久化层都是 struct,序列化/反序列化由专门 type 处理 | impl |
+| 93 | **`session://` URI scheme + 两条新 PubSub `:events` 通道**(§3.5 URI types + §5.7.6 topic taxonomy 扩展)— Phase 2 新增 `session://` 作为 Kind URI scheme(Session Kind 用)。`esr:session:<uri>:events` 用于 chat stream 订阅(消息/成员变更/online-offline)+ `esr:user:<uri>:events` 用于个人 inbox 通知。两个 topic 都是 §5.7.6 的 view fan-out 合法用法(已加入 `check_invariants` #1 allowlist) | impl |
+| 94 | **Bridge↔Agent dual map**(v1_prototype 实现层模式,Phase 5 channel 重写时复用)— `Esr.Bridge.V1Prototype.Server` 同时维护 `bridge_to_agent: %{bridge_id => pid}` + `agent_to_bridge: %{agent_uri_str => bridge_id}`。出站(Agent.invoke(:receive) → claude)用 `bridge_for_agent/1`;入站(claude reply tool → Agent)用 `forward_reply_to_agent/2` 找 pid → `send/2`。模式本质:wire-id 和 business-URI 解耦,routing 层不感知 wire 协议。Phase 5 esr_plugin_cc_channel 重写时延续此模式 | impl |
 
-实施期决策(impl)将持续从 #86 起 append →
+实施期决策(impl)将持续从 #95 起 append →
 
 ---
 
@@ -192,11 +201,13 @@ Capability-based access control。ESR 的权限模型——每个 Invocation 在
 
 ### Channel(Claude Code Channel)
 
-Anthropic 给 Claude Code 的"外部事件 push"机制。**反向 MCP push 模型**(不是 LLM pull tools)。ESR 通过 `esr_plugin_cc_channel`(双侧组件:Elixir adapter + Python channel server)桥接外部 CC 实例。
+Anthropic 给 Claude Code 的"外部事件 push to TUI"机制。**MCP 协议的一个扩展 capability**(不是独立通信协议,Decision #86 Phase 1b 实证)——一个 channel 就是个普通 MCP server,多三件事:`capabilities.experimental['claude/channel']` + `notifications/claude/channel` notification(server → claude,渲染 `<channel source="...">`)+ 标准 MCP tool(如 `reply`,claude → server)。
 
-⚠️ 易混淆 — Phoenix.Channel 是 WS 抽象,跟 CC Channel 是两件事。见 §3 易混淆词表。
+ESR 通过 `esr_plugin_cc_channel`(Elixir HTTP/SSE + Python MCP server)桥接外部 CC 实例。Python 侧是普通 MCP server,走 stdio 跟 CC 通信;Elixir 侧通过 HTTP/SSE 跟 Python 通信。**不需要独立 channel-server 进程,不需要 WebSocket** — 这是 v0.3 §12.8 的认知错误,Phase 1b 纠正。
 
-参考: ARCHITECTURE.md §12.8,Decision #51
+⚠️ 易混淆 — Phoenix.Channel 是 Phoenix 框架的 WebSocket 抽象,跟 CC Channel 完全是两件事(碰巧同名)。见 §3 易混淆词表。
+
+参考: ARCHITECTURE.md §12.8(Phase 1b 后已重写),Decision #86
 
 ### ctx(Invocation context)
 
@@ -499,7 +510,7 @@ ESR domain 词跟外部世界(Phoenix / Elixir / 通用计算机科学)同名碰
 
 | 词 | ESR 意义 | 外部世界意义 | 消歧写法 |
 |---|---|---|---|
-| **channel** | Claude Code Channel(MCP 协议,反向 push) | Phoenix.Channel(WS 抽象) / OTP channel(无此概念) | "CC Channel" / "Phoenix.Channel" |
+| **channel** | Claude Code Channel(MCP 协议扩展:`claude/channel` capability + 一个 notification method + tools) | Phoenix.Channel(Phoenix WS 框架抽象) / OTP channel(无此概念) | "CC Channel" / "Phoenix.Channel";两个完全无关,碰巧同名 |
 | **session** | ESR Session(routing context owner,Kind 子类) | Phoenix session(cookie/web session) / HTTP session | "ESR Session" / "Phoenix session" |
 | **registry** | KindRegistry(URI→pid) / RoutingRegistry(external_key→URI) | Elixir Registry(底层 module) | 显式指 "KindRegistry" 或 "RoutingRegistry";"Elixir Registry" |
 | **behavior** | Esr.Behavior(action 处理者,自定义概念) | Elixir behaviour(callback 契约,语言级) | ESR 用 "Behavior" 大写 B;Elixir 用 "behaviour" 小写 b(British spelling) |
@@ -526,7 +537,7 @@ ESR domain 词跟外部世界(Phoenix / Elixir / 通用计算机科学)同名碰
 ### 实施期新增 Decision
 
 1. 实施期产生新架构决策(brainstorm 阶段 / dev review / Allen 指示)
-2. Append 到 §1 Decision Log,编号递增(下一条 #86)
+2. Append 到 §1 Decision Log,编号递增(下一条 #88)
 3. Period 字段标 `impl`(区别 v0.1-v0.4 的"设计期"决策)
 4. 决策正文要简洁:**一句话核心 + 关键 link**(到 ARCHITECTURE.md 章节或 phase-specs/)
 5. 同步:如果决策影响 ARCHITECTURE.md,Allen 决定要不要 patch 主文档(小决策可能只在 GLOSSARY 记录)
@@ -552,5 +563,5 @@ ESR domain 词跟外部世界(Phoenix / Elixir / 通用计算机科学)同名碰
 本文件是 ESR 项目的**单一真相源**,跟 ARCHITECTURE.md 平级。实施期任何疑问优先查这里。
 
 **Maintainers**: Allen + Claude(顶层文档维护)+ 工程师(实施期 phase-specs)
-**Last updated**: Phase 1 spec sign-off(2026-05-15)+ impl 期 #84-#85 入账
-**Decision Log status**: #85(下一条 #86,实施期持续 append)
+**Last updated**: Phase 1 完成(2026-05-15)+ impl 期 #84-#87 入账;Channel 术语 + 易混淆词表同步 Decision #86 后简化定义
+**Decision Log status**: #87(下一条 #88,实施期持续 append)

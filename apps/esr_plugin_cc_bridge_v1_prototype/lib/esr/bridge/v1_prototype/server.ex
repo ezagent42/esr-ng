@@ -18,7 +18,18 @@ defmodule Esr.Bridge.V1Prototype.Server do
 
   ## State shape
 
-  `%{bridges: %{bridge_id => %{connected_at: DateTime, info: map}}}`
+  `%{bridges: %{bridge_id => %{connected_at: DateTime, info: map}},
+     replies: %{bridge_id => [%{at, text}]},
+     bridge_to_agent: %{bridge_id => agent_pid},
+     agent_to_bridge: %{agent_uri_string => bridge_id}}`
+
+  Phase 2c-step 1 added the bridge↔agent dual map: when a bridge
+  announces with an `agent_uri`, the controller spawns an
+  `Esr.Entity.Agent` Kind at that URI and registers the binding here.
+  Reply traffic from claude (POST /reply) then routes through the
+  Agent Kind via `forward_reply_to_agent/2`, which in turn dispatches
+  a `chat/send` on `session://main` so the message lands on every
+  member's `:receive` path (including admin via LV).
   """
 
   use GenServer
@@ -106,6 +117,55 @@ defmodule Esr.Bridge.V1Prototype.Server do
     GenServer.call(__MODULE__, {:recent_replies, bridge_id})
   end
 
+  # --- Phase 2c bridge↔agent binding ------------------------------------
+
+  @doc """
+  Bind `bridge_id` to a running `Esr.Entity.Agent` pid + its URI.
+
+  Called from the announce controller AFTER the controller spawns the
+  Agent Kind via `DynamicSupervisor.start_child`. Idempotent — re-binding
+  a bridge to the same agent_uri overwrites silently (handles bridge
+  reconnect).
+  """
+  @spec bind_agent(String.t(), URI.t(), pid()) :: :ok
+  def bind_agent(bridge_id, %URI{} = agent_uri, agent_pid)
+      when is_binary(bridge_id) and is_pid(agent_pid) do
+    GenServer.call(__MODULE__, {:bind_agent, bridge_id, agent_uri, agent_pid})
+  end
+
+  @doc """
+  Forward a claude reply to the Agent Kind bound to `bridge_id`.
+
+  The Agent's `handle_info({:reply_received, text}, state)` (in
+  `Esr.Behavior.Chat`) constructs an `%Esr.Message{}` envelope with
+  itself as sender + dispatches `session://main/behavior/chat/send`.
+  This is the new Phase 2 reply path — replaces the Phase 1
+  `record_reply` flow that wrote to per-bridge `replies` and broadcast
+  for LV.
+
+  Returns `{:error, :no_agent}` if no Agent is bound (legacy bridges
+  that announced without `agent_uri` — controller surfaces 400 then).
+  """
+  @spec forward_reply_to_agent(String.t(), String.t()) :: :ok | {:error, :no_agent}
+  def forward_reply_to_agent(bridge_id, text) when is_binary(bridge_id) and is_binary(text) do
+    GenServer.call(__MODULE__, {:forward_reply, bridge_id, text})
+  end
+
+  @doc "Look up the bridge_id bound to an Agent URI (for outbound to_claude push)."
+  @spec bridge_for_agent(URI.t()) :: {:ok, String.t()} | :error
+  def bridge_for_agent(%URI{} = agent_uri) do
+    GenServer.call(__MODULE__, {:bridge_for_agent, agent_uri})
+  end
+
+  @doc """
+  Unbind an agent on bridge disconnect. Removes both directions of the
+  map. Idempotent.
+  """
+  @spec unbind_agent(String.t()) :: {:ok, URI.t() | nil}
+  def unbind_agent(bridge_id) when is_binary(bridge_id) do
+    GenServer.call(__MODULE__, {:unbind_agent, bridge_id})
+  end
+
   @doc "How many bridges are connected? Returns 0 if GenServer not started."
   def count do
     case Process.whereis(__MODULE__) do
@@ -132,7 +192,13 @@ defmodule Esr.Bridge.V1Prototype.Server do
 
   @impl true
   def init(_) do
-    {:ok, %{bridges: %{}, replies: %{}}}
+    {:ok,
+     %{
+       bridges: %{},
+       replies: %{},
+       bridge_to_agent: %{},
+       agent_to_bridge: %{}
+     }}
   end
 
   @impl true
@@ -188,5 +254,61 @@ defmodule Esr.Bridge.V1Prototype.Server do
 
   def handle_call({:recent_replies, bridge_id}, _from, state) do
     {:reply, Map.get(state.replies, bridge_id, []), state}
+  end
+
+  def handle_call({:bind_agent, bridge_id, agent_uri, agent_pid}, _from, state) do
+    new_state = %{
+      state
+      | bridge_to_agent: Map.put(state.bridge_to_agent, bridge_id, agent_pid),
+        agent_to_bridge: Map.put(state.agent_to_bridge, URI.to_string(agent_uri), bridge_id)
+    }
+
+    {:reply, :ok, new_state}
+  end
+
+  def handle_call({:forward_reply, bridge_id, text}, _from, state) do
+    case Map.get(state.bridge_to_agent, bridge_id) do
+      nil ->
+        {:reply, {:error, :no_agent}, state}
+
+      agent_pid when is_pid(agent_pid) ->
+        # send/2 lands in Esr.Kind.Server.handle_info/2 which fans out
+        # to each composed Behavior's handle_kind_message/3. Chat's
+        # clause for {:reply_received, _} constructs the Message +
+        # dispatches chat/send.
+        send(agent_pid, {:reply_received, text})
+        {:reply, :ok, state}
+    end
+  end
+
+  def handle_call({:bridge_for_agent, agent_uri}, _from, state) do
+    case Map.get(state.agent_to_bridge, URI.to_string(agent_uri)) do
+      nil -> {:reply, :error, state}
+      bridge_id -> {:reply, {:ok, bridge_id}, state}
+    end
+  end
+
+  def handle_call({:unbind_agent, bridge_id}, _from, state) do
+    case Map.get(state.bridge_to_agent, bridge_id) do
+      nil ->
+        {:reply, {:ok, nil}, state}
+
+      _agent_pid ->
+        # Find agent_uri so we can remove from agent_to_bridge too.
+        {agent_uri_str, agent_to_bridge} =
+          Enum.reduce(state.agent_to_bridge, {nil, %{}}, fn
+            {uri, ^bridge_id}, {nil, acc} -> {uri, acc}
+            {uri, bid}, {found, acc} -> {found, Map.put(acc, uri, bid)}
+          end)
+
+        new_state = %{
+          state
+          | bridge_to_agent: Map.delete(state.bridge_to_agent, bridge_id),
+            agent_to_bridge: agent_to_bridge
+        }
+
+        agent_uri = if agent_uri_str, do: URI.new!(agent_uri_str)
+        {:reply, {:ok, agent_uri}, new_state}
+    end
   end
 end

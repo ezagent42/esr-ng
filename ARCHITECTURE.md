@@ -1,10 +1,10 @@
 # ESR Kind Runtime — 架构设计 v0.4
 
-> **Status**: 架构骨架冻结,Phase 0 完成(`phase0` tag),Phase 1 spec sign-off,实施期决策已开始记录(impl 期 #84+)
-> **Last updated**: 2026-05-15
+> **Status**: 架构骨架冻结,Phase 0-1 完成(`phase0` + `phase1b` tags),Phase 1 sign-off,实施期决策 Decision #84-#87 入账
+> **Last updated**: 2026-05-15(Phase 1 完成 + §12.8 重写)
 > **Owner**: Allen / ezagent42
 > **Changes from v0.3**: 顶层加"ESR 是 router 不是 req/resp app"framing;Resource Kind 加"shared referent needs identity"判定原则;Template 升级为双层模型(Class / Instance,Workspace 是 Instance 示范);加 reliability primitives 三件套(ReadyGate / PendingDelivery / Idempotency);RoutingRegistry 加 `put_new` 语义(unique-key only)+ `reverse_index` 反查;Matcher 边界按"读 core 数据 → core"画线;Plugin 判定原则显式化;5 个事故坑全部 design-in;LOC 校准 475/595 → ~870 → 920;feishu-cc 切片 4 张参考表入 spec;ES 从 deferred 改为已决不做;dev 两轮 review 闭环
-> **Impl-period 更新**: §5.7.4 承认 Kind 生命周期两条等价实现路径(宏 / 共享 Server,Decision #84);Decision Log #84 #85 加入
+> **Impl-period 更新**: §5.7.4 承认 Kind 生命周期两条等价实现路径(宏 / 共享 Server,Decision #84);**§12.8 重写反映 "Channel = MCP + 1 capability" 协议层简化**(Phase 1b 实证,Decision #86);Phase 2 加 K-path Behavior 模型 / `handle_kind_message` Kind.Server 转发器 / `ctx.kind_module` + `ctx.self_uri` 注入 / MessageStore 单一真相源 / `:uri` primitive / `session://` scheme + 两条 PubSub `:events` 通道(Decision #88-#94);Decision Log 当前到 #94
 
 ---
 
@@ -916,6 +916,18 @@ end
 
 **关键不变式**(两条路径都依赖):这个窗口的正确性依赖 §5.7.6 的硬不变式(inbound 永远走 dispatch,**不**裸 `PubSub.broadcast` 到 inbound topic)。Phoenix.PubSub 对没有订阅者的 topic **不** buffer——裸 broadcast 进 inbound topic 在 register→subscribe 窗口里**会被丢**(这正是事故 2.1 的本来面貌)。
 
+**Phase 2 增补合约 — 统一 Behavior 消息转发器**(Decision #89):路径 B 的 `Esr.Kind.Server.handle_info/2` 同时充当所有 composing Behavior 的"非 dispatch 入站"转发点。任何不来自 `Esr.Invocation.dispatch/1` 的 GenServer 消息(`Process.monitor` 触发的 `:DOWN` / 外部 `send/2` 回调 / 未来 timer tick)都经此 mailbox,转发到每个 Behavior 的可选回调:
+
+```elixir
+@callback handle_kind_message(message :: term(), slice :: map(),
+                              ctx :: %{kind_module: module(), self_uri: URI.t()}) ::
+            {:ok, new_slice :: map()} | :ignore
+```
+
+返 `{:ok, new_slice}` 更新该 Behavior 的 slice;返 `:ignore` 不变。`Kind.Server` 仍**完全不感知**任何业务 Behavior——只查 `function_exported?/3` 后调用。Phase 2 Chat 用此 hook 实现 offline 状态机(`:DOWN` → last_seen)和 bridge→Agent reply 回路(`{:reply_received, _}` → 构造 Message + dispatch chat/send),Kind.Server 一行业务代码都不加。
+
+**`ctx.kind_module` + `ctx.self_uri` 单点注入**(Decision #90):`Esr.Kind.Runtime.handle_dispatch/4` 在调用 `invoke_behavior` 前在 ctx 上 `Map.put` 这两个 key。Behavior 跨 Kind 时(Chat 的 `:receive` 分支 User vs Agent / Session 的 `:send` 用 self_uri 当 broadcast topic 前缀)需要它们,Adapter 构造 Invocation 时**不**填——是 runtime injection contract。
+
 #### 5.7.5 `Esr.Invocation.dispatch/1` 内置投递路径选择
 
 ```elixir
@@ -959,6 +971,17 @@ end
 
 **硬不变式(不是 guideline,是 §5.7.4 正确性依赖):inbound 消息永远走 `dispatch/1`,绝不允许裸 `PubSub.broadcast` 到 inbound topic**。
 
+**Topic taxonomy(Phase 2 增补,Decision #93)**:`:events` 后缀是 view fan-out 的统一命名约定。当前在用:
+
+| Topic 模板 | 谁广播 | 谁订阅 | 用途 |
+|---|---|---|---|
+| `esr:audit:stream` | `Esr.Audit` | LiveView /admin audit log + telemetry 观察者 | invocation 流式 |
+| `esr:session:<session_uri>:events` | `Esr.Behavior.Chat` (Session 侧) | LiveView /admin chat stream + 成员状态;Feishu/CLI adapter 渲染 | Chat 消息 + 成员 join/leave/offline |
+| `esr:user:<user_uri>:events` | `Esr.Behavior.Chat` (:receive 在 User Kind) | 该 User 的 inbox 渲染(LV 多个 view 共享 admin User) | 个人 inbox 通知 |
+| `esr:bridge_v1:events` / `esr:bridge_v1:to_claude:<bridge_id>` | `Esr.Bridge.V1Prototype.Server` | LV bridge 状态 + SSE endpoint | v1_prototype bridge 协议(Phase 5 替换) |
+
+新增 view fan-out topic 走 `:events` 后缀;`mix esr.check_invariants` #1 的 allowlist 列源文件(audit.ex / invocation.ex / chat.ex / ...),新加 broadcast 源码必须同步更新 allowlist。
+
 理由:Phoenix.PubSub **不** buffer 没有订阅者的 topic 的消息。裸 broadcast 在 receiver 的 register→subscribe 窗口里**会被丢**——这正是事故 2.1 的根因。`dispatch/1` 通过 ReadyGate + PendingDelivery 接住这个窗口,broadcast 不行。
 
 判断规则的简化记法:**有特定 receiver → `dispatch/1`;广播给不确定旁观者 → `PubSub.broadcast`**。前者必须有投递保证,后者本来就接受"晚来没看到"。`code review` 时 grep `PubSub.broadcast` 出现在 inbound 路径上 = bug。
@@ -999,7 +1022,9 @@ end
 }
 ```
 
-Type spec 用 Elixir-style atom/tuple notation(`:string`、`:integer`、`{:tuple, :integer, :integer}`、`{:list, :string}`、`{:option, :string}`、`:map`、`%{<field> => <ty>}`)。v0 用 compile-time 简单 check;runtime 强校验 deferred 到 v0.2+。
+Type spec 用 Elixir-style atom/tuple notation(`:string`、`:integer`、`{:tuple, :integer, :integer}`、`{:list, :string}`、`{:option, :string}`、`:map`、`:uri`、`%{<field> => <ty>}`)。v0 用 compile-time 简单 check;runtime 强校验 deferred 到 v0.2+。
+
+Phase 2 加 `:uri` primitive(Decision #92):匹配 `%URI{}` struct,**拒绝裸字符串**。Chat 的 `@interface` 用它声明 `sender: :uri`、`mentions: {:list, :uri}` 等典型 URI 字段。这与 `Esr.Ecto.URI` 自定义 Ecto type 配合,实现 URI 跨进程/跨持久化层始终是 struct,字符串只出现在 dump/load 的边界。
 
 `@interface` 是所有 adapter 的生成源:
 
@@ -1908,47 +1933,78 @@ Chat Behavior 收到 message 后做两件事(独立):
 
 ESR **不**内置通用 MCP server——内嵌 BEAM agent 直接调 Elixir API,Python/Bun adapter 走 WS,都不需要 MCP。**唯一的 MCP 集成**是 Claude Code Channel adapter,因为 Channels 是 Anthropic 给 Claude Code 的官方"外部事件 push"机制,**是 ESR 跟运行中 CC session 通信的唯一可靠方式**(pty stdin、文件 watch、CLAUDE.md 都太脆弱)。
 
-#### 12.8.1 Channel 是反向 MCP
+#### 12.8.1 Channel = MCP server + 1 capability(Phase 1b 协议层洞察)
 
-| 普通 MCP | Channels |
+**Phase 1b 实证发现**(Decision #86):Claude Code Channels 协议**不是独立的通信协议**——它是 MCP 协议的一个扩展 capability。一个 Claude Code "channel" **就是一个普通的 MCP server**,只多了三件事:
+
+| 协议 element | 位置 | 方向 |
+|---|---|---|
+| `capabilities.experimental['claude/channel'] = {}` | MCP `initialize` response | 声明这是 channel-capable server |
+| `notifications/claude/channel`(JSON-RPC notification,no id) | server → claude(stdout 写) | 让 claude TUI 渲染 `<channel source="...">CONTENT</channel>` |
+| 标准 MCP tools/call(如 `reply` tool) | claude → server | claude 调 tool 反向通信 |
+
+整个 channel 跑在 **MCP stdio** 上(`--dangerously-load-development-channels server:<name>` 或 `--mcp-config`),跟普通 MCP server 完全同构。没有独立 WebSocket、没有 channel-specific framing、没有 channel-specific 认证(channel 协议本来有 sender allowlist 机制,但 ESR 用 CapBAC 取代,Channels protocol 那部分不实现)。
+
+**v0.3 §12.8 的错误假设**:之前章节假设 channel 需要独立通信协议 + 独立 channel-server 进程 + Phoenix.Socket / WebSocket 作为 wire。**这个认知错误现已纠正**(Phase 1b 实证 + Channels reference 文档读后)。
+
+**对比"普通 MCP"的 framing**:
+
+| 普通 MCP | Channel-enabled MCP |
 |---|---|
-| Claude 主动调 tool(pull) | 外部 push event 进 session |
-| 一次性 request/response | 长连接,事件流 |
-| Tool 暴露给 LLM 用 | 在 LLM context 出现 `<channel source="xxx">` |
-| 用于"赋予 LLM 能力" | 用于"通知 LLM 外部发生了什么" |
+| Claude 主动调 tool(pull) | 同 + server 主动 push notification 进 session |
+| 一次性 request/response | 长连接,事件流(stdin/stdout 长保持) |
+| Tool 暴露给 LLM 用 | 同 + 在 LLM context 出现 `<channel source="xxx">` |
+| 用于"赋予 LLM 能力" | 同 + 用于"通知 LLM 外部发生了什么" |
 
-Channels 是双向的:CC 通过 channel 的 `reply` tool 回复,reply 走回原协议。这是一个完整的 chat-style transport。
+Channel 是**双向**的:server push notification 进 session 让 claude 看到外部事件;claude 调 server 暴露的 tool 反向通信(`reply` tool 是常见的 reply pattern)。底层 wire 仍然是 MCP stdio,**不是独立协议**。
 
-参考:<https://code.claude.com/docs/en/channels>
+**关于 LOC 对比的诚实表述**:Phase 1b `esr_plugin_cc_bridge_v1_prototype` 的 **minimum bidirectional channel ~250 LOC Python**。老 esr `cc_channel_runner`(973 LOC)和 cc-openclaw `channel_server`(4164 LOC)的代码量**不是纯 channel 协议层**——它们包含 channel 之外的功能(多 session 管理 / persistence / permission relay / production-grade error handling / 跨平台兼容 等等)。直接拿 4164 vs 250 对比是**不公平的**——这两个系统不止做 channel 一件事。
 
-#### 12.8.2 Plugin 形态——单 plugin 两侧组件
+公平的对比是**协议层 surface**:
+- 错误认知(v0.3 §12.8 假设):channel 需要独立协议 + 独立 server 进程 + WebSocket wire → 大量 framing/lifecycle 代码
+- 纠正后(Phase 1b 实证):channel = MCP + 1 capability + 1 notification method → 普通 MCP server + ~3 处增量
 
-整个 CC Channel 集成是**一个 plugin deliverable**:`esr_plugin_cc_channel`。代码库结构:
+**协议层简化是真的**(错误假设引起的过度工程);**LOC 比较的简化幅度**是模糊的(取决于 prior art 还做了什么 channel 之外的事)。
+
+参考:<https://code.claude.com/docs/en/channels> 和 <https://code.claude.com/docs/en/channels-reference>
+
+#### 12.8.2 Plugin 形态——单 plugin 两侧组件(基于 MCP 协议层简化)
+
+整个 CC Channel 集成是**一个 plugin deliverable**:`esr_plugin_cc_channel`。**两侧都跑标准协议**——Python 侧是普通 MCP server(stdio),Elixir 侧通过 HTTP / SSE 跟 Python plugin 通信(不是 Phoenix.Socket WebSocket)。
+
+代码库结构:
 
 ```
 esr_plugin_cc_channel/                      ← 一个 git repo / release
   ├── elixir/                               ← ESR side(OTP app)
   │   ├── lib/esr_plugin_cc_channel/
   │   │   ├── application.ex
-  │   │   ├── channel_socket.ex             (Phoenix.Socket)
-  │   │   ├── channel_bridge.ex             (Cross-cutting Behavior)
-  │   │   └── instance_registry.ex          (CCInstanceConnection table)
+  │   │   ├── bridge_server.ex              (GenServer:管理 bridge_id ↔ session 映射,push 队列)
+  │   │   ├── announce_controller.ex        (Plug:接收 Python 来的 `/announce` 和 `/reply` HTTP POST;`/events_sse` 提供 push stream)
+  │   │   └── instance_registry.ex          (CCInstanceConnection RoutingRegistry table)
   │   └── mix.exs
-  ├── python/                               ← CC side(MCP channel server)
+  ├── python/                               ← CC side(MCP server)
   │   ├── esr_channel/
   │   │   ├── __init__.py
-  │   │   ├── channel_server.py             (MCP stdio + channels protocol)
-  │   │   ├── ws_client.py                  (连 ESR /cc_channel)
-  │   │   └── config.py                     (读 ESR endpoint + token)
+  │   │   ├── mcp_server.py                 (普通 MCP server,stdio;声明 `claude/channel` capability)
+  │   │   ├── notification_pump.py          (从 ESR /events_sse 拉 server-push,转 `notifications/claude/channel`)
+  │   │   ├── reply_tool.py                 (MCP tool: claude 调 reply → POST 到 ESR /reply)
+  │   │   └── config.py                     (读 ESR endpoint + bridge_id + token)
   │   └── pyproject.toml
   └── README.md
 ```
 
-**实现语言:Python 优先**(可复用现有 esr 的 Python channel 实现);Bun 也可,但 Python 跟 `esr_plugin_feishu` 一致,运维心智更统一。
+**ESR Elixir 侧 ↔ Python MCP server 的 wire 选择**:**HTTP/SSE**(Phase 1b 实证选择,Phase 5 实施时可重新评估)。理由:
+- HTTP/SSE 比 Phoenix.Socket WebSocket 简单一个数量级(不需要 ChannelSocket + Channel module + Heartbeat / Reconnect 抽象)
+- Server push 一侧用 SSE,Reply 一侧用普通 HTTP POST,各自最小协议
+- Python `requests` / `httpx` 标准库支持,无需特殊 client 库
+- 工程师 Phase 5 brainstorm 时如果发现 SSE 不够用(例如需要 bidirectional binary frame),再切回 WebSocket
 
-#### 12.8.3 数据流
+**实现语言:Python 优先**(可复用 Phase 1b 实证的 `esr_plugin_cc_bridge_v1_prototype/python/`);Bun 也可,但 Python 跟 `esr_plugin_feishu` 一致,运维心智更统一。
 
-**方向 1: ESR → CC**(向 Claude Code 推 message)
+#### 12.8.3 数据流(MCP stdio + HTTP/SSE)
+
+**方向 1: ESR → CC**(向 Claude Code 推 message,push 模型)
 
 ```
 [ESR routing 算出 receiver = agent://cc-allen-小满]
@@ -1959,31 +2015,37 @@ esr_plugin_cc_channel/                      ← 一个 git repo / release
     ▼
 [CCChannelBridge Behavior (cross-cutting attached to Agent Kind)]
     │
-    │ PubSub.broadcast("cc:allen-小满:outbound", message)
+    │ Phoenix.PubSub.broadcast("esr:cc_channel:to_claude:<bridge_id>", message)
     ▼
-[Esr.Web.CCChannelSocket — 对应 channel pid]
+[Esr.PluginCcChannel.AnnounceController.events_sse — SSE subscriber]
     │
-    │ Phoenix.Channel.push("event", payload)
+    │ HTTP chunked SSE: data: {"content": "...", "meta": {...}}
     ▼
-[esr-channel Python plugin]
+[Python MCP server: notification_pump.py]
     │
-    │ channels protocol: emit channel event via stdio MCP
+    │ 写 JSON-RPC notification 到 stdout:
+    │   { "jsonrpc": "2.0",
+    │     "method": "notifications/claude/channel",
+    │     "params": { "source": "esr-channel", "content": "...", ... } }
     ▼
-[Claude Code session]
-    ← <channel source="esr-channel">message_data</channel>
+[Claude Code TUI(MCP client)]
+    ← 渲染 <channel source="esr-channel" ...>CONTENT</channel> 进 LLM context
 ```
 
-**方向 2: CC → ESR**(Claude 回复)
+**方向 2: CC → ESR**(Claude 回复,通过标准 MCP tool)
 
 ```
 [Claude Code session]
-    → 调 esr-channel 的 reply tool
+    → Claude reasoning 后调 `reply` tool
+    │ JSON-RPC request 到 Python stdin:
+    │   { "method": "tools/call", "params": {"name": "reply", "arguments": {...}} }
     ▼
-[esr-channel Python plugin]
+[Python MCP server: reply_tool.py]
     │
-    │ WS to ESR /cc_channel: send invocation
+    │ HTTP POST /api/cc-channel/reply
+    │   {"bridge_id": "...", "text": "..."}
     ▼
-[Esr.Web.CCChannelSocket]
+[Esr.PluginCcChannel.AnnounceController.reply]
     │
     │ build %Invocation{
     │   target: <原 session URI>/behavior/chat/receive,
@@ -1995,7 +2057,12 @@ esr_plugin_cc_channel/                      ← 一个 git repo / release
 [ESR Message routing — 走标准 §5.5 路径]
 ```
 
-整套路径里 "channel 是反向 MCP" 的语义被完全 wrap 在 plugin 内,**ESR core 不感知**——它只看到 `agent://cc-xxx` 这个 Entity 通过某种 transport 接入,跟 Feishu user 接入同形。
+整套路径里 "channel" 的语义是**MCP server 多发一个 notification + 暴露 1+ tools**,完全被 wrap 在 plugin 内,**ESR core 不感知**——它只看到 `agent://cc-xxx` 这个 Entity 通过某种 transport 接入,跟 Feishu user 接入同形。
+
+**关键不变式仍然成立**:
+- inbound message 走 `Esr.Invocation.dispatch/1`(Decision #75)— Python `reply_tool.py` POST 后,ESR Elixir 侧构造 Invocation 走 dispatch
+- `ctx.caller = agent://cc-xxx` Entity 走 CapBAC 检查(§7,Decision #29)
+- 不裸 `PubSub.broadcast` 到 inbound topic — outbound push 走 PubSub broadcast 到 SSE subscriber(这是 "broadcast 给不确定旁观者"的合法用法,符合 §5.7.6)
 
 #### 12.8.4 身份验证——单层鉴权,不用 channels sender allowlist
 
@@ -2003,39 +2070,41 @@ Channels 协议默认的 sender allowlist + pairing flow(`/telegram:access pair 
 
 **单层鉴权**:
 
-1. **WS connect 时**:Phoenix.Socket.connect/3 验 token(ESR 配置 + CC 实例 ID),通过则把 socket 绑定到 `agent://cc-<instance>` URI
-2. **每条 Invocation**:走 §5.5 step 5.5 cap check——`ctx.caller` 是否持有 `cap(agent://cc-<instance>, Behavior.Chat)` 等
+1. **Python plugin 启动时**:读 config(`bridge_id` + `esr_token`),所有 HTTP request 带 token header
+2. **ESR Elixir 侧 announce_controller 验 token**:验证后把 `bridge_id` 绑定到 `agent://cc-<instance>` URI,记录到 `CCInstanceConnection` table
+3. **每条 inbound Invocation**(由 `reply_tool` POST 触发):走 §5.5 step 5.5 cap check——`ctx.caller = agent://cc-<instance>` 是否持有相应 cap
 
-esr-channel(Python)启动时读配置文件拿 ESR endpoint + token,WS 连接里把 token 带过去:
+Python plugin config:
 
 ```python
 # esr_channel/config.py
 {
-  "esr_url": "wss://esr.local/cc_channel",
+  "esr_url": "https://esr.local",      # HTTP (not WS)
   "esr_token": "<secret>",
+  "bridge_id": "allen-小满-bridge-7f3a",
   "cc_instance_id": "allen-小满"
 }
 ```
 
-ESR 这边:
+ESR Elixir 侧:
 
 ```elixir
-defmodule Esr.Plugin.CCChannel.ChannelSocket do
-  use Phoenix.Socket
-  channel "cc:*", Esr.Plugin.CCChannel.Channel
+defmodule Esr.PluginCcChannel.AnnounceController do
+  use Plug.Builder
+  plug :verify_token
 
-  def connect(%{"token" => token, "cc_instance" => instance_id}, socket, _conn_info) do
-    with {:ok, agent_uri} <- verify_token(token, instance_id),
+  def announce(conn, %{"bridge_id" => bid, "cc_instance" => instance_id}) do
+    with {:ok, agent_uri} <- verify_and_resolve(conn, instance_id),
          :ok <- Esr.RoutingRegistry.put_new(CCInstanceConnection, instance_id, agent_uri) do
-      {:ok, assign(socket, %{agent_uri: agent_uri})}
+      send_resp(conn, 200, Jason.encode!(%{bridge_id: bid, status: "connected"}))
     else
       {:error, {:already_registered, existing}} ->
         # 撞 key——同一个 instance_id 已经有活连接(可能是孤儿/重连/配错)
         # 显式 reject,不静默 shadow(防 §1.2 差异 1 描述的 silent bug)
-        Logger.warning("CC channel connect rejected: #{instance_id} already connected as #{inspect(existing)}")
-        :error
+        Logger.warning("CC channel announce rejected: #{instance_id} already connected as #{inspect(existing)}")
+        send_resp(conn, 409, Jason.encode!(%{error: "already_connected"}))
       _ ->
-        :error
+        send_resp(conn, 401, Jason.encode!(%{error: "unauthorized"}))
     end
   end
 end
@@ -2043,18 +2112,18 @@ end
 
 **为什么 `put_new` 而不是 `put`**:`put` 是 last-writer-wins,在 unique-key 表上会静默 shadow——第二个 connect 覆盖第一个,旧连接的 PING/PONG 还正常但 ESR 不再路由给它,**用户看得到系统输出但发的东西全部蒸发**(现有 esr 真实事故 `mcp-transport-orphan-session-hazard.md`)。
 
-`put_new` 撞 key 显式 reject,让重复连接**大声失败**而不是静默接管。如果旧的真死了,KindRegistry 的 monitor 会清掉它,新连接重试即可。
+`put_new` 撞 key 显式 reject(返回 409),让重复连接**大声失败**而不是静默接管。如果旧的真死了,KindRegistry 的 monitor + 定期 health check 会清掉它,新连接重试即可。
 
-**Channels 协议要求的 sender allowlist / pairing 流程,esr-channel 故意不实现**——它信任 WS 连接已建立的事实。
+**Channels 协议要求的 sender allowlist / pairing 流程,Python plugin 故意不实现**——它信任 HTTP token 验证后的 bridge 已建立的事实。
 
 #### 12.8.5 多 CC 实例
 
-一个 ESR 节点可同时连多个 CC 实例(Allen 的工作流:一个 worktree 一个 CC,5 个并行)。每个 CC 各自带 `--channels plugin:esr-channel`,各自 esr-channel 连同一 ESR:
+一个 ESR 节点可同时连多个 CC 实例(Allen 的工作流:一个 worktree 一个 CC,5 个并行)。每个 CC 各自带 `--dangerously-load-development-channels server:esr-channel`,各自 Python plugin 通过 HTTP/SSE 连同一 ESR:
 
 ```
-[CC instance allen-小满]  ─stdio─> [esr-channel #1] ─WS─┐
-[CC instance feature-a]   ─stdio─> [esr-channel #2] ─WS─┼─→ [ESR /cc_channel]
-[CC instance feature-b]   ─stdio─> [esr-channel #3] ─WS─┘
+[CC instance allen-小满]  ─stdio─> [Python plugin #1] ─HTTP─┐
+[CC instance feature-a]   ─stdio─> [Python plugin #2] ─HTTP─┼─→ [ESR /api/cc-channel/*]
+[CC instance feature-b]   ─stdio─> [Python plugin #3] ─HTTP─┘
 ```
 
 `CCInstanceConnection` 表(由 `esr_plugin_cc_channel` 在 `RoutingRegistry` 注册):
@@ -2064,7 +2133,7 @@ end
 {cc_instance_id: "feature-a"}  → agent://cc-feature-a
 ```
 
-ESR 推 message 给 `agent://cc-allen-小满` 时,通过这张表找到对应连接,push 进去。
+ESR 推 message 给 `agent://cc-allen-小满` 时,通过这张表找到对应连接(`bridge_id`),向对应 SSE stream broadcast push event,该 Python plugin 收到后 emit `notifications/claude/channel` 给它 stdio 上的 CC instance。
 
 #### 12.8.6 跟 `esr_plugin_cc_pty` 的关系
 
@@ -2586,6 +2655,15 @@ Adapter           Esr.Invocation        Kind GenServer     Behavior       :telem
 | 83 | **§14 LOC budget round-2 校准**:`message_store.ex` 之前漏在 §14 模块清单外,工程师 round-2 review 发现;补进清单(~50 LOC,cap 70),target 870 → 920,red line 1100 → 1150 | v0.4 |
 | 84 | **Phase 1 采用路径 B(`@behaviour Esr.Kind` + 共享 `Esr.Kind.Server`)** 不用宏 — register→subscribe→announce_ready property 等价 Decision #66 但 means 不同;共享 Server 把 Kind 隔离从 compile time 推到 runtime,`Esr.Kind.Runtime.handle_dispatch/3` 必须 defensive 处理多 Kind state shape;Phase 1 接受 trade-off 因为只有 Echo 一个业务 Kind;Phase 2+ 若 state shape 假设冲突再评估切回路径 A 或两条并存(详见 §5.7.4) | impl |
 | 85 | **`.claude/` 暂用 plain dir 不 vendor+submodule**(Phase 0 实施期决策)— 短期符合"少发明多装配"+ 镜像老 esr 实际结构;trigger 迁 vendor: (a) 出现 skill 需要 upstream 更新需求,或 (b) Phase 5 完成后整理 tech debt | impl |
+| 86 | **CC channel 协议层简化:Channel = MCP server + 1 capability**(Phase 1b 实证)— v0.3 §12.8 之前假设 channel 是独立通信协议(独立 server 进程 + 类似 WebSocket 的 wire),Phase 1b 发现 Channels 是 MCP 协议扩展:`capabilities.experimental['claude/channel']` + `notifications/claude/channel` notification + 标准 MCP tools/call(`reply`)。Phase 1b `esr_plugin_cc_bridge_v1_prototype` minimum bidirectional ~250 LOC Python。**关于 LOC 对比的诚实表述**:老 esr `cc_channel_runner`(973 LOC)和 cc-openclaw `channel_server`(4164 LOC)的代码量**不是纯 channel 协议层**——包含多 session 管理 / persistence / permission relay / production-grade 错误处理 等非 channel 功能,直接拿 4164 vs 250 对比是**不公平的**;**协议层简化是真的**(纠正过度工程认知),但 LOC 比较的简化幅度取决于 prior art 还做了什么 channel 之外的事。Phase 5 `esr_plugin_cc_channel` 走这条简化路径(v1_prototype wholesale replace 的 target),详见 §12.8 | impl |
+| 87 | **`--dangerously-load-development-channels server:<name>` 需要项目根 `.mcp.json`**(per-operator,gitignored,通过 `git rev-parse --show-toplevel` 锚定)— 否则 claude 启动期 lookup 失败打印 warning;`--mcp-config <abs>` 只读 session-level,**不**满足 dev-channels lookup。`Esr.Bridge.V1Prototype.McpConfigWriter.write!/0` 同时写 session-level 和 project-level | impl |
+| 88 | **K-path Behavior 模型**(Phase 2 落地 Decision #61)— 一个 Behavior 模块同时挂在多个 Kind 上,每个 Kind 通过 `BehaviorRegistry.register(kind, action, behavior)` 注册自己消费的 **action subset**(Chat: Session→send/join/leave, User+Agent→receive)。`Kind.behaviors/0` 从"action 路由权威"降级为"`init_slice` 用的列表",真正权威是 BehaviorRegistry per-Kind 表。User Kind 可以 `behaviors() = []` 但仍接收 `:receive` 分发。plugin isolation 北极星的核心原语 | impl |
+| 89 | **`Esr.Kind.Server.handle_info/2` 统一 Behavior 消息转发器**(§5.7.4 新合约面)— 任何非 dispatch 入站(Process.monitor `:DOWN` / bridge `send/2` 回调 / 未来 timer tick)进 Kind.Server 单 mailbox,转发到每个 composing Behavior 的可选回调 `handle_kind_message(message, slice, ctx)`,返 `{:ok, new_slice}` 或 `:ignore`。Kind.Server 仍不感知任何业务 Behavior。Phase 2 Chat 用此 hook 实现 offline 状态机 + bridge→Agent reply 回路 | impl |
+| 90 | **`ctx.kind_module` + `ctx.self_uri` 在 Kind.Runtime 注入**(§4 Invocation flow 增补)— 跨 Kind 的 Behavior(Chat 的 :receive 要分支 User vs Agent / Session 的 :send 要 broadcast topic 含自己 URI)需要这两个值,Phase 1 没有。Kind.Runtime.handle_dispatch/4 在 invoke 前单点 `Map.put` 注入,plugin 永远不手 plumb。`Invocation.ctx` type spec:这两 key runtime-injected,Behavior 内可见,adapter 构造时不填 | impl |
+| 91 | **MessageStore 为聊天历史的单一真相源**(Phase 2 P2-D3)— Session.Chat slice 只持 ephemeral 在线状态(members/monitors/last_seen),offline 期消息不维护 pending queue;rejoin 通过 `MessageStore.in_session_since(session_uri, last_seen[uri])` 派生 replay 集,SQL `LIMIT 1000` 兜底。可派生的不独立维护 — 同 memory `feedback_converge_to_uri_list` | impl |
+| 92 | **`InterfaceValidator` 加 `:uri` primitive**(§6.2 type-spec 语法扩展)— Chat 的 `@interface` schema 声明 `sender: :uri, mentions: {:list, :uri}` 等典型 URI 字段,validator 在 dispatch 边界要求 `%URI{}` struct,**拒绝裸字符串**。配 `Esr.Ecto.URI` 自定义 Ecto type 实现 URI 跨进程/跨持久化层都是 struct | impl |
+| 93 | **`session://` URI scheme + 两条新 PubSub `:events` 通道**(§3.5 URI types + §5.7.6 topic taxonomy 扩展)— Phase 2 新增 `session://` 作为 Kind URI scheme(Session Kind 用)。`esr:session:<uri>:events` 用于 chat stream 订阅(消息/成员变更/online-offline)+ `esr:user:<uri>:events` 用于个人 inbox 通知。两个 topic 都是 §5.7.6 的 view fan-out 合法用法(已加入 `check_invariants` #1 allowlist) | impl |
+| 94 | **Bridge↔Agent dual map**(v1_prototype 实现层模式,Phase 5 channel 重写时复用)— `Esr.Bridge.V1Prototype.Server` 同时维护 `bridge_to_agent: %{bridge_id => pid}` + `agent_to_bridge: %{agent_uri_str => bridge_id}`。出站(Agent.invoke(:receive) → claude)用 `bridge_for_agent/1`;入站(claude reply → Agent)用 `forward_reply_to_agent/2` 找 pid → `send/2`。模式本质:wire-id 和 business-URI 解耦,routing 层不感知 wire 协议 | impl |
 
 ---
 

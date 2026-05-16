@@ -40,7 +40,12 @@ defmodule EsrWebLiveview.MixProject do
       # is a v1_prototype coupling — Phase 5 wholesale-replaces the
       # bridge with the production plugin and the LV will subscribe
       # to a class of bridge topics rather than name a specific module.
-      {:esr_plugin_cc_bridge_v1_prototype, in_umbrella: true}
+      {:esr_plugin_cc_bridge_v1_prototype, in_umbrella: true},
+      # Phase 2: the /admin LV displays Session membership (online/
+      # offline) sourced from `Esr.Behavior.Chat`. Same shape as the
+      # cc-bridge coupling — Phase 3+ may abstract the LV's "what
+      # session UI to show" via configuration rather than direct dep.
+      {:esr_plugin_chat, in_umbrella: true}
     ]
   end
 end

@@ -99,7 +99,7 @@ defmodule Esr.Kind.Server do
 
   @impl true
   def handle_call({:esr_dispatch, %Esr.Invocation{} = inv}, _from, state) do
-    case Esr.Kind.Runtime.handle_dispatch(inv, state.state, state.kind) do
+    case Esr.Kind.Runtime.handle_dispatch(inv, state.state, state.kind, state.uri) do
       {:ok, new_slice_state, result} ->
         :ok = Esr.Kind.Snapshot.maybe_save(state.uri, state.kind, state.state, new_slice_state)
         {:reply, {:ok, result}, %{state | state: new_slice_state}}
@@ -115,7 +115,7 @@ defmodule Esr.Kind.Server do
 
   @impl true
   def handle_cast({:esr_dispatch, %Esr.Invocation{} = inv}, state) do
-    case Esr.Kind.Runtime.handle_dispatch(inv, state.state, state.kind) do
+    case Esr.Kind.Runtime.handle_dispatch(inv, state.state, state.kind, state.uri) do
       {:ok, new_slice_state, result} ->
         :ok = Esr.Kind.Snapshot.maybe_save(state.uri, state.kind, state.state, new_slice_state)
         # cast still replies via ctx.reply if set (e.g. caller_inbox).
@@ -129,6 +129,47 @@ defmodule Esr.Kind.Server do
       {:error, reason} ->
         Esr.Invocation.reply(inv.ctx, {:error, reason})
         {:noreply, state}
+    end
+  end
+
+  # Unified forwarder: any GenServer message a Kind's Behaviors might want
+  # to react to (currently only `:DOWN` from Process.monitor; Phase 3+ may
+  # add timer ticks etc) routes through `handle_kind_message/3` on each
+  # Behavior that exports it. Behaviors that ignore the message return
+  # their slice unchanged.
+  #
+  # The optional hook signature `handle_kind_message(message, slice, ctx)`:
+  #  - `message`: the raw GenServer message (e.g. `{:DOWN, ref, ..., reason}`)
+  #  - `slice`: this Behavior's slice
+  #  - `ctx`: %{kind_module:, self_uri:} so Behaviors can route based on Kind
+  #
+  # Returns `{:ok, new_slice}` or `:ignore` (slice unchanged). This lets
+  # multi-Behavior Kinds share one mailbox without each Behavior shadowing
+  # everything (P2-D2 K-path principle: one Behavior, multiple Kinds —
+  # not a Kind-wide message bus).
+  @impl true
+  def handle_info(message, %{kind: kind_module, uri: self_uri, state: slice_state} = wrapper) do
+    new_slice_state =
+      kind_module.behaviors()
+      |> Enum.reduce(slice_state, fn behavior, acc_state ->
+        forward_to_behavior(behavior, message, acc_state, kind_module, self_uri)
+      end)
+
+    {:noreply, %{wrapper | state: new_slice_state}}
+  end
+
+  defp forward_to_behavior(behavior, message, slice_state, kind_module, self_uri) do
+    if function_exported?(behavior, :handle_kind_message, 3) do
+      slice_key = behavior.state_slice()
+      slice = Map.get(slice_state, slice_key, %{})
+      ctx = %{kind_module: kind_module, self_uri: self_uri}
+
+      case behavior.handle_kind_message(message, slice, ctx) do
+        {:ok, new_slice} -> Map.put(slice_state, slice_key, new_slice)
+        :ignore -> slice_state
+      end
+    else
+      slice_state
     end
   end
 

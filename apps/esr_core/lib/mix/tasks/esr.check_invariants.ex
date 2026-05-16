@@ -65,6 +65,10 @@ defmodule Mix.Tasks.Esr.CheckInvariants do
   # `Phoenix.PubSub.broadcast` is legitimate for:
   # - `:events` topics (view fan-out per §5.7.6)
   # - `esr:audit:stream` (audit view fan-out, this is `Esr.Audit`)
+  # - Chat outbound broadcasts (session/user :events topics) inside
+  #   `Esr.Behavior.Chat` — these are view fan-out per §5.7.6, same
+  #   shape as audit.ex; the inbound path is the dispatch that
+  #   triggered `invoke/4` in the first place.
   # Any other broadcast call would be an inbound-message path which
   # MUST go through `Esr.Invocation.dispatch/1` instead (event 2.1
   # root cause).
@@ -73,6 +77,9 @@ defmodule Mix.Tasks.Esr.CheckInvariants do
     # - `audit.ex`: legitimate view fan-out to esr:audit:stream (§5.7.6)
     # - `invocation.ex`: reply path :phoenix_pubsub (caller chose this
     #   reply target explicitly — not an inbound message broadcast)
+    # - `behavior/chat.ex`: session/user :events fan-out from Chat.invoke
+    #   (Phase 2b-step 2 — fan-out to LV stream subscribers, NOT an
+    #   inbound message; inbound side is the dispatch that fired invoke)
     # Plus the standard exclusions (tests, this checker).
     {output, _exit_code} =
       System.cmd(
@@ -81,9 +88,10 @@ defmodule Mix.Tasks.Esr.CheckInvariants do
           "-c",
           # Strip lines that are pure prose mentions (backtick-quoted
           # symbol inside docstring) rather than actual code calls.
-          "grep -rnE 'PubSub\\.broadcast' apps/esr_core apps/esr_plugin_echo apps/esr_web_liveview 2>/dev/null --include='*.ex' " <>
+          "grep -rnE 'PubSub\\.broadcast' apps/esr_core apps/esr_plugin_echo apps/esr_plugin_chat apps/esr_web_liveview 2>/dev/null --include='*.ex' " <>
             "| grep -v 'lib/esr/audit.ex' " <>
             "| grep -v 'lib/esr/invocation.ex' " <>
+            "| grep -v 'esr_plugin_chat/lib/esr/behavior/chat.ex' " <>
             "| grep -v '_test.exs' " <>
             "| grep -v 'esr.check_invariants.ex' " <>
             "| grep -v ' `PubSub' || true"
@@ -109,13 +117,14 @@ defmodule Mix.Tasks.Esr.CheckInvariants do
         "bash",
         [
           "-c",
-          "grep -rnE '^\\s*def init\\(' apps/esr_core apps/esr_plugin_echo apps/esr_web_liveview 2>/dev/null --include='*.ex' " <>
+          "grep -rnE '^\\s*def init\\(' apps/esr_core apps/esr_plugin_echo apps/esr_plugin_chat apps/esr_web_liveview 2>/dev/null --include='*.ex' " <>
             "| grep -v 'kind/server.ex' " <>
             "| grep -v 'ets_owner.ex' " <>
             "| grep -v 'idempotency/sweeper.ex' " <>
             "| grep -v 'audit/writer.ex' " <>
             "| grep -v 'esr_core/application.ex' " <>
             "| grep -v 'esr_plugin_echo/application.ex' " <>
+            "| grep -v 'esr_plugin_chat/application.ex' " <>
             "| grep -v '_test.exs' || true"
         ],
         stderr_to_stdout: true
