@@ -68,7 +68,7 @@ defmodule EsrWebLiveview.AdminLive do
       |> assign(:current_session_uri, current_session_uri)
       |> assign(:sessions, EsrPluginChat.list_sessions())
       |> assign(:session_members, read_session_members(current_session_uri))
-      |> assign(:agent_options, list_agent_uris())
+      |> assign(:agent_options, list_session_agent_uris(current_session_uri))
       |> assign(:floating_agents, list_floating_agents())
       |> assign(:form,
         to_form(%{"target" => "", "args" => "", "mode" => "call"}, as: "manual_dispatch")
@@ -117,6 +117,17 @@ defmodule EsrWebLiveview.AdminLive do
     Esr.KindRegistry.list_all()
     |> Enum.filter(fn {uri_str, _pid} -> String.starts_with?(uri_str, "agent://") end)
     |> Enum.map(fn {uri_str, _pid} -> uri_str end)
+    |> Enum.sort()
+  end
+
+  # @ agent dropdown should only offer agents that can actually receive
+  # in the current session — i.e. members of @current_session_uri.
+  # Showing all KindRegistry agents (including floating) confused operators
+  # because @-mentioning a floating agent silently drops (Phase 3 P3-D9).
+  defp list_session_agent_uris(%URI{} = session_uri) do
+    read_session_members(session_uri)
+    |> Enum.map(& &1.uri)
+    |> Enum.filter(&String.starts_with?(&1, "agent://"))
     |> Enum.sort()
   end
 
@@ -216,14 +227,16 @@ defmodule EsrWebLiveview.AdminLive do
     {:noreply,
      socket
      |> assign(:connected_bridges, list_bridges_safely())
-     |> assign(:agent_options, list_agent_uris())}
+     |> assign(:agent_options, list_session_agent_uris(socket.assigns.current_session_uri))
+     |> assign(:floating_agents, list_floating_agents())}
   end
 
   def handle_info({:cc_disconnected, _bridge_id}, socket) do
     {:noreply,
      socket
      |> assign(:connected_bridges, list_bridges_safely())
-     |> assign(:agent_options, list_agent_uris())}
+     |> assign(:agent_options, list_session_agent_uris(socket.assigns.current_session_uri))
+     |> assign(:floating_agents, list_floating_agents())}
   end
 
   def handle_info({:member_joined, _uri}, socket),
@@ -231,7 +244,7 @@ defmodule EsrWebLiveview.AdminLive do
       {:noreply,
        socket
        |> assign(:session_members, read_session_members(socket.assigns.current_session_uri))
-       |> assign(:agent_options, list_agent_uris())
+       |> assign(:agent_options, list_session_agent_uris(socket.assigns.current_session_uri))
        |> assign(:floating_agents, list_floating_agents())}
 
   def handle_info({:member_left, _uri}, socket),
@@ -239,7 +252,7 @@ defmodule EsrWebLiveview.AdminLive do
       {:noreply,
        socket
        |> assign(:session_members, read_session_members(socket.assigns.current_session_uri))
-       |> assign(:agent_options, list_agent_uris())
+       |> assign(:agent_options, list_session_agent_uris(socket.assigns.current_session_uri))
        |> assign(:floating_agents, list_floating_agents())}
 
   def handle_info({:member_offline, _uri, _at}, socket),
@@ -334,11 +347,13 @@ defmodule EsrWebLiveview.AdminLive do
       {:ok, new_uri} ->
         # LV is subscribed to all sessions' events (mount + create_session
         # both subscribe), so no need to re-sub here. Just update current
-        # focus + reload stream from MessageStore.
+        # focus + reload stream from MessageStore + refresh @-agent options
+        # (only members of the new current session, per #UX-floating-mention).
         {:noreply,
          socket
          |> assign(:current_session_uri, new_uri)
          |> assign(:session_members, read_session_members(new_uri))
+         |> assign(:agent_options, list_session_agent_uris(new_uri))
          |> stream(:messages, load_session_messages(new_uri), reset: true, limit: @message_limit)}
 
       _ ->
@@ -523,6 +538,9 @@ defmodule EsrWebLiveview.AdminLive do
                 <option value="">— room (no mention) —</option>
                 <option :for={uri <- @agent_options} value={uri}>{uri}</option>
               </select>
+              <p :if={@agent_options == []} style="font-size: 11px; color: #999; margin: 4px 0 0;">
+                (no agents in this session — add one via Floating list)
+              </p>
             </div>
             <div style="flex: 1 1 auto;">
               <label style="display: block; font-size: 13px; font-weight: 500;" for="chat_text">message</label>

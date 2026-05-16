@@ -30,4 +30,10 @@ export NO_PROXY=$no_proxy
 #
 # Convention: agent://<short-display-name>. The host segment is what
 # admin's @-mention dropdown will display.
-export ESR_AGENT_URI="agent://cc-builder"
+#
+# Uses `:=` default-assignment so a pre-set ESR_AGENT_URI from your
+# shell wins (allows running multiple claude instances with different
+# agent URIs without editing this file). E.g.:
+#   ESR_AGENT_URI=agent://cc-architect bash scripts/cc-bridge-attach.sh
+: "${ESR_AGENT_URI:=agent://cc-builder}"
+export ESR_AGENT_URI
