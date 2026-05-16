@@ -2248,6 +2248,30 @@ esr_core/
 
 Plugin 不在此 budget 内——plugin 想多大都行,但应该自己有内部模块边界纪律。
 
+#### 14.x Phase 3-4 实测校准
+
+到 Phase 4 closeout,**esr_core/lib 实测 ~4,375 LOC**(v0.4 target 920 的 ~4.75 倍)。诚实拆解:
+
+| 阶段 | 增量来源 | LOC 大致归属 |
+|---|---|---|
+| Phase 0-1 | dispatch / Registry / Audit / ReadyGate / Idempotency / PendingDelivery | ~1,400 |
+| Phase 2 | Message envelope + MessageStore + message_routings + Chat router 基础 | ~600 |
+| Phase 3 | RoutingRegistry + Matcher 5 leaf + Resolver + RuleStore + Identity Behavior + Cap 真化(authz_check) + check_invariants Tasks | ~1,500 |
+| Phase 4 | Workspace Kind + Behavior + Store + Loader + SpawnRegistry + facade + Mix tasks(invariant test 不算 lib) | ~900 |
+
+**v0.4 target 与实测差距的根因**:
+- v0.4 budget 只算"光纯逻辑 SLOC"(不含 `@moduledoc` / `@doc` / 空行 / 单行结构) — 工程师习惯写法多 40-60% 的注释/空行,等量逻辑实际 file 行数翻倍
+- v0.4 budget 漏算了 `behaviour` 模块本身的 callback boilerplate(`Esr.Kind` / `Esr.Behavior` 各 ~80 LOC 的 callback 声明 + typespec)
+- v0.4 budget 漏算了 `mix esr.*` 任务(Phase 3-4 增加 4 个,共 ~250 LOC)— 严格说不是 esr_core 模块库,但放在 `apps/esr_core/lib/mix/` 下计入了
+
+**结论**:v0.4 target 920 应理解为 "**纯逻辑 SLOC 的设计估算**",而不是 "file LOC 上限"。Phase 5 不建议追逐 920 数字本身;追的应该是:
+1. **每个 lib/ 顶层模块是否仍 < cap**(单模块复杂度信号,实测合规)
+2. **能否清晰描述每个模块的单一职责**(架构边界信号,Phase 4 invariant test 直接量化)
+
+#### 14.y Phase 4 plugin-isolation 北极星的 LOC 维度
+
+`Esr.SpawnRegistry`(86 LOC)+ `Esr.Workspace.{Store,Loader,Behavior}`(620 LOC)= **plugin 作者新增 Kind 不动 esr_core 的 LOC 代价**:0(全在 esr_core 一次性铺设)+ plugin 自己 register_spawn_fn 的 ~5 行。这是 Decision #66 / #70 / #88 的 LOC 兑现。
+
 ### Phase 3 实测校准(impl,2026-05-16)
 
 **目前 esr_core/lib 实测 3,467 LOC,远超 v0.4 red line 1150**。诚实拆账:
@@ -2696,6 +2720,15 @@ Adapter           Esr.Invocation        Kind GenServer     Behavior       :telem
 | 102 | **Reply 契约 D8:`{session_uris: [URI], text, ref?}`** — Python bridge `reply` MCP tool 三字段;session_uris 是 list;ref optional 支持 proactive reply。Agent.handle_kind_message 用同一 envelope dispatch chat/send per session_uri(identity invariant 配合 #98)。ref + session_uris 不一致 emit `[:esr, :chat, :reply_session_mismatch]` 但仍按 session_uris 路由(soft warn,信任 claude)| impl |
 | 103 | **Bridge↔Agent floating (P3-D9 contract change) + LV @-dropdown 只列 session 成员**(real-claude e2e exposed)— bridge announce 改为 spawn Agent Kind 但不 join 任何 session(floating),admin 通过 LV "Add to session..." 显式拉入。配合 LV compose 区 @ agent dropdown 只列 current_session_uri 的 members,空时显 hint。multi-agent demo 暴露的 UX 问题(@ floating agent 后 message 静默 drop)的根本修复 | impl |
 | 104 | **push_to_claude meta 必含 `"session"` 字段 + reply dispatch failure 可见**(real-claude e2e hotfix)— Chat.invoke(:receive) Agent 分支构造 push_to_claude meta 时必须包含 `"session" => URI.to_string(ctx.caller)`(源 session URI),claude 才能正确填 reply 的 session_uris。配 Chat.handle_kind_message dispatch chat/send 返 `{:error, _}` 时 emit `[:esr, :chat, :reply_dispatch_failed]` telemetry(以前静默 drop) | impl |
+| 105 | **admin_live Phase 4a 用 Phoenix.Component 拆分(stateless)而非 LiveComponent**(Phase 4 D2 文档化 vs 实际落地差异)— D2 原话推 LiveComponent,但 admin_live 状态紧耦合(session 选择驱动 chat + members + sidebar),LiveComponent 的 `send_update` 跨组件协调比直接 parent assign 多绕一层。Phoenix.Component 拿到 file-boundary split(主目标 — 4b/c/d 新增 surface 进新文件不进 admin_live),不付协调成本。promote 到 LiveComponent 推迟到具体 surface 真需要 own state(4d Workspace member-picker 候选,但 4d 也仍单文件 LV)。详见 `apps/esr_web_liveview/lib/esr_web_liveview/admin_live.ex` 文件顶部 moduledoc | impl |
+| 106 | **Workspace Kind + Behavior lives in esr_core**(Phase 4b)— Workspace 是 cross-plugin 基础(plugin 用 Workspace 声明自己的 Kind 模板),放 plugin 会循环依赖。`Esr.Entity.Workspace` 平 `Esr.Entity.User`;`EsrCore.Application.start` 注册 Workspace Behavior 的 9 个 action(第一次 EsrCore 注册 Behavior,但 Workspace 是 cross-plugin 基础概念,例外合理)。`Esr.Workspace.Supervisor` DynamicSupervisor 也在 EsrCore.Application children 第 ⑦ 项 | impl |
+| 107 | **`Esr.Behavior.Workspace.invoke(:instantiate)` 返回 children 数据不做 side-effects**(Phase 4 D5)— plugin isolation 在 boundary:esr_core 不知道哪个 plugin 拥有哪个 Kind 的 supervisor。`:instantiate` 返 `{:ok, slice, %{children: [{:member, URI}]}}` 纯数据;Loader walk + call `SpawnRegistry.spawn/1`。Decision #70 Workspace 薄 Resource 形态的运行时落地 — "薄"= 行为 declarative + actual effect 由调用者注入(DI at boundary) | impl |
+| 108 | **`Esr.SpawnRegistry`:URI scheme → spawn fn 的 ETS 表(plugin DI 原语)**(Phase 4c)— plugin Application 在 `start/2` 调 `Esr.SpawnRegistry.register("agent", fn uri -> ... end)`。chat plugin 注册 `agent`/`session`/`user` 三个 scheme。Loader 看 `agent://cc-builder` 时 lookup scheme → call 注册的 fn,esr_core 永远不引用 `EsrPluginChat.AgentSupervisor`。`spawn/1` 先 `KindRegistry.lookup`(idempotent re-spawn safe)再 fall back ETS。`{:already_started, pid}` 透明 unwrap 为 `{:ok, pid}`。`EtsOwner` 拥有该表(与 ReadyGate/Idempotency 等并列第 ⑥ 张表)| impl |
+| 109 | **Workspace 持久化分层:config 持久化(Store)≠ Kind state snapshot**(Phase 4 D7)— Workspace Kind `persistence/0` 仍 `:ephemeral`;config(members/templates/routing_rules)经 `Esr.Workspace.Store` 写 SQLite `workspaces` 表(JSON-text 列,SQLite 无 native JSON column);Loader 从 DB rehydrate live Kind 时把 config 灌进 init_slice。per-Kind state snapshot(运行时 slice 状态)是 Phase 5+ SnapshotStrategy framework 的事,推后。混淆这两个会让 restart 慢且脆 | impl |
+| 110 | **Workspace facade dual-write 模式**(Phase 4c)— `Esr.Workspace.add_member/2` 等 mutation 先 `Store.update_members`(durable DB)再 `dispatch(:add_member)`(live Kind)。两步非事务:crash 后 Loader 在下次 boot 用 DB 状态重建 live Kind — **Loader 是 resync 真相**。read 走 live Kind only(`list_members` 等),DB 是 recovery snapshot,不是 read source。Phase 5 可能 wrap transactional path 但 v0 接受简单实现(失败恢复路径有 Loader 兜底) | impl |
+| 111 | **Phase 4 plugin-isolation invariant test(D10 完成 gate)**— `apps/esr_core/test/integration/plugin_isolation_workspace_test.exs` 内联 `ProbeKind` + `ProbeBehavior`(**NOT in lib/**),运行时 `SpawnRegistry.register("probe", ...)`,持久化 Workspace declares `probe://invariant-N` member,`DynamicSupervisor.terminate_child` 模拟 restart(不是 `Process.exit` — `:one_for_one` 会立刻 re-spawn,模拟错),`Loader.load_all/0` re-spawn probe,断言 new pid alive。Per memory `feedback_completion_requires_invariant_test`:Phase 4 不可单凭 tests-pass + merge 宣完成 — 这是架构 gate。若该测试 break = plugin isolation broken,investigate before ship | impl |
+| 112 | **Plugin Application 启动尾巴 call `Loader.load_all/0`**(Phase 4c boot 顺序约定)— Loader 必须 AFTER plugin 已注册 schemes 才能跑。`EsrPluginChat.Application.start` 在自身 bootstrap(register_chat_behaviors + admin User join + DefaultRules)完成、register_spawn_fns 注册 3 个 scheme 后,在 start callback 尾巴 call `Esr.Workspace.Loader.load_all/0`。当前依赖 Application 启动顺序(chat plugin 是最后启动的 plugin)。Phase 5 可能改为显式"all-plugins-ready" gate 或 release-time bootstrap script | impl |
+| 113 | **`PHASE4-SPLIT-FIRST` marker 注释 + 兑现机制**(Phase 4 工程流程)— PR #8 在 `admin_live.ex` 顶部加 13-line 注释 block 声明"Phase 4 必须先拆分再加新功能";Phase 4a(PR #9)真拆;Phase 4d(PR #12)Workspace UI 不塞 admin_live 而是独立 `/admin/workspaces` route 验证 marker 起作用。模式:**pre-commit marker → 后续 PR 兑现 → closeout 验证**。可推广到其他"将要溢出"的模块(LOC red line 触发器之外的早期预警机制) | impl |
 
 ---
 
