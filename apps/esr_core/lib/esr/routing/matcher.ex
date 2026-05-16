@@ -9,18 +9,19 @@ defmodule Esr.Routing.Matcher do
   Plugin-payload matchers (e.g. `feishu_card_type`) belong in the
   plugin that owns that payload.
 
-  ## 5 leaf matchers (Phase 3 scope, Decision P3-D3)
+  ## 5 leaf matchers + 3 combinators (Phase 4-completion Spec 05 Part B)
 
+  Leaves (Phase 3):
   - `mention(URI.t())` — `URI` in `message.mentions`
   - `from(URI.t())` — `message.sender == URI`
   - `text_contains(String.t())` — body text contains substring
   - `text_matches(regex_string)` — body text matches Elixir-regex string
   - `always()` — unconditional true (catchall rule use)
 
-  Combinators (and/or/not) intentionally deferred to Phase 4+ — most
-  Phase 3 routing scenarios are covered by additive single-matcher
-  rules (multiple rules each matching different criteria; Decision
-  #41 additive semantics).
+  Combinators (Phase 4-completion):
+  - `all_of([m1, m2, ...])` — `{:and, list}` — every leaf must match
+  - `any_of([m1, m2, ...])` — `{:or, list}` — at least one
+  - `negate(m)` — `{:not, m}` — single nested negation
 
   ## Shape
 
@@ -40,12 +41,20 @@ defmodule Esr.Routing.Matcher do
   tuple makes the JSON round-trip explicit + symmetric.
   """
 
+  # Phase 4-completion Spec 05 Part B B.1: combinator clauses use
+  # `match?/2` recursively in `:and` / `:or` / `:not` clauses. Exclude
+  # Kernel.match?/2 to avoid the new conflict-warning in Elixir 1.18+.
+  import Kernel, except: [match?: 2]
+
   @type matcher ::
           {:mention, String.t()}
           | {:from, String.t()}
           | {:text_contains, String.t()}
           | {:text_matches, String.t()}
           | {:always}
+          | {:and, [matcher()]}
+          | {:or, [matcher()]}
+          | {:not, matcher()}
 
   # --- Constructors (accept URI struct OR string) -----------------------
 
@@ -74,6 +83,29 @@ defmodule Esr.Routing.Matcher do
   @doc "Always match — catchall rule constructor."
   @spec always() :: matcher()
   def always, do: {:always}
+
+  # --- Combinators (Phase 4-completion Spec 05 Part B B.1) -------------
+
+  @doc """
+  Conjunction: all sub-matchers must evaluate true. `Enum.all?` short-
+  circuits on first false. Empty list = vacuously true (Spec 05 B.1 §A).
+  """
+  @spec all_of([matcher()]) :: matcher()
+  def all_of(list) when is_list(list), do: {:and, list}
+
+  @doc """
+  Disjunction: at least one sub-matcher must evaluate true. `Enum.any?`
+  short-circuits on first true. Empty list = vacuously false (Spec 05 B.1 §A).
+  """
+  @spec any_of([matcher()]) :: matcher()
+  def any_of(list) when is_list(list), do: {:or, list}
+
+  @doc """
+  Negation: single nested matcher flipped. Named `negate/1` to avoid
+  collision with `Kernel.not/1` (Spec 05 §B.1 §A naming).
+  """
+  @spec negate(matcher()) :: matcher()
+  def negate(m) when is_tuple(m), do: {:not, m}
 
   # --- Predicate ---------------------------------------------------------
 
@@ -119,6 +151,19 @@ defmodule Esr.Routing.Matcher do
 
   def match?({:always}, _msg), do: true
 
+  # Combinators
+  def match?({:and, sub_matchers}, %Esr.Message{} = msg) when is_list(sub_matchers) do
+    Enum.all?(sub_matchers, &match?(&1, msg))
+  end
+
+  def match?({:or, sub_matchers}, %Esr.Message{} = msg) when is_list(sub_matchers) do
+    Enum.any?(sub_matchers, &match?(&1, msg))
+  end
+
+  def match?({:not, sub_matcher}, %Esr.Message{} = msg) do
+    not match?(sub_matcher, msg)
+  end
+
   # --- JSON serde (Decision #42 / DECISIONS P3-D impl Matcher AST) ------
 
   @doc """
@@ -133,6 +178,15 @@ defmodule Esr.Routing.Matcher do
   def to_json({:text_contains, sub}), do: %{"type" => "text_contains", "arg" => sub}
   def to_json({:text_matches, re}), do: %{"type" => "text_matches", "arg" => re}
   def to_json({:always}), do: %{"type" => "always"}
+
+  # Combinators
+  def to_json({:and, list}) when is_list(list),
+    do: %{"type" => "and", "items" => Enum.map(list, &to_json/1)}
+
+  def to_json({:or, list}) when is_list(list),
+    do: %{"type" => "or", "items" => Enum.map(list, &to_json/1)}
+
+  def to_json({:not, m}), do: %{"type" => "not", "item" => to_json(m)}
 
   @doc """
   Deserialize from JSON map back to matcher tuple.
@@ -158,7 +212,41 @@ defmodule Esr.Routing.Matcher do
   end
 
   def from_json(%{"type" => "always"}), do: {:ok, always()}
+
+  # Combinators — recursive descent
+  def from_json(%{"type" => "and", "items" => items}) when is_list(items) do
+    decode_list(items, [])
+    |> case do
+      {:ok, list} -> {:ok, all_of(list)}
+      err -> err
+    end
+  end
+
+  def from_json(%{"type" => "or", "items" => items}) when is_list(items) do
+    decode_list(items, [])
+    |> case do
+      {:ok, list} -> {:ok, any_of(list)}
+      err -> err
+    end
+  end
+
+  def from_json(%{"type" => "not", "item" => item}) when is_map(item) do
+    case from_json(item) do
+      {:ok, m} -> {:ok, negate(m)}
+      err -> err
+    end
+  end
+
   def from_json(other), do: {:error, {:invalid_matcher_json, other}}
+
+  defp decode_list([], acc), do: {:ok, Enum.reverse(acc)}
+
+  defp decode_list([item | rest], acc) do
+    case from_json(item) do
+      {:ok, m} -> decode_list(rest, [m | acc])
+      err -> err
+    end
+  end
 
   # --- Internals --------------------------------------------------------
 
