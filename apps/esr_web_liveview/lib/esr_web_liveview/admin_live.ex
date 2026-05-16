@@ -330,6 +330,7 @@ defmodule EsrWebLiveview.AdminLive do
         <p style="font-size: 13px; color: #666;">
           Caller: <code>{@caller_uri_str}</code>
           <a href="/admin/workspaces" style="margin-left: 16px; color: #0969da;">Workspaces →</a>
+          <a href="/admin/routing" style="margin-left: 16px; color: #0969da;">Routing →</a>
         </p>
       </header>
 

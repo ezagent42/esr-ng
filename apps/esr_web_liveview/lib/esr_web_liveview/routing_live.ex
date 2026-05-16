@@ -1,0 +1,358 @@
+defmodule EsrWebLiveview.RoutingLive do
+  @moduledoc """
+  /admin/routing — global RoutingRegistry rules editor.
+
+  Per Phase 4-completion Spec 05 Part B B.2 — replaces the
+  `mix esr.routing.add_rule` CLI workflow for admin operators.
+  Workspace.routing_rules per Workspace stays config-only metadata
+  (Q-RT-1 default γ); this LV manages the **global** RoutingRegistry
+  tables (MentionRouting + SessionRouting from chat plugin).
+
+  ## Form shape
+
+  - **Table** select — registered table modules
+    (`EsrPluginChat.Routing.MentionRouting` / `SessionRouting`)
+  - **Matcher** — two modes via toggle:
+    - **Form mode** (default): pick leaf type (mention / from /
+      text_contains / text_matches / always) + arg input
+    - **JSON mode**: paste arbitrary matcher JSON (for combinators —
+      and/or/not). Live-validated via `Matcher.from_json/1`
+  - **Receivers** — comma-separated URI strings
+
+  ## Auth
+
+  Phase 4 v1: admin-only by route gate (RequireUser already
+  authenticates; additional cap check on Workspace.routing_rules.modify
+  Behavior — but for global tables we just allow any logged-in user
+  per Phase 4 v1; tighten Phase 5 with synthetic RoutingAdmin Kind per
+  Spec Q-RT-3).
+  """
+
+  use Phoenix.LiveView
+  import Phoenix.Component
+
+  alias Esr.Routing.{Matcher, RuleStore}
+
+  @tables [
+    {"MentionRouting", EsrPluginChat.Routing.MentionRouting},
+    {"SessionRouting", EsrPluginChat.Routing.SessionRouting}
+  ]
+
+  @matcher_types [
+    {"mention", "URI"},
+    {"from", "URI"},
+    {"text_contains", "substring"},
+    {"text_matches", "regex"},
+    {"always", nil}
+  ]
+
+  @impl true
+  def mount(_params, _session, socket) do
+    [{_, first_table} | _] = @tables
+
+    {:ok,
+     socket
+     |> assign(:tables, @tables)
+     |> assign(:matcher_types, @matcher_types)
+     |> assign(:current_table, first_table)
+     |> assign(:rules, load_rules(first_table))
+     |> assign(:flash_error, nil)
+     |> assign(:matcher_mode, "form")
+     |> assign(
+       :add_form,
+       to_form(
+         %{
+           "table" => Atom.to_string(first_table),
+           "matcher_type" => "mention",
+           "matcher_arg" => "",
+           "matcher_json" => "",
+           "receivers" => ""
+         },
+         as: "rule"
+       )
+     )}
+  end
+
+  defp load_rules(table) do
+    RuleStore.list(table)
+    |> Enum.map(fn row ->
+      matcher =
+        case Matcher.from_json(row.matcher_data) do
+          {:ok, m} -> m
+          _ -> :invalid
+        end
+
+      %{id: row.id, matcher: matcher, matcher_data: row.matcher_data, receivers: row.receivers}
+    end)
+  end
+
+  @impl true
+  def handle_event("switch_table", %{"table" => table_str}, socket) do
+    case parse_table(table_str) do
+      {:ok, table} ->
+        {:noreply,
+         socket
+         |> assign(:current_table, table)
+         |> assign(:rules, load_rules(table))
+         |> assign(:flash_error, nil)}
+
+      _ ->
+        {:noreply, assign(socket, :flash_error, "unknown table: #{table_str}")}
+    end
+  end
+
+  def handle_event("toggle_mode", %{"mode" => mode}, socket) when mode in ["form", "json"] do
+    {:noreply, assign(socket, :matcher_mode, mode)}
+  end
+
+  def handle_event("add_rule", %{"rule" => params}, socket) do
+    with {:ok, table} <- parse_table(Map.get(params, "table", "")),
+         {:ok, matcher} <- parse_matcher(socket.assigns.matcher_mode, params),
+         receivers when is_list(receivers) <-
+           parse_receivers(Map.get(params, "receivers", "")),
+         true <- length(receivers) > 0 || {:error, :no_receivers},
+         {:ok, _row} <- RuleStore.add(table, matcher, receivers, nil),
+         :ok <- RuleStore.load_into_registry(table) do
+      {:noreply,
+       socket
+       |> assign(:current_table, table)
+       |> assign(:rules, load_rules(table))
+       |> assign(:flash_error, nil)
+       |> assign(
+         :add_form,
+         to_form(
+           %{
+             "table" => Atom.to_string(table),
+             "matcher_type" => "mention",
+             "matcher_arg" => "",
+             "matcher_json" => "",
+             "receivers" => ""
+           },
+           as: "rule"
+         )
+       )}
+    else
+      {:error, reason} ->
+        {:noreply, assign(socket, :flash_error, "add failed: #{inspect(reason)}")}
+
+      false ->
+        {:noreply, assign(socket, :flash_error, "at least one receiver required")}
+    end
+  end
+
+  def handle_event("delete_rule", %{"id" => id_str}, socket) do
+    case Integer.parse(id_str) do
+      {id, ""} ->
+        case RuleStore.delete(id) do
+          :ok ->
+            :ok = RuleStore.load_into_registry(socket.assigns.current_table)
+
+            {:noreply,
+             socket
+             |> assign(:rules, load_rules(socket.assigns.current_table))
+             |> assign(:flash_error, nil)}
+
+          {:error, reason} ->
+            {:noreply, assign(socket, :flash_error, "delete failed: #{inspect(reason)}")}
+        end
+
+      _ ->
+        {:noreply, assign(socket, :flash_error, "bad id: #{id_str}")}
+    end
+  end
+
+  defp parse_table(""), do: {:error, :missing_table}
+
+  defp parse_table(s) when is_binary(s) do
+    try do
+      {:ok, String.to_existing_atom(s)}
+    rescue
+      ArgumentError -> {:error, {:unknown_table, s}}
+    end
+  end
+
+  defp parse_matcher("form", %{"matcher_type" => type, "matcher_arg" => arg}) do
+    case type do
+      "mention" when is_binary(arg) and arg != "" -> {:ok, Matcher.mention(arg)}
+      "from" when is_binary(arg) and arg != "" -> {:ok, Matcher.from(arg)}
+      "text_contains" when is_binary(arg) and arg != "" -> {:ok, Matcher.text_contains(arg)}
+      "text_matches" when is_binary(arg) and arg != "" ->
+        try do
+          {:ok, Matcher.text_matches(arg)}
+        rescue
+          e -> {:error, {:invalid_regex, Exception.message(e)}}
+        end
+      "always" -> {:ok, Matcher.always()}
+      _ -> {:error, {:invalid_matcher_form, type, arg}}
+    end
+  end
+
+  defp parse_matcher("json", %{"matcher_json" => json}) when is_binary(json) and json != "" do
+    case Jason.decode(json) do
+      {:ok, decoded} ->
+        case Matcher.from_json(decoded) do
+          {:ok, m} -> {:ok, m}
+          err -> err
+        end
+
+      {:error, _} = err ->
+        err
+    end
+  end
+
+  defp parse_matcher(_, _), do: {:error, :empty_matcher}
+
+  defp parse_receivers(csv) when is_binary(csv) do
+    csv
+    |> String.split(",", trim: true)
+    |> Enum.map(&String.trim/1)
+    |> Enum.reject(&(&1 == ""))
+  end
+
+  @impl true
+  def render(assigns) do
+    ~H"""
+    <div style="max-width: 1000px; margin: 0 auto; padding: 24px; font-family: -apple-system, sans-serif;">
+      <header>
+        <h1 style="font-size: 22px; font-weight: 600;">Routing Rules</h1>
+        <p style="font-size: 13px; color: #666;">
+          Global RoutingRegistry tables. Per-workspace routing_rules stay config-only metadata (visible on Workspace detail page).
+          <a href="/admin" style="margin-left: 16px; color: #0969da;">← /admin</a>
+        </p>
+      </header>
+
+      <section id="table-tabs" style="margin-top: 24px; display: flex; gap: 8px;">
+        <button
+          :for={{label, mod} <- @tables}
+          type="button"
+          phx-click="switch_table"
+          phx-value-table={Atom.to_string(mod)}
+          style={tab_style(@current_table == mod)}
+        >
+          {label}
+        </button>
+      </section>
+
+      <section id="rules-list" style="margin-top: 16px;">
+        <p :if={@rules == []} id="rules-empty" style="color: #57606a; font-style: italic;">
+          No rules in this table. Add one below.
+        </p>
+
+        <table :if={@rules != []} id="rules-table" style="width: 100%; font-size: 13px; border-collapse: collapse;">
+          <thead>
+            <tr style="border-bottom: 1px solid #d1d5da;">
+              <th style="text-align: left; padding: 6px 4px;">ID</th>
+              <th style="text-align: left;">Matcher</th>
+              <th style="text-align: left;">Receivers</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr :for={rule <- @rules} style="border-bottom: 1px solid #eaeef2;">
+              <td style="padding: 4px 4px;">{rule.id}</td>
+              <td style="font-family: monospace; font-size: 11px;">{inspect(rule.matcher)}</td>
+              <td style="font-family: monospace; font-size: 11px;">{Enum.join(rule.receivers, ", ")}</td>
+              <td>
+                <button
+                  type="button"
+                  phx-click="delete_rule"
+                  phx-value-id={rule.id}
+                  style="padding: 4px 10px; background: white; color: #cf222e; border: 1px solid #cf222e; border-radius: 4px; cursor: pointer; font-size: 11px;"
+                  data-confirm="Delete this rule?"
+                >
+                  Delete
+                </button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </section>
+
+      <section id="add-rule" style="margin-top: 24px; padding: 16px; border: 1px solid #d1d5da; border-radius: 6px;">
+        <h2 style="font-size: 14px; font-weight: 500; margin: 0 0 12px 0;">Add rule</h2>
+
+        <div style="margin-bottom: 12px; display: flex; gap: 8px;">
+          <button
+            type="button"
+            phx-click="toggle_mode"
+            phx-value-mode="form"
+            style={mode_btn_style(@matcher_mode == "form")}
+          >
+            Form mode
+          </button>
+          <button
+            type="button"
+            phx-click="toggle_mode"
+            phx-value-mode="json"
+            style={mode_btn_style(@matcher_mode == "json")}
+          >
+            JSON mode (combinators)
+          </button>
+        </div>
+
+        <.form for={@add_form} phx-submit="add_rule">
+          <input type="hidden" name="rule[table]" value={Atom.to_string(@current_table)} />
+
+          <div :if={@matcher_mode == "form"} style="display: grid; grid-template-columns: 200px 1fr; gap: 8px; margin-bottom: 12px;">
+            <select name="rule[matcher_type]" style="padding: 6px 10px; border: 1px solid #d1d5da; border-radius: 4px;">
+              <option :for={{t, _arg_label} <- @matcher_types} value={t}>{t}</option>
+            </select>
+            <input
+              type="text"
+              name="rule[matcher_arg]"
+              placeholder="matcher arg (e.g. user://admin)"
+              style="padding: 6px 10px; border: 1px solid #d1d5da; border-radius: 4px;"
+            />
+          </div>
+
+          <div :if={@matcher_mode == "json"} style="margin-bottom: 12px;">
+            <textarea
+              name="rule[matcher_json]"
+              rows="4"
+              placeholder={~s({"type":"and","items":[{"type":"mention","arg":"agent://x"},{"type":"from","arg":"user://admin"}]})}
+              style="width: 100%; padding: 6px 10px; border: 1px solid #d1d5da; border-radius: 4px; font-family: monospace; font-size: 12px;"
+            ></textarea>
+            <p style="font-size: 11px; color: #57606a; margin: 4px 0 0;">
+              Use full matcher JSON for combinators. Shapes:
+              <code>and / or / not</code> wrap leaf matchers
+              (<code>mention</code>, <code>from</code>, <code>text_contains</code>,
+              <code>text_matches</code>, <code>always</code>).
+            </p>
+          </div>
+
+          <div style="margin-bottom: 12px;">
+            <label style="display: block; font-size: 12px; color: #57606a;">Receivers (comma-separated URIs)</label>
+            <input
+              type="text"
+              name="rule[receivers]"
+              placeholder="session://oncall,session://emergency"
+              style="width: 100%; padding: 6px 10px; border: 1px solid #d1d5da; border-radius: 4px; font-family: monospace;"
+            />
+          </div>
+
+          <button
+            type="submit"
+            style="padding: 8px 16px; background: #1f883d; color: white; border: none; border-radius: 4px; cursor: pointer;"
+          >
+            Add rule
+          </button>
+        </.form>
+
+        <p :if={@flash_error} style="color: #cf222e; font-size: 13px; margin-top: 8px;">{@flash_error}</p>
+      </section>
+    </div>
+    """
+  end
+
+  defp tab_style(true), do: tab_base() <> "background: #0969da; color: white; border-color: #0969da;"
+  defp tab_style(false), do: tab_base() <> "background: white; color: #0969da;"
+
+  defp tab_base,
+    do: "padding: 6px 16px; border: 1px solid #d1d5da; border-radius: 4px; cursor: pointer; font-size: 13px; "
+
+  defp mode_btn_style(true),
+    do: "padding: 4px 12px; background: #0969da; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;"
+
+  defp mode_btn_style(false),
+    do: "padding: 4px 12px; background: white; color: #0969da; border: 1px solid #d1d5da; border-radius: 4px; cursor: pointer; font-size: 12px;"
+end
