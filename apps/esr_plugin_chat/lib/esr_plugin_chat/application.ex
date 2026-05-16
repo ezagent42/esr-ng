@@ -64,6 +64,7 @@ defmodule EsrPluginChat.Application do
 
     children = [
       {DynamicSupervisor, name: EsrPluginChat.AgentSupervisor, strategy: :one_for_one},
+      {DynamicSupervisor, name: EsrPluginChat.SessionSupervisor, strategy: :one_for_one},
       kind_server_spec(:session_main, Session, Session.default_uri()),
       kind_server_spec(:user_admin, User, User.admin_uri())
     ]
