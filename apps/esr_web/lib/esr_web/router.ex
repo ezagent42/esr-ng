@@ -42,6 +42,9 @@ defmodule EsrWeb.Router do
     # different surface than per-session chat.
     live "/admin/workspaces", WorkspacesLive
     live "/admin/workspaces/:name", WorkspaceDetailLive
+
+    # Phase 4-completion PR 7: global RoutingRegistry rule editor.
+    live "/admin/routing", RoutingLive
   end
 
   # Liveness probe — plain JSON, no ESR dispatch path involved.
