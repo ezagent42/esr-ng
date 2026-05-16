@@ -119,15 +119,23 @@ defmodule Esr.Behavior.Workspace do
   # --- instantiate (the north-star action) -----------------------------
 
   def invoke(:instantiate, slice, _args, _ctx) do
-    # Phase 4b: each member URI becomes a child to spawn. Caller resolves
-    # URI scheme → Kind module via a spawn registry. Phase 4c expands to
-    # session_templates (each template → a Session Kind with the
-    # template's members joined).
-    children =
+    # Phase 4-completion: emit both member spawns and template
+    # instantiations. Loader walks each child tuple and dispatches to
+    # SpawnRegistry (members) or TemplateRegistry (templates).
+    # Members ordered first so any Session-Template member dependencies
+    # are already alive when chat/join fires (cast + PendingDelivery
+    # makes this not strictly necessary but reduces inbox noise).
+    member_children =
       slice.members
       |> Enum.map(fn %URI{} = uri -> {:member, uri} end)
 
-    {:ok, slice, %{children: children}}
+    template_children =
+      slice.session_templates
+      |> Enum.map(fn {tmpl_name, tmpl_data} ->
+        {:template, tmpl_name, tmpl_data}
+      end)
+
+    {:ok, slice, %{children: member_children ++ template_children}}
   end
 
   # --- interface (adapter generation + arg validation) ----------------

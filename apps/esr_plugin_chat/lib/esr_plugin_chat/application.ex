@@ -84,6 +84,12 @@ defmodule EsrPluginChat.Application do
         # this plugin's supervisors. Plugin-isolation north star.
         :ok = register_spawn_fns()
 
+        # Phase 4-completion: register Template Classes this plugin
+        # provides. GenericSession declares: "given session_name +
+        # members, spawn a Session and join those members". Workspaces
+        # reference it via `"class" => "session.generic"` in template data.
+        :ok = register_template_classes()
+
         # Phase 4c: load persisted Workspaces. Runs HERE (in chat plugin's
         # start callback, after spawn fn registration) rather than in
         # EsrCore.Application so the Loader can resolve plugin-owned
@@ -96,6 +102,11 @@ defmodule EsrPluginChat.Application do
       other ->
         other
     end
+  end
+
+  defp register_template_classes do
+    :ok = Esr.TemplateRegistry.register(Esr.Template.GenericSession)
+    :ok
   end
 
   defp register_spawn_fns do

@@ -32,9 +32,35 @@ defmodule EsrWebLiveview.WorkspaceDetailLive do
          |> assign(:name, name)
          |> assign(:workspace, ws)
          |> assign(:flash_error, nil)
-         |> assign(:add_form, to_form(%{"member_uri" => ""}, as: "add_member"))}
+         |> assign(:add_form, to_form(%{"member_uri" => ""}, as: "add_member"))
+         |> assign(:registered_template_classes, Esr.TemplateRegistry.registered_template_names())}
     end
   end
+
+  defp template_class_name(%{"class" => name}) when is_binary(name), do: name
+  defp template_class_name(_), do: "—"
+
+  defp template_member_count(%{"members" => m}) when is_list(m), do: length(m)
+  defp template_member_count(_), do: 0
+
+  defp template_status(%{"class" => name}) when is_binary(name) do
+    case Esr.TemplateRegistry.lookup(name) do
+      {:ok, _module} -> :class_registered
+      :error -> :no_class
+    end
+  end
+
+  defp template_status(_), do: :no_class_field
+
+  defp template_status_label(:class_registered), do: "Class registered"
+  defp template_status_label(:no_class), do: "No Class registered"
+  defp template_status_label(:no_class_field), do: "Missing \"class\" field"
+
+  defp template_status_style(:class_registered),
+    do: "font-size: 11px; color: #1f883d;"
+
+  defp template_status_style(_),
+    do: "font-size: 11px; color: #cf222e;"
 
   @impl true
   def handle_event("add_member", %{"add_member" => %{"member_uri" => uri_str}}, socket)
@@ -149,12 +175,34 @@ defmodule EsrWebLiveview.WorkspaceDetailLive do
       <section id="templates" style="margin-top: 24px; padding: 16px; border: 1px solid #d1d5da; border-radius: 6px;">
         <h2 style="font-size: 14px; font-weight: 500; margin: 0 0 12px 0;">
           Session templates ({map_size(@workspace.session_templates)})
-          <span style="font-size: 11px; color: #57606a; font-weight: normal;">(read-only — Phase 5 editor)</span>
+          <span style="font-size: 11px; color: #57606a; font-weight: normal;">
+            (read-only here — add via <code>mix esr.workspace.add_template</code>; LV editor Phase 5)
+          </span>
         </h2>
         <p :if={@workspace.session_templates == %{}} id="templates-empty" style="color: #57606a; font-style: italic;">
           No session templates declared.
         </p>
-        <pre :if={@workspace.session_templates != %{}} id="templates-json" style="background: #f6f8fa; padding: 12px; border-radius: 4px; overflow-x: auto; font-size: 11px;">{Jason.encode!(@workspace.session_templates, pretty: true)}</pre>
+        <table :if={@workspace.session_templates != %{}} id="templates-table" style="width: 100%; font-size: 12px; border-collapse: collapse;">
+          <thead>
+            <tr style="border-bottom: 1px solid #d1d5da;">
+              <th style="text-align: left; padding: 6px 4px;">Name</th>
+              <th style="text-align: left;">Class</th>
+              <th style="text-align: left;">Members</th>
+              <th style="text-align: left;">Status</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr :for={{tmpl_name, tmpl_data} <- @workspace.session_templates} style="border-bottom: 1px solid #f0f0f0;">
+              <td style="padding: 4px 4px; font-weight: 500;">{tmpl_name}</td>
+              <td style="font-family: monospace; font-size: 11px;">{template_class_name(tmpl_data)}</td>
+              <td>{template_member_count(tmpl_data)}</td>
+              <td style={template_status_style(template_status(tmpl_data))}>{template_status_label(template_status(tmpl_data))}</td>
+            </tr>
+          </tbody>
+        </table>
+        <p :if={@registered_template_classes != []} id="registered-classes" style="margin-top: 12px; font-size: 11px; color: #57606a;">
+          Registered Template Classes: <code>{Enum.join(@registered_template_classes, ", ")}</code>
+        </p>
       </section>
 
       <section id="routing-rules" style="margin-top: 24px; padding: 16px; border: 1px solid #d1d5da; border-radius: 6px;">

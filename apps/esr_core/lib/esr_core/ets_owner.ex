@@ -35,7 +35,8 @@ defmodule EsrCore.EtsOwner do
     {Esr.Idempotency, :set},
     {Esr.BehaviorRegistry, :set},
     {Esr.RoutingRegistry, :set},
-    {Esr.SpawnRegistry, :set}
+    {Esr.SpawnRegistry, :set},
+    {Esr.TemplateRegistry, :set}
   ]
 
   def start_link(_opts) do

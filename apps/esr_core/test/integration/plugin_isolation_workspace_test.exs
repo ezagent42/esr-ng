@@ -37,7 +37,7 @@ defmodule Esr.Integration.PluginIsolationWorkspaceTest do
 
   use EsrCore.DataCase, async: false
 
-  alias Esr.{KindRegistry, SpawnRegistry, Workspace}
+  alias Esr.{KindRegistry, SpawnRegistry, TemplateRegistry, Workspace}
 
   # ---------------------------------------------------------------
   # Fake plugin types — defined inline in the test, NOT in lib/
@@ -79,6 +79,33 @@ defmodule Esr.Integration.PluginIsolationWorkspaceTest do
 
     @impl true
     def uri_from_args(args), do: Map.fetch!(args, :uri)
+  end
+
+  # Phase 4-completion: fake Template Class for invariant test of
+  # Decision #64's Class half. Inline here so esr_core never
+  # references it — proves a plugin author's Template Class survives
+  # restart purely via TemplateRegistry runtime DI.
+  defmodule ProbeTemplate do
+    @behaviour Esr.Kind.Template
+
+    @impl true
+    def template_name, do: "probe.template"
+
+    @impl true
+    def validate(%{"class" => "probe.template", "probe_name" => name}) when is_binary(name),
+      do: :ok
+
+    def validate(_), do: {:error, :bad_probe_template}
+
+    @impl true
+    def instantiate(_tmpl_name, %{"probe_name" => name}, _workspace_uri) do
+      uri = URI.parse("probe://#{name}")
+
+      case Esr.SpawnRegistry.spawn(uri) do
+        {:ok, _pid} -> {:ok, [uri]}
+        err -> err
+      end
+    end
   end
 
   # ---------------------------------------------------------------
@@ -144,6 +171,103 @@ defmodule Esr.Integration.PluginIsolationWorkspaceTest do
     assert is_pid(new_probe_pid)
     assert Process.alive?(new_probe_pid)
     refute new_probe_pid == probe_pid
+  end
+
+  test "PHASE 4 INVARIANT EXT: plugin-defined Template Class survives Workspace teardown + Loader rehydrate" do
+    # Phase 4-completion (Spec 01): Decision #64 Class half landed.
+    # This test extends the original invariant: a fake Template Class
+    # defined ONLY in test/ (NOT lib/) must spawn its declared Kind
+    # purely via runtime TemplateRegistry + SpawnRegistry registration,
+    # then survive teardown + Loader.load_all/0.
+
+    # 1. Plugin-author work: register both the probe Kind's spawn fn
+    #    AND the probe Template Class.
+    SpawnRegistry.register("probe", fn uri ->
+      DynamicSupervisor.start_child(
+        Esr.Workspace.Supervisor,
+        {Esr.Kind.Server, {ProbeKind, %{uri: uri}}}
+      )
+    end)
+
+    :ok = TemplateRegistry.register(ProbeTemplate)
+
+    # 2. Plugin-author work: persist a Workspace whose session_templates
+    #    declares a ProbeTemplate instance. No members — template alone
+    #    must produce the probe Kind via Loader.
+    workspace_name = "tmpl-invariant-#{System.unique_integer([:positive])}"
+    probe_name = "tmpl-probe-#{System.unique_integer([:positive])}"
+    probe_uri = URI.parse("probe://#{probe_name}")
+
+    tmpl_data = %{
+      "class" => "probe.template",
+      "probe_name" => probe_name
+    }
+
+    {:ok, _ws_pid} =
+      Workspace.create(workspace_name, %{
+        session_templates: %{"main" => tmpl_data}
+      })
+
+    # Sanity: probe not yet alive (create only persists + spawns Workspace Kind)
+    assert :error = KindRegistry.lookup(probe_uri)
+
+    # 3. Loader runs — instantiate the template
+    results = Esr.Workspace.Loader.load_all()
+
+    {^workspace_name, children_results} =
+      Enum.find(results, fn {name, _} -> name == workspace_name end)
+
+    # Children: 1 template entry, no member entries
+    assert [{"main", {:ok, [^probe_uri]}}] = children_results
+
+    {:ok, probe_pid} = KindRegistry.lookup(probe_uri)
+    assert is_pid(probe_pid)
+    assert Process.alive?(probe_pid)
+
+    # 4. Tear down via supervisor (no auto-restart)
+    workspace_uri = Esr.Entity.Workspace.uri_for(workspace_name)
+    {:ok, workspace_pid} = KindRegistry.lookup(workspace_uri)
+
+    :ok = DynamicSupervisor.terminate_child(Esr.Workspace.Supervisor, probe_pid)
+    :ok = DynamicSupervisor.terminate_child(Esr.Workspace.Supervisor, workspace_pid)
+
+    wait_until(fn -> KindRegistry.lookup(probe_uri) == :error end)
+    wait_until(fn -> KindRegistry.lookup(workspace_uri) == :error end)
+
+    # 5. The proof: Loader.load_all/0 re-runs and the probe is alive
+    #    again — purely from persisted Workspace state + runtime
+    #    TemplateRegistry + SpawnRegistry, no esr_core / plugin code
+    #    knows about probe.template.
+    _ = Esr.Workspace.Loader.load_all()
+
+    {:ok, new_probe_pid} = KindRegistry.lookup(probe_uri)
+    assert is_pid(new_probe_pid)
+    assert Process.alive?(new_probe_pid)
+    refute new_probe_pid == probe_pid
+  end
+
+  test "Workspace.add_template/3 fail-fast: rejects template without registered Class" do
+    workspace_name = "addtmpl-#{System.unique_integer([:positive])}"
+    {:ok, _} = Workspace.create(workspace_name)
+
+    tmpl = %{
+      "class" => "never-registered-#{System.unique_integer([:positive])}",
+      "session_name" => "x"
+    }
+
+    assert {:error, {:no_template_class, _}} =
+             Workspace.add_template(workspace_name, "main", tmpl)
+
+    # Verify SQLite row absent — template was not persisted
+    assert %{session_templates: %{}} = Esr.Workspace.Store.get_by_name(workspace_name)
+  end
+
+  test "Workspace.add_template/3 fail-fast: rejects template missing class field" do
+    workspace_name = "noclass-#{System.unique_integer([:positive])}"
+    {:ok, _} = Workspace.create(workspace_name)
+
+    assert {:error, :missing_class_field} =
+             Workspace.add_template(workspace_name, "main", %{"session_name" => "x"})
   end
 
   defp wait_until(fun, attempts \\ 50)
