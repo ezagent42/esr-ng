@@ -76,6 +76,71 @@ defmodule Esr.Capability do
   def admin_invariant?(%__MODULE__{}), do: false
 
   @doc """
+  Serialize a Capability to a JSON-safe map (for `users.caps_json`
+  storage per Phase 4-completion Spec 05 Part A).
+
+  Atoms become strings; modules become strings; URIs become strings.
+  Inverse of `from_map/1`.
+  """
+  @spec to_map(t()) :: map()
+  def to_map(%__MODULE__{} = cap) do
+    %{
+      "kind" => atom_or_module_to_string(cap.kind),
+      "behavior" => atom_or_module_to_string(cap.behavior),
+      "instance" => uri_or_any_to_string(cap.instance),
+      "granted_by" => uri_or_any_to_string(cap.granted_by),
+      "granted_at" => DateTime.to_iso8601(cap.granted_at)
+    }
+  end
+
+  @doc """
+  Deserialize a Capability from a JSON-decoded map.
+  """
+  @spec from_map(map()) :: t()
+  def from_map(%{} = m) do
+    %__MODULE__{
+      kind: string_to_atom_or_module(Map.get(m, "kind")),
+      behavior: string_to_atom_or_module(Map.get(m, "behavior")),
+      instance: string_to_uri_or_any(Map.get(m, "instance")),
+      granted_by: string_to_uri_or_any(Map.get(m, "granted_by")),
+      granted_at: parse_datetime(Map.get(m, "granted_at"))
+    }
+  end
+
+  defp atom_or_module_to_string(:any), do: "any"
+  defp atom_or_module_to_string(value) when is_atom(value), do: Atom.to_string(value)
+
+  defp string_to_atom_or_module("any"), do: :any
+  defp string_to_atom_or_module(s) when is_binary(s) do
+    cond do
+      String.starts_with?(s, "Elixir.") ->
+        String.to_existing_atom(s)
+
+      Regex.match?(~r/^[a-z_][a-z0-9_]*$/, s) ->
+        String.to_existing_atom(s)
+
+      true ->
+        String.to_existing_atom("Elixir." <> s)
+    end
+  rescue
+    ArgumentError -> :any
+  end
+
+  defp uri_or_any_to_string(:any), do: "any"
+  defp uri_or_any_to_string(%URI{} = u), do: URI.to_string(u)
+
+  defp string_to_uri_or_any("any"), do: :any
+  defp string_to_uri_or_any(s) when is_binary(s), do: URI.parse(s)
+
+  defp parse_datetime(nil), do: DateTime.utc_now()
+  defp parse_datetime(s) when is_binary(s) do
+    case DateTime.from_iso8601(s) do
+      {:ok, dt, _offset} -> dt
+      _ -> DateTime.utc_now()
+    end
+  end
+
+  @doc """
   Compute the `needed` cap shape for a given (Kind module, action,
   target URI) tuple — for dispatch step 5.5 to feed into `matches?/2`.
 
