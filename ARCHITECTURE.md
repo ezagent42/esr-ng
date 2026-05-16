@@ -4,7 +4,7 @@
 > **Last updated**: 2026-05-15(Phase 1 完成 + §12.8 重写)
 > **Owner**: Allen / ezagent42
 > **Changes from v0.3**: 顶层加"ESR 是 router 不是 req/resp app"framing;Resource Kind 加"shared referent needs identity"判定原则;Template 升级为双层模型(Class / Instance,Workspace 是 Instance 示范);加 reliability primitives 三件套(ReadyGate / PendingDelivery / Idempotency);RoutingRegistry 加 `put_new` 语义(unique-key only)+ `reverse_index` 反查;Matcher 边界按"读 core 数据 → core"画线;Plugin 判定原则显式化;5 个事故坑全部 design-in;LOC 校准 475/595 → ~870 → 920;feishu-cc 切片 4 张参考表入 spec;ES 从 deferred 改为已决不做;dev 两轮 review 闭环
-> **Impl-period 更新**: §5.7.4 承认 Kind 生命周期两条等价实现路径(宏 / 共享 Server,Decision #84);**§12.8 重写反映 "Channel = MCP + 1 capability" 协议层简化**(Phase 1b 实证,Decision #86);Decision Log 已加 #84-#87
+> **Impl-period 更新**: §5.7.4 承认 Kind 生命周期两条等价实现路径(宏 / 共享 Server,Decision #84);**§12.8 重写反映 "Channel = MCP + 1 capability" 协议层简化**(Phase 1b 实证,Decision #86);Phase 2 加 K-path Behavior 模型 / `handle_kind_message` Kind.Server 转发器 / `ctx.kind_module` + `ctx.self_uri` 注入 / MessageStore 单一真相源 / `:uri` primitive / `session://` scheme + 两条 PubSub `:events` 通道(Decision #88-#94);Decision Log 当前到 #94
 
 ---
 
@@ -916,6 +916,18 @@ end
 
 **关键不变式**(两条路径都依赖):这个窗口的正确性依赖 §5.7.6 的硬不变式(inbound 永远走 dispatch,**不**裸 `PubSub.broadcast` 到 inbound topic)。Phoenix.PubSub 对没有订阅者的 topic **不** buffer——裸 broadcast 进 inbound topic 在 register→subscribe 窗口里**会被丢**(这正是事故 2.1 的本来面貌)。
 
+**Phase 2 增补合约 — 统一 Behavior 消息转发器**(Decision #89):路径 B 的 `Esr.Kind.Server.handle_info/2` 同时充当所有 composing Behavior 的"非 dispatch 入站"转发点。任何不来自 `Esr.Invocation.dispatch/1` 的 GenServer 消息(`Process.monitor` 触发的 `:DOWN` / 外部 `send/2` 回调 / 未来 timer tick)都经此 mailbox,转发到每个 Behavior 的可选回调:
+
+```elixir
+@callback handle_kind_message(message :: term(), slice :: map(),
+                              ctx :: %{kind_module: module(), self_uri: URI.t()}) ::
+            {:ok, new_slice :: map()} | :ignore
+```
+
+返 `{:ok, new_slice}` 更新该 Behavior 的 slice;返 `:ignore` 不变。`Kind.Server` 仍**完全不感知**任何业务 Behavior——只查 `function_exported?/3` 后调用。Phase 2 Chat 用此 hook 实现 offline 状态机(`:DOWN` → last_seen)和 bridge→Agent reply 回路(`{:reply_received, _}` → 构造 Message + dispatch chat/send),Kind.Server 一行业务代码都不加。
+
+**`ctx.kind_module` + `ctx.self_uri` 单点注入**(Decision #90):`Esr.Kind.Runtime.handle_dispatch/4` 在调用 `invoke_behavior` 前在 ctx 上 `Map.put` 这两个 key。Behavior 跨 Kind 时(Chat 的 `:receive` 分支 User vs Agent / Session 的 `:send` 用 self_uri 当 broadcast topic 前缀)需要它们,Adapter 构造 Invocation 时**不**填——是 runtime injection contract。
+
 #### 5.7.5 `Esr.Invocation.dispatch/1` 内置投递路径选择
 
 ```elixir
@@ -959,6 +971,17 @@ end
 
 **硬不变式(不是 guideline,是 §5.7.4 正确性依赖):inbound 消息永远走 `dispatch/1`,绝不允许裸 `PubSub.broadcast` 到 inbound topic**。
 
+**Topic taxonomy(Phase 2 增补,Decision #93)**:`:events` 后缀是 view fan-out 的统一命名约定。当前在用:
+
+| Topic 模板 | 谁广播 | 谁订阅 | 用途 |
+|---|---|---|---|
+| `esr:audit:stream` | `Esr.Audit` | LiveView /admin audit log + telemetry 观察者 | invocation 流式 |
+| `esr:session:<session_uri>:events` | `Esr.Behavior.Chat` (Session 侧) | LiveView /admin chat stream + 成员状态;Feishu/CLI adapter 渲染 | Chat 消息 + 成员 join/leave/offline |
+| `esr:user:<user_uri>:events` | `Esr.Behavior.Chat` (:receive 在 User Kind) | 该 User 的 inbox 渲染(LV 多个 view 共享 admin User) | 个人 inbox 通知 |
+| `esr:bridge_v1:events` / `esr:bridge_v1:to_claude:<bridge_id>` | `Esr.Bridge.V1Prototype.Server` | LV bridge 状态 + SSE endpoint | v1_prototype bridge 协议(Phase 5 替换) |
+
+新增 view fan-out topic 走 `:events` 后缀;`mix esr.check_invariants` #1 的 allowlist 列源文件(audit.ex / invocation.ex / chat.ex / ...),新加 broadcast 源码必须同步更新 allowlist。
+
 理由:Phoenix.PubSub **不** buffer 没有订阅者的 topic 的消息。裸 broadcast 在 receiver 的 register→subscribe 窗口里**会被丢**——这正是事故 2.1 的根因。`dispatch/1` 通过 ReadyGate + PendingDelivery 接住这个窗口,broadcast 不行。
 
 判断规则的简化记法:**有特定 receiver → `dispatch/1`;广播给不确定旁观者 → `PubSub.broadcast`**。前者必须有投递保证,后者本来就接受"晚来没看到"。`code review` 时 grep `PubSub.broadcast` 出现在 inbound 路径上 = bug。
@@ -999,7 +1022,9 @@ end
 }
 ```
 
-Type spec 用 Elixir-style atom/tuple notation(`:string`、`:integer`、`{:tuple, :integer, :integer}`、`{:list, :string}`、`{:option, :string}`、`:map`、`%{<field> => <ty>}`)。v0 用 compile-time 简单 check;runtime 强校验 deferred 到 v0.2+。
+Type spec 用 Elixir-style atom/tuple notation(`:string`、`:integer`、`{:tuple, :integer, :integer}`、`{:list, :string}`、`{:option, :string}`、`:map`、`:uri`、`%{<field> => <ty>}`)。v0 用 compile-time 简单 check;runtime 强校验 deferred 到 v0.2+。
+
+Phase 2 加 `:uri` primitive(Decision #92):匹配 `%URI{}` struct,**拒绝裸字符串**。Chat 的 `@interface` 用它声明 `sender: :uri`、`mentions: {:list, :uri}` 等典型 URI 字段。这与 `Esr.Ecto.URI` 自定义 Ecto type 配合,实现 URI 跨进程/跨持久化层始终是 struct,字符串只出现在 dump/load 的边界。
 
 `@interface` 是所有 adapter 的生成源:
 
@@ -2632,6 +2657,13 @@ Adapter           Esr.Invocation        Kind GenServer     Behavior       :telem
 | 85 | **`.claude/` 暂用 plain dir 不 vendor+submodule**(Phase 0 实施期决策)— 短期符合"少发明多装配"+ 镜像老 esr 实际结构;trigger 迁 vendor: (a) 出现 skill 需要 upstream 更新需求,或 (b) Phase 5 完成后整理 tech debt | impl |
 | 86 | **CC channel 协议层简化:Channel = MCP server + 1 capability**(Phase 1b 实证)— v0.3 §12.8 之前假设 channel 是独立通信协议(独立 server 进程 + 类似 WebSocket 的 wire),Phase 1b 发现 Channels 是 MCP 协议扩展:`capabilities.experimental['claude/channel']` + `notifications/claude/channel` notification + 标准 MCP tools/call(`reply`)。Phase 1b `esr_plugin_cc_bridge_v1_prototype` minimum bidirectional ~250 LOC Python。**关于 LOC 对比的诚实表述**:老 esr `cc_channel_runner`(973 LOC)和 cc-openclaw `channel_server`(4164 LOC)的代码量**不是纯 channel 协议层**——包含多 session 管理 / persistence / permission relay / production-grade 错误处理 等非 channel 功能,直接拿 4164 vs 250 对比是**不公平的**;**协议层简化是真的**(纠正过度工程认知),但 LOC 比较的简化幅度取决于 prior art 还做了什么 channel 之外的事。Phase 5 `esr_plugin_cc_channel` 走这条简化路径(v1_prototype wholesale replace 的 target),详见 §12.8 | impl |
 | 87 | **`--dangerously-load-development-channels server:<name>` 需要项目根 `.mcp.json`**(per-operator,gitignored,通过 `git rev-parse --show-toplevel` 锚定)— 否则 claude 启动期 lookup 失败打印 warning;`--mcp-config <abs>` 只读 session-level,**不**满足 dev-channels lookup。`Esr.Bridge.V1Prototype.McpConfigWriter.write!/0` 同时写 session-level 和 project-level | impl |
+| 88 | **K-path Behavior 模型**(Phase 2 落地 Decision #61)— 一个 Behavior 模块同时挂在多个 Kind 上,每个 Kind 通过 `BehaviorRegistry.register(kind, action, behavior)` 注册自己消费的 **action subset**(Chat: Session→send/join/leave, User+Agent→receive)。`Kind.behaviors/0` 从"action 路由权威"降级为"`init_slice` 用的列表",真正权威是 BehaviorRegistry per-Kind 表。User Kind 可以 `behaviors() = []` 但仍接收 `:receive` 分发。plugin isolation 北极星的核心原语 | impl |
+| 89 | **`Esr.Kind.Server.handle_info/2` 统一 Behavior 消息转发器**(§5.7.4 新合约面)— 任何非 dispatch 入站(Process.monitor `:DOWN` / bridge `send/2` 回调 / 未来 timer tick)进 Kind.Server 单 mailbox,转发到每个 composing Behavior 的可选回调 `handle_kind_message(message, slice, ctx)`,返 `{:ok, new_slice}` 或 `:ignore`。Kind.Server 仍不感知任何业务 Behavior。Phase 2 Chat 用此 hook 实现 offline 状态机 + bridge→Agent reply 回路 | impl |
+| 90 | **`ctx.kind_module` + `ctx.self_uri` 在 Kind.Runtime 注入**(§4 Invocation flow 增补)— 跨 Kind 的 Behavior(Chat 的 :receive 要分支 User vs Agent / Session 的 :send 要 broadcast topic 含自己 URI)需要这两个值,Phase 1 没有。Kind.Runtime.handle_dispatch/4 在 invoke 前单点 `Map.put` 注入,plugin 永远不手 plumb。`Invocation.ctx` type spec:这两 key runtime-injected,Behavior 内可见,adapter 构造时不填 | impl |
+| 91 | **MessageStore 为聊天历史的单一真相源**(Phase 2 P2-D3)— Session.Chat slice 只持 ephemeral 在线状态(members/monitors/last_seen),offline 期消息不维护 pending queue;rejoin 通过 `MessageStore.in_session_since(session_uri, last_seen[uri])` 派生 replay 集,SQL `LIMIT 1000` 兜底。可派生的不独立维护 — 同 memory `feedback_converge_to_uri_list` | impl |
+| 92 | **`InterfaceValidator` 加 `:uri` primitive**(§6.2 type-spec 语法扩展)— Chat 的 `@interface` schema 声明 `sender: :uri, mentions: {:list, :uri}` 等典型 URI 字段,validator 在 dispatch 边界要求 `%URI{}` struct,**拒绝裸字符串**。配 `Esr.Ecto.URI` 自定义 Ecto type 实现 URI 跨进程/跨持久化层都是 struct | impl |
+| 93 | **`session://` URI scheme + 两条新 PubSub `:events` 通道**(§3.5 URI types + §5.7.6 topic taxonomy 扩展)— Phase 2 新增 `session://` 作为 Kind URI scheme(Session Kind 用)。`esr:session:<uri>:events` 用于 chat stream 订阅(消息/成员变更/online-offline)+ `esr:user:<uri>:events` 用于个人 inbox 通知。两个 topic 都是 §5.7.6 的 view fan-out 合法用法(已加入 `check_invariants` #1 allowlist) | impl |
+| 94 | **Bridge↔Agent dual map**(v1_prototype 实现层模式,Phase 5 channel 重写时复用)— `Esr.Bridge.V1Prototype.Server` 同时维护 `bridge_to_agent: %{bridge_id => pid}` + `agent_to_bridge: %{agent_uri_str => bridge_id}`。出站(Agent.invoke(:receive) → claude)用 `bridge_for_agent/1`;入站(claude reply → Agent)用 `forward_reply_to_agent/2` 找 pid → `send/2`。模式本质:wire-id 和 business-URI 解耦,routing 层不感知 wire 协议 | impl |
 
 ---
 
