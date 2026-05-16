@@ -1,4 +1,16 @@
 defmodule EsrWebLiveview.AdminLive do
+  # PHASE4-SPLIT-FIRST: this module is 800+ LOC after Phase 3 multi-session
+  # UX additions (sessions sidebar + floating agents + add-to-session +
+  # @-dropdown scoping + create session form). DO NOT add features here
+  # before Phase 4 brainstorm decides the split (Phoenix.Component vs
+  # LiveComponent vs on_mount hooks; sub-component file boundaries
+  # informed by Phase 4 form factor — CLI surface, Workspace UI, login).
+  # See Decision Log #95-#104 and Phase 3 closeout notes.
+  #
+  # The decision to defer the split to Phase 4 is per Allen 2026-05-16
+  # — splitting now risks tearing at the wrong seams when Phase 4 adds
+  # new LV surfaces (Workspace operations, login, CLI command panels).
+  # Split + new features in the same Phase 4 spec.
   @moduledoc """
   /admin LiveView — Phase 2 chat-window UI.
 
