@@ -1,15 +1,18 @@
 defmodule EsrWeb.CcBridgeAnnounceControllerPhase2Test do
   @moduledoc """
-  Phase 2c-step 1 integration tests for the announce/disconnect/reply
-  endpoints' new agent_uri pathway.
+  Phase 2c-step 1 + Phase 3b-step 2 contract change tests.
 
-  Verifies:
-  1. POST /announce with agent_uri spawns Agent Kind + joins session://main
-  2. POST /reply with valid bridge_id+agent forwards to Agent Kind's
-     mailbox (which dispatches chat/send → admin receives via user:events)
+  **Phase 3 contract change (per P3-D9 + #P1-6)**: bridge announce no
+  longer auto-joins session://main. Agent is floating until admin
+  explicitly dispatches chat/join via LV or another path.
+
+  Verifies (Phase 3 updated):
+  1. POST /announce with agent_uri spawns Agent Kind, binds to
+     bridge_id, but does NOT auto-join any session (floating)
+  2. POST /reply with bound agent + after manual join → forwards via
+     Agent's chat/send dispatch (now requires explicit pre-join)
   3. POST /reply with bridge that has no agent returns 422
   4. POST /disconnect terminates Agent Kind + unbinds
-  5. Re-announce with the SAME agent_uri returns 200 (idempotent reconnect)
   """
 
   use ExUnit.Case
@@ -30,9 +33,9 @@ defmodule EsrWeb.CcBridgeAnnounceControllerPhase2Test do
     {:ok, conn: conn}
   end
 
-  describe "announce with agent_uri" do
-    test "spawns Agent Kind and binds it to bridge_id", %{conn: conn} do
-      bridge_id = "p2-announce-#{System.unique_integer([:positive])}"
+  describe "announce with agent_uri (Phase 3 floating)" do
+    test "spawns Agent Kind, binds to bridge_id, but does NOT auto-join session", %{conn: conn} do
+      bridge_id = "p3-announce-#{System.unique_integer([:positive])}"
       agent_uri_str = "agent://cc-builder-#{System.unique_integer([:positive])}"
 
       conn =
@@ -52,22 +55,20 @@ defmodule EsrWeb.CcBridgeAnnounceControllerPhase2Test do
       # Server has the binding
       assert {:ok, ^bridge_id} = BridgeServer.bridge_for_agent(agent_uri)
 
-      # Agent joined session://main — poll briefly for the cast to land
+      # Phase 3 contract change: NOT in session://main members (floating)
       {:ok, session_pid} = KindRegistry.lookup(Session.default_uri())
-
-      assert wait_until(fn ->
-               %{state: %{chat: s}} = :sys.get_state(session_pid)
-               Map.has_key?(s.members, agent_uri)
-             end)
+      %{state: %{chat: s}} = :sys.get_state(session_pid)
+      refute Map.has_key?(s.members, agent_uri), "agent should be floating, not in main"
 
       # Cleanup
       delete(conn, "/api/cc-bridge/announce/#{bridge_id}")
     end
   end
 
-  describe "reply with bound agent" do
-    test "forwards text → Agent dispatches chat/send → admin user:events receives", %{conn: conn} do
-      bridge_id = "p2-reply-#{System.unique_integer([:positive])}"
+  describe "reply with bound agent (Phase 3: requires manual join first)" do
+    test "after manual join, forwards text → Agent dispatches chat/send → admin user:events receives",
+         %{conn: conn} do
+      bridge_id = "p3-reply-#{System.unique_integer([:positive])}"
       agent_uri_str = "agent://cc-replier-#{System.unique_integer([:positive])}"
 
       post(conn, "/api/cc-bridge/announce", %{
@@ -75,9 +76,20 @@ defmodule EsrWeb.CcBridgeAnnounceControllerPhase2Test do
         "agent_uri" => agent_uri_str
       })
 
-      # Wait for agent to join session
+      # Phase 3: manually join agent to main (LV would do this in real
+      # flow; we simulate it directly via dispatch)
       agent_uri = URI.new!(agent_uri_str)
-      {:ok, session_pid} = KindRegistry.lookup(Session.default_uri())
+      session_uri = Session.default_uri()
+
+      :ok =
+        Esr.Invocation.dispatch(%Esr.Invocation{
+          target: URI.new!("#{URI.to_string(session_uri)}/behavior/chat/join"),
+          mode: :cast,
+          args: %{member: agent_uri},
+          ctx: %{caller: agent_uri, caps: User.admin_caps(), reply: :ignore}
+        })
+
+      {:ok, session_pid} = KindRegistry.lookup(session_uri)
 
       assert wait_until(fn ->
                %{state: %{chat: s}} = :sys.get_state(session_pid)

@@ -31,7 +31,7 @@ defmodule EsrWeb.CcBridgeAnnounceController do
   use Phoenix.Controller, formats: [:json]
 
   alias Esr.Bridge.V1Prototype.Server, as: BridgeServer
-  alias Esr.Entity.{Agent, Session, User}
+  alias Esr.Entity.Agent
 
   def announce(conn, params) do
     bridge_id = params["bridge_id"] || generated_fallback_id()
@@ -68,10 +68,13 @@ defmodule EsrWeb.CcBridgeAnnounceController do
   defp spawn_and_bind_agent("", _bridge_id), do: {:legacy, :no_agent_uri}
 
   defp spawn_and_bind_agent(agent_uri_str, bridge_id) when is_binary(agent_uri_str) do
+    # Phase 3b-step 2 (per P3-D9): bridge attach spawns Agent Kind + binds
+    # to bridge_id, but **does not** auto-join any session. Agent is
+    # "floating" — LV admin manually adds to session via chat/join dispatch.
+    # Removed: join_agent_to_default_session/1 call (Phase 2 behavior).
     with {:ok, agent_uri} <- URI.new(agent_uri_str),
          {:ok, agent_pid} <- start_agent_kind(agent_uri) do
       :ok = BridgeServer.bind_agent(bridge_id, agent_uri, agent_pid)
-      :ok = join_agent_to_default_session(agent_uri)
       :ok
     else
       {:error, _} = err -> err
@@ -98,51 +101,23 @@ defmodule EsrWeb.CcBridgeAnnounceController do
     end
   end
 
-  defp join_agent_to_default_session(agent_uri) do
-    target = URI.new!("#{URI.to_string(Session.default_uri())}/behavior/chat/join")
-
-    _ =
-      Esr.Invocation.dispatch(%Esr.Invocation{
-        target: target,
-        mode: :cast,
-        args: %{member: agent_uri},
-        ctx: %{
-          caller: agent_uri,
-          caps: User.admin_caps(),
-          reply: :ignore
-        }
-      })
-
-    :ok
-  end
-
   def disconnect(conn, %{"bridge_id" => bridge_id}) do
     # Unbind Agent first so subsequent reply traffic gets :no_agent
     # rather than racing the terminate.
     case BridgeServer.unbind_agent(bridge_id) do
       {:ok, nil} -> :ok
-      {:ok, %URI{} = agent_uri} -> leave_and_terminate_agent(agent_uri)
+      {:ok, %URI{} = agent_uri} -> terminate_agent(agent_uri)
     end
 
     :ok = BridgeServer.unregister(bridge_id)
     json(conn, %{ok: true, bridge_id: bridge_id})
   end
 
-  defp leave_and_terminate_agent(agent_uri) do
-    target = URI.new!("#{URI.to_string(Session.default_uri())}/behavior/chat/leave")
-
-    _ =
-      Esr.Invocation.dispatch(%Esr.Invocation{
-        target: target,
-        mode: :cast,
-        args: %{member: agent_uri},
-        ctx: %{
-          caller: agent_uri,
-          caps: User.admin_caps(),
-          reply: :ignore
-        }
-      })
-
+  # Phase 3b-step 2: Agent might be in N sessions or none. Just terminate
+  # the Agent Kind; each monitoring Session's handle_kind_message(:DOWN)
+  # marks agent offline + records last_seen (no full removal — admin can
+  # explicitly leave per session via LV later if needed).
+  defp terminate_agent(agent_uri) do
     case Esr.KindRegistry.lookup(agent_uri) do
       {:ok, agent_pid} ->
         _ = DynamicSupervisor.terminate_child(EsrPluginChat.AgentSupervisor, agent_pid)
