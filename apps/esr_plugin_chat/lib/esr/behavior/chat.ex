@@ -251,39 +251,103 @@ defmodule Esr.Behavior.Chat do
     end
   end
 
-  # Bridge → Agent reply path (2c-step 1). When the controller's
-  # forward_reply_to_agent/2 lands on the Agent's mailbox, this clause
-  # constructs the chat envelope + dispatches send through Session so
-  # the reply walks the same router as any other chat message.
+  # Bridge → Agent reply path (Phase 3c-step 2/3, P3-D8 contract).
   #
-  # Guarded on ctx.kind_module = Agent: other Kinds would not normally
-  # receive {:reply_received, _}, but the guard makes intent explicit
-  # and prevents a misrouted message from re-dispatching from User.
-  def handle_kind_message({:reply_received, text}, _slice, %{kind_module: Esr.Entity.Agent} = ctx)
-      when is_binary(text) do
+  # When the controller's forward_reply_to_agent/4 lands on the Agent's
+  # mailbox, this clause constructs ONE chat envelope (identity invariant
+  # per Decision #40) and dispatches `chat/send` once per session_uri in
+  # the target list. Same Message URI lands in multiple sessions via
+  # MessageStore.write upsert + message_routings rows (per #P1-4 fix).
+  #
+  # ref consistency soft warn (P3-D8): if `ref` is provided, look up the
+  # ref'd Message's session presence and check it overlaps with the
+  # supplied session_uris. Mismatch emits telemetry + audit warn but
+  # STILL routes per the explicit session_uris (trust claude's choice).
+  def handle_kind_message(
+        {:reply_received, session_uris, text, ref_str_or_nil},
+        _slice,
+        %{kind_module: Esr.Entity.Agent} = ctx
+      )
+      when is_list(session_uris) and is_binary(text) do
     agent_uri = ctx.self_uri
-    session_uri = Esr.Entity.Session.default_uri()
 
-    msg = Message.new(agent_uri, %{text: text, attachments: []})
-    target = URI.new!("#{URI.to_string(session_uri)}/behavior/chat/send")
+    # Construct envelope once (identity invariant). ref is string at
+    # wire boundary; parse to %URI{} for the Message struct.
+    ref_uri =
+      case ref_str_or_nil do
+        nil -> nil
+        "" -> nil
+        s when is_binary(s) -> URI.new!(s)
+      end
 
-    _ =
-      Invocation.dispatch(%Invocation{
-        target: target,
-        mode: :cast,
-        args: %{message: msg},
-        ctx: %{
-          caller: agent_uri,
-          caps: MapSet.new(),
-          reply: :ignore
-        }
-      })
+    msg =
+      Message.new(agent_uri, %{text: text, attachments: []},
+        ref: ref_uri
+      )
+
+    # Soft consistency check: ref'd message should have been seen in at
+    # least one of the target sessions. Mismatch = noisy emit, not block.
+    maybe_emit_ref_mismatch(ref_str_or_nil, session_uris)
+
+    # Dispatch chat/send per session_uri. Message envelope shared.
+    for session_uri_str <- session_uris do
+      target = URI.new!("#{session_uri_str}/behavior/chat/send")
+
+      _ =
+        Invocation.dispatch(%Invocation{
+          target: target,
+          mode: :cast,
+          args: %{message: msg},
+          ctx: %{
+            caller: agent_uri,
+            caps: MapSet.new(),
+            reply: :ignore
+          }
+        })
+    end
 
     # Slice unchanged — Agent has no chat state of its own.
     :ignore
   end
 
   def handle_kind_message(_other_message, _slice, _ctx), do: :ignore
+
+  defp maybe_emit_ref_mismatch(nil, _), do: :ok
+  defp maybe_emit_ref_mismatch("", _), do: :ok
+
+  defp maybe_emit_ref_mismatch(ref_str, session_uris) when is_binary(ref_str) do
+    case Esr.MessageStore.by_uri(ref_str) do
+      :error ->
+        # Ref points to unknown message — still warn (claude may have
+        # made up a ref or referenced a pruned message).
+        :telemetry.execute(
+          [:esr, :chat, :reply_session_mismatch],
+          %{},
+          %{ref: ref_str, target_sessions: session_uris, reason: :ref_not_found}
+        )
+
+      {:ok, _msg} ->
+        # Compare against actual presence (via message_routings join).
+        actual_sessions = Esr.MessageStore.sessions_for_message(ref_str)
+
+        intersection = MapSet.intersection(MapSet.new(actual_sessions), MapSet.new(session_uris))
+
+        if MapSet.size(intersection) == 0 do
+          :telemetry.execute(
+            [:esr, :chat, :reply_session_mismatch],
+            %{},
+            %{
+              ref: ref_str,
+              target_sessions: session_uris,
+              ref_actual_sessions: actual_sessions,
+              reason: :no_overlap
+            }
+          )
+        end
+    end
+
+    :ok
+  end
 
   # --- Interface schema --------------------------------------------------
 

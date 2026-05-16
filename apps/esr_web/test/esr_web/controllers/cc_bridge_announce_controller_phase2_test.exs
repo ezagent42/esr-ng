@@ -106,6 +106,7 @@ defmodule EsrWeb.CcBridgeAnnounceControllerPhase2Test do
       reply_conn =
         post(conn, "/api/cc-bridge/reply", %{
           "bridge_id" => bridge_id,
+          "session_uris" => [URI.to_string(session_uri)],
           "text" => reply_text
         })
 
@@ -119,6 +120,103 @@ defmodule EsrWeb.CcBridgeAnnounceControllerPhase2Test do
       assert {:ok, _} = MessageStore.by_uri(msg.uri)
 
       # Cleanup
+      delete(conn, "/api/cc-bridge/announce/#{bridge_id}")
+    end
+  end
+
+  describe "reply with multi-session targets (Phase 3 P3-D8)" do
+    test "reply with session_uris list dispatches to each session", %{conn: conn} do
+      bridge_id = "p3-multi-#{System.unique_integer([:positive])}"
+      agent_uri_str = "agent://cc-multi-#{System.unique_integer([:positive])}"
+
+      post(conn, "/api/cc-bridge/announce", %{
+        "bridge_id" => bridge_id,
+        "agent_uri" => agent_uri_str
+      })
+
+      agent_uri = URI.new!(agent_uri_str)
+      session_uri = Session.default_uri()
+
+      # join agent to main
+      :ok =
+        Esr.Invocation.dispatch(%Esr.Invocation{
+          target: URI.new!("#{URI.to_string(session_uri)}/behavior/chat/join"),
+          mode: :cast,
+          args: %{member: agent_uri},
+          ctx: %{caller: agent_uri, caps: User.admin_caps(), reply: :ignore}
+        })
+
+      {:ok, session_pid} = KindRegistry.lookup(session_uri)
+
+      assert wait_until(fn ->
+               %{state: %{chat: s}} = :sys.get_state(session_pid)
+               Map.has_key?(s.members, agent_uri)
+             end)
+
+      # Subscribe to admin user:events
+      :ok = Phoenix.PubSub.subscribe(EsrCore.PubSub, Chat.user_events_topic(User.admin_uri()))
+
+      reply_text = "multi-target reply #{System.unique_integer()}"
+
+      reply_conn =
+        post(conn, "/api/cc-bridge/reply", %{
+          "bridge_id" => bridge_id,
+          "session_uris" => [URI.to_string(session_uri)],
+          "text" => reply_text
+        })
+
+      assert %{"ok" => true} = json_response(reply_conn, 200)
+
+      # admin receives the reply via session://main fan-out → chat/receive
+      assert_receive {:message_received, %Message{} = msg}, 2_000
+      assert msg.body.text == reply_text
+      assert msg.sender == agent_uri
+
+      # Cleanup
+      delete(conn, "/api/cc-bridge/announce/#{bridge_id}")
+    end
+
+    test "reply with text but not session_uris → 200 + no dispatch (empty target list)", %{
+      conn: conn
+    } do
+      # Backward-compat path: missing session_uris defaults to [] in controller
+      bridge_id = "p3-empty-#{System.unique_integer([:positive])}"
+
+      post(conn, "/api/cc-bridge/announce", %{
+        "bridge_id" => bridge_id,
+        "agent_uri" => "agent://cc-empty-#{System.unique_integer([:positive])}"
+      })
+
+      reply_conn =
+        post(conn, "/api/cc-bridge/reply", %{
+          "bridge_id" => bridge_id,
+          "text" => "no targets"
+        })
+
+      # ok=true; Agent's handle_kind_message receives empty session_uris list
+      # → for-loop iterates zero times → no chat/send dispatched
+      assert %{"ok" => true} = json_response(reply_conn, 200)
+
+      delete(conn, "/api/cc-bridge/announce/#{bridge_id}")
+    end
+
+    test "reply with text not a string → 422", %{conn: conn} do
+      bridge_id = "p3-badtext-#{System.unique_integer([:positive])}"
+
+      post(conn, "/api/cc-bridge/announce", %{
+        "bridge_id" => bridge_id,
+        "agent_uri" => "agent://x-#{System.unique_integer([:positive])}"
+      })
+
+      reply_conn =
+        post(conn, "/api/cc-bridge/reply", %{
+          "bridge_id" => bridge_id,
+          "text" => 123,
+          "session_uris" => ["session://main"]
+        })
+
+      assert json_response(reply_conn, 422)["error"] =~ "text must be a string"
+
       delete(conn, "/api/cc-bridge/announce/#{bridge_id}")
     end
   end

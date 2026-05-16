@@ -176,27 +176,47 @@ defmodule EsrWeb.CcBridgeAnnounceController do
   @doc """
   Python bridge POSTs here when claude calls its `reply` tool.
 
-  Phase 2c: if the bridge has an Agent Kind bound, forward the text to
-  it via `BridgeServer.forward_reply_to_agent/2` — the Agent's
-  `handle_kind_message({:reply_received, _}, ...)` in
-  `Esr.Behavior.Chat` then constructs the Message + dispatches
-  `chat/send` so the reply flows through the same router path as any
-  other chat message.
+  Phase 3c-step 2 (P3-D8 contract): body must include `session_uris`
+  (list of target session URIs) + `text`; may include `ref` (optional).
+  Forwards to BridgeServer.forward_reply_to_agent/4 → Agent Kind's
+  handle_kind_message dispatches chat/send per session_uri.
 
-  Legacy fallback (no Agent bound): returns 422. The Phase 1
-  `record_reply` path is removed — bridges that want their replies
-  visible must announce with `agent_uri`.
+  Backward-compat: if body only has `text` (Phase 2 schema), default
+  session_uris to `[]` and let Agent's handle_kind_message handle the
+  empty-target case (currently no-op + telemetry).
+
+  Returns 422 if bridge has no agent bound.
   """
-  def reply(conn, %{"bridge_id" => bridge_id, "text" => text})
-      when is_binary(bridge_id) and is_binary(text) do
-    case BridgeServer.forward_reply_to_agent(bridge_id, text) do
-      :ok ->
-        json(conn, %{ok: true})
+  def reply(conn, %{"bridge_id" => bridge_id} = params)
+      when is_binary(bridge_id) do
+    text = Map.get(params, "text", "")
+    session_uris = Map.get(params, "session_uris", [])
+    ref = Map.get(params, "ref")
 
-      {:error, :no_agent} ->
+    cond do
+      not is_binary(text) ->
         conn
         |> put_status(:unprocessable_entity)
-        |> json(%{ok: false, error: "bridge has no agent bound; announce with agent_uri"})
+        |> json(%{ok: false, error: "text must be a string"})
+
+      not is_list(session_uris) ->
+        conn
+        |> put_status(:unprocessable_entity)
+        |> json(%{ok: false, error: "session_uris must be a list of strings"})
+
+      true ->
+        case BridgeServer.forward_reply_to_agent(bridge_id, session_uris, text, ref) do
+          :ok ->
+            json(conn, %{ok: true})
+
+          {:error, :no_agent} ->
+            conn
+            |> put_status(:unprocessable_entity)
+            |> json(%{
+              ok: false,
+              error: "bridge has no agent bound; announce with agent_uri"
+            })
+        end
     end
   end
 

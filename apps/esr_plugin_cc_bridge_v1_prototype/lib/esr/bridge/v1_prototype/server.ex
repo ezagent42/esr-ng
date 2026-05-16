@@ -136,19 +136,21 @@ defmodule Esr.Bridge.V1Prototype.Server do
   @doc """
   Forward a claude reply to the Agent Kind bound to `bridge_id`.
 
-  The Agent's `handle_info({:reply_received, text}, state)` (in
-  `Esr.Behavior.Chat`) constructs an `%Esr.Message{}` envelope with
-  itself as sender + dispatches `session://main/behavior/chat/send`.
-  This is the new Phase 2 reply path — replaces the Phase 1
-  `record_reply` flow that wrote to per-bridge `replies` and broadcast
-  for LV.
+  Phase 3c-step 2 (P3-D8 contract):
+  - `session_uris` is a list of target session URIs (Phase 3 multi-session)
+  - `ref` is an optional message URI being replied to (for consistency check)
 
-  Returns `{:error, :no_agent}` if no Agent is bound (legacy bridges
-  that announced without `agent_uri` — controller surfaces 400 then).
+  Agent Kind's `handle_kind_message({:reply_received, session_uris, text, ref}, ...)`
+  dispatches `chat/send` once per session_uri (envelope reused per
+  identity invariant Decision #40).
+
+  Returns `{:error, :no_agent}` if no Agent is bound.
   """
-  @spec forward_reply_to_agent(String.t(), String.t()) :: :ok | {:error, :no_agent}
-  def forward_reply_to_agent(bridge_id, text) when is_binary(bridge_id) and is_binary(text) do
-    GenServer.call(__MODULE__, {:forward_reply, bridge_id, text})
+  @spec forward_reply_to_agent(String.t(), [String.t()], String.t(), String.t() | nil) ::
+          :ok | {:error, :no_agent}
+  def forward_reply_to_agent(bridge_id, session_uris, text, ref \\ nil)
+      when is_binary(bridge_id) and is_list(session_uris) and is_binary(text) do
+    GenServer.call(__MODULE__, {:forward_reply, bridge_id, session_uris, text, ref})
   end
 
   @doc "Look up the bridge_id bound to an Agent URI (for outbound to_claude push)."
@@ -266,7 +268,7 @@ defmodule Esr.Bridge.V1Prototype.Server do
     {:reply, :ok, new_state}
   end
 
-  def handle_call({:forward_reply, bridge_id, text}, _from, state) do
+  def handle_call({:forward_reply, bridge_id, session_uris, text, ref}, _from, state) do
     case Map.get(state.bridge_to_agent, bridge_id) do
       nil ->
         {:reply, {:error, :no_agent}, state}
@@ -274,9 +276,9 @@ defmodule Esr.Bridge.V1Prototype.Server do
       agent_pid when is_pid(agent_pid) ->
         # send/2 lands in Esr.Kind.Server.handle_info/2 which fans out
         # to each composed Behavior's handle_kind_message/3. Chat's
-        # clause for {:reply_received, _} constructs the Message +
-        # dispatches chat/send.
-        send(agent_pid, {:reply_received, text})
+        # clause for {:reply_received, session_uris, text, ref}
+        # dispatches chat/send per session_uri (envelope reused).
+        send(agent_pid, {:reply_received, session_uris, text, ref})
         {:reply, :ok, state}
     end
   end
