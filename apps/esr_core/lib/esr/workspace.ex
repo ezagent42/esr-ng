@@ -105,22 +105,62 @@ defmodule Esr.Workspace do
     end
   end
 
+  @doc """
+  Add a template to a Workspace. Fail-fast structural validation:
+  - template map must carry a `"class"` field referencing a registered
+    `Esr.Kind.Template` Class
+  - Class's `validate/1` (if defined) is called before persistence
+
+  Per Phase 4-completion Spec 01 Q2-(b): `"class"` field is the source
+  of truth for template Class binding. Multiple instances per Class are
+  fine — they're distinguished by the Workspace-local `tmpl_name` key.
+  """
   @spec add_template(String.t(), String.t(), map()) :: :ok | {:error, term()}
   def add_template(name, tmpl_name, tmpl) when is_binary(tmpl_name) and is_map(tmpl) do
+    with :ok <- validate_template(tmpl),
+         %{session_templates: tmpls} <- get_or_not_found(name),
+         new_tmpls = Map.put(tmpls, tmpl_name, tmpl),
+         {:ok, _} <- Store.update_templates(name, new_tmpls),
+         :ok <-
+           dispatch_mutation(name, "add_template", %{name: tmpl_name, template: tmpl}) do
+      :ok
+    end
+  end
+
+  defp get_or_not_found(name) do
     case Store.get_by_name(name) do
+      nil -> {:error, :not_found}
+      decoded -> decoded
+    end
+  end
+
+  defp validate_template(tmpl) do
+    case extract_class_name(tmpl) do
       nil ->
-        {:error, :not_found}
+        {:error, :missing_class_field}
 
-      %{session_templates: tmpls} ->
-        new_tmpls = Map.put(tmpls, tmpl_name, tmpl)
+      class_name ->
+        case Esr.TemplateRegistry.lookup(class_name) do
+          :error ->
+            {:error, {:no_template_class, class_name}}
 
-        with {:ok, _} <- Store.update_templates(name, new_tmpls),
-             :ok <-
-               dispatch_mutation(name, "add_template", %{name: tmpl_name, template: tmpl}) do
-          :ok
+          {:ok, class_module} ->
+            invoke_validate(class_module, tmpl)
         end
     end
   end
+
+  defp invoke_validate(class_module, tmpl) do
+    if function_exported?(class_module, :validate, 1) do
+      class_module.validate(tmpl)
+    else
+      :ok
+    end
+  end
+
+  defp extract_class_name(%{"class" => name}) when is_binary(name) and name != "", do: name
+  defp extract_class_name(%{class: name}) when is_binary(name) and name != "", do: name
+  defp extract_class_name(_), do: nil
 
   @spec remove_template(String.t(), String.t()) :: :ok | {:error, term()}
   def remove_template(name, tmpl_name) when is_binary(tmpl_name) do

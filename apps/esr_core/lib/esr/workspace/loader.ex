@@ -35,7 +35,7 @@ defmodule Esr.Workspace.Loader do
 
   require Logger
 
-  alias Esr.{Invocation, SpawnRegistry, Workspace}
+  alias Esr.{Invocation, SpawnRegistry, TemplateRegistry, Workspace}
 
   @doc """
   Load every persisted Workspace and (re-)spawn each of its members.
@@ -60,14 +60,14 @@ defmodule Esr.Workspace.Loader do
          }) do
       {:ok, _pid} ->
         children = instantiate_via_dispatch(decoded.uri)
-        results = Enum.map(children, &spawn_child/1)
+        results = Enum.map(children, &spawn_child(&1, decoded.uri))
         {name, results}
 
       {:error, {:already_started, _pid}} ->
         # Already alive (e.g. test setup spawned it before Loader ran).
         # Dispatch :instantiate to re-spawn any missing members.
         children = instantiate_via_dispatch(decoded.uri)
-        results = Enum.map(children, &spawn_child/1)
+        results = Enum.map(children, &spawn_child(&1, decoded.uri))
         {name, results}
 
       {:error, reason} ->
@@ -99,7 +99,7 @@ defmodule Esr.Workspace.Loader do
     end
   end
 
-  defp spawn_child({:member, %URI{} = uri}) do
+  defp spawn_child({:member, %URI{} = uri}, _workspace_uri) do
     case SpawnRegistry.spawn(uri) do
       {:ok, pid} ->
         {uri, {:ok, pid}}
@@ -112,4 +112,58 @@ defmodule Esr.Workspace.Loader do
         {uri, err}
     end
   end
+
+  defp spawn_child({:template, tmpl_name, tmpl_data}, workspace_uri) do
+    case extract_class_name(tmpl_data) do
+      nil ->
+        Logger.warning(
+          "Workspace.Loader: template #{inspect(tmpl_name)} missing \"class\" field in " <>
+            "workspace #{URI.to_string(workspace_uri)}, skipping"
+        )
+
+        {tmpl_name, {:error, :missing_class_field}}
+
+      class_name ->
+        case TemplateRegistry.lookup(class_name) do
+          {:ok, class_module} ->
+            invoke_template(class_module, tmpl_name, tmpl_data, workspace_uri)
+
+          :error ->
+            Logger.warning(
+              "Workspace.Loader: no Template Class registered for " <>
+                "#{inspect(class_name)} (template #{inspect(tmpl_name)}) in workspace " <>
+                "#{URI.to_string(workspace_uri)}, skipping"
+            )
+
+            {tmpl_name, {:error, {:no_template_class, class_name}}}
+        end
+    end
+  end
+
+  defp invoke_template(class_module, tmpl_name, tmpl_data, workspace_uri) do
+    case class_module.instantiate(tmpl_name, tmpl_data, workspace_uri) do
+      {:ok, uris} when is_list(uris) ->
+        {tmpl_name, {:ok, uris}}
+
+      {:error, reason} = err ->
+        Logger.warning(
+          "Workspace.Loader: template #{inspect(tmpl_name)} instantiate returned " <>
+            "#{inspect(reason)} in workspace #{URI.to_string(workspace_uri)}"
+        )
+
+        {tmpl_name, err}
+
+      other ->
+        Logger.warning(
+          "Workspace.Loader: template #{inspect(tmpl_name)} returned unexpected " <>
+            "#{inspect(other)} (expected `{:ok, [URI]}` or `{:error, _}`)"
+        )
+
+        {tmpl_name, {:error, {:bad_template_return, other}}}
+    end
+  end
+
+  defp extract_class_name(%{"class" => name}) when is_binary(name) and name != "", do: name
+  defp extract_class_name(%{class: name}) when is_binary(name) and name != "", do: name
+  defp extract_class_name(_), do: nil
 end
