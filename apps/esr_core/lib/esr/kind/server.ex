@@ -40,8 +40,8 @@ defmodule Esr.Kind.Server do
 
   Borrowed from old esr `Esr.Entity.Server` (SPEC borrow #4): we want
   graceful `terminate/2` so the GenServer can emit a final telemetry
-  event before going down. Phase 1's terminate is a no-op pass-through;
-  Phase 3 wires snapshot-on-shutdown here.
+  event before going down. Phase 4-completion PR 2 wired
+  snapshot-on-shutdown for Kinds declaring `:on_terminate` persistence.
   """
 
   use GenServer
