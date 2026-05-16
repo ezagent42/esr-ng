@@ -40,6 +40,9 @@ defmodule Esr.Routing.RuleStore do
     field :receivers, {:array, :string}
     field :created_by, :string
     field :created_at, :utc_datetime_usec
+    # Phase 4-completion PR 9: source distinguishes system_default from admin
+    field :source, :string, default: "admin"
+    field :enabled, :boolean, default: true
   end
 
   @type t :: %__MODULE__{
@@ -48,25 +51,42 @@ defmodule Esr.Routing.RuleStore do
           matcher_data: map(),
           receivers: [String.t()],
           created_by: String.t() | nil,
-          created_at: DateTime.t() | nil
+          created_at: DateTime.t() | nil,
+          source: String.t(),
+          enabled: boolean()
         }
 
+  @system_default "system_default"
+  @admin "admin"
+
+  def system_default_source, do: @system_default
+  def admin_source, do: @admin
+
   @doc """
-  Insert a new rule. `matcher_tuple` is `Esr.Routing.Matcher.matcher()`,
-  internally serialized via `to_json/1`. `receivers` is `[URI.t()]`
-  or `[String.t()]`.
+  Insert a new rule. `matcher_tuple` is `Esr.Routing.Matcher.matcher()`.
+  Default source is "admin" — pass `source: "system_default"` for
+  plugin-bootstrapped rules (per Phase 4-completion PR 9 §C).
   """
-  @spec add(atom(), Esr.Routing.Matcher.matcher(), [URI.t() | String.t()], URI.t() | nil) ::
-          {:ok, t()} | {:error, term()}
-  def add(table_name_atom, matcher_tuple, receivers, created_by) when is_atom(table_name_atom) do
+  @spec add(
+          atom(),
+          Esr.Routing.Matcher.matcher(),
+          [URI.t() | String.t()],
+          URI.t() | nil,
+          keyword()
+        ) :: {:ok, t()} | {:error, term()}
+  def add(table_name_atom, matcher_tuple, receivers, created_by, opts \\ [])
+      when is_atom(table_name_atom) do
     receivers_str = Enum.map(receivers, &uri_to_string/1)
+    source = Keyword.get(opts, :source, @admin)
 
     rule = %__MODULE__{
       table_name: Atom.to_string(table_name_atom),
       matcher_data: Esr.Routing.Matcher.to_json(matcher_tuple),
       receivers: receivers_str,
       created_by: uri_to_string_or_nil(created_by),
-      created_at: DateTime.utc_now()
+      created_at: DateTime.utc_now(),
+      source: source,
+      enabled: true
     }
 
     Repo.insert(rule)
@@ -93,7 +113,11 @@ defmodule Esr.Routing.RuleStore do
   """
   @spec load_into_registry(atom()) :: :ok
   def load_into_registry(table_name_atom) when is_atom(table_name_atom) do
+    # Phase 4-completion PR 9: only load `enabled` rows. Admin can
+    # disable a system_default rule without deleting it (system_defaults
+    # are protected from delete by delete/1).
     list(table_name_atom)
+    |> Enum.filter(& &1.enabled)
     |> Enum.each(fn row ->
       case Esr.Routing.Matcher.from_json(row.matcher_data) do
         {:ok, matcher_tuple} ->
@@ -108,15 +132,81 @@ defmodule Esr.Routing.RuleStore do
     :ok
   end
 
-  @doc "Delete a rule by id."
+  @doc """
+  Check if any system_default rule exists in this table. Used by
+  DefaultRules.bootstrap to decide whether to seed (per PR 9 §C: was
+  "table empty?", now "no system_default rules?" — so admin's
+  delete-then-restart doesn't get re-seeded).
+  """
+  @spec has_system_default?(atom()) :: boolean()
+  def has_system_default?(table_name_atom) when is_atom(table_name_atom) do
+    table_str = Atom.to_string(table_name_atom)
+
+    from(r in __MODULE__,
+      where: r.table_name == ^table_str and r.source == ^@system_default,
+      limit: 1
+    )
+    |> Repo.exists?()
+  end
+
+  @doc """
+  Delete a rule by id. Phase 4-completion PR 9 §C: system_default
+  rules are protected — admin can `disable/1` them but not `delete/1`.
+  Force-delete still possible via `delete/2` with `force: true`.
+  """
   @spec delete(integer()) :: :ok | {:error, term()}
-  def delete(id) when is_integer(id) do
+  def delete(id), do: delete(id, force: false)
+
+  @spec delete(integer(), keyword()) :: :ok | {:error, term()}
+  def delete(id, opts) when is_integer(id) do
+    force = Keyword.get(opts, :force, false)
+
+    case Repo.get(__MODULE__, id) do
+      nil ->
+        {:error, :not_found}
+
+      %__MODULE__{source: @system_default} when not force ->
+        {:error, :cannot_delete_system_default}
+
+      rule ->
+        case Repo.delete(rule) do
+          {:ok, _} -> :ok
+          err -> err
+        end
+    end
+  end
+
+  @doc """
+  Disable an enabled rule (set enabled=false). System_defaults that admin
+  doesn't want can be disabled without deleting; reload picks this up.
+  """
+  @spec disable(integer()) :: :ok | {:error, term()}
+  def disable(id) when is_integer(id) do
     case Repo.get(__MODULE__, id) do
       nil ->
         {:error, :not_found}
 
       rule ->
-        Repo.delete(rule)
+        rule
+        |> Ecto.Changeset.change(%{enabled: false})
+        |> Repo.update()
+        |> case do
+          {:ok, _} -> :ok
+          err -> err
+        end
+    end
+  end
+
+  @spec enable(integer()) :: :ok | {:error, term()}
+  def enable(id) when is_integer(id) do
+    case Repo.get(__MODULE__, id) do
+      nil ->
+        {:error, :not_found}
+
+      rule ->
+        rule
+        |> Ecto.Changeset.change(%{enabled: true})
+        |> Repo.update()
         |> case do
           {:ok, _} -> :ok
           err -> err

@@ -99,30 +99,27 @@ defmodule Esr.Behavior.Chat do
           {:chat_message, session_uri, msg}
         )
 
-        # 3. Fan out routing decisions in two flavors:
-        # (a) cross-session targets from Resolver → dispatch chat/send to
-        #     that target session (it'll handle its own member fan-out)
-        # (b) in-session members fan-out:
-        #     - if Resolver returned any cross-session targets: still
-        #       do in-session fan-out too (additive — message belongs
-        #       to current session too)
-        #     - if Resolver returned []: members-only (default)
-        cross_session_targets = Esr.Routing.Resolver.resolve(msg, session_uri)
+        # Phase 4-completion PR 9: Resolver is the SINGLE source of
+        # truth for routing decisions. No hardcoded fan-out here — the
+        # in-session-member fan-out is now expressed as a system_default
+        # rule with `receivers: ["$session_members"]` that Resolver
+        # expands using the passed members list.
+        #
+        # Resolver returns the complete recipient list. Each recipient
+        # is either:
+        # - a session URI (cross-session route) → dispatch chat/send there
+        # - a non-session URI (member / agent) → dispatch chat/receive
+        #
+        # Recursion guard for the current session is inside Resolver.
         in_session_members = Map.keys(slice.members)
+        recipients = Esr.Routing.Resolver.resolve(msg, session_uri, in_session_members)
 
-        # Avoid recursion: don't dispatch to the current session as a
-        # cross-session target (would loop forever).
-        cross_filtered =
-          Enum.reject(cross_session_targets, fn target ->
-            URI.to_string(target) == URI.to_string(session_uri)
-          end)
-
-        for target_session <- cross_filtered do
-          dispatch_cross_session(target_session, msg)
-        end
-
-        for member_uri <- in_session_members, member_uri != msg.sender do
-          dispatch_receive(member_uri, msg, session_uri)
+        for recipient <- recipients do
+          if recipient.scheme == "session" do
+            dispatch_cross_session(recipient, msg)
+          else
+            dispatch_receive(recipient, msg, session_uri)
+          end
         end
 
         {:ok, slice, %{stored: true}}

@@ -9,6 +9,14 @@ defmodule Esr.Routing.RuleStoreTest do
     :ok
   end
 
+  # PR 9 §A: DefaultRules.bootstrap seeds a system_default rule into
+  # MentionRouting at chat plugin boot. Tests that assert specific row
+  # counts must filter to admin-source rows.
+  defp admin_rules(table) do
+    RuleStore.list(table)
+    |> Enum.reject(&(&1.source == RuleStore.system_default_source()))
+  end
+
   test "add → list round-trip with matcher JSON encoded" do
     table = EsrPluginChat.Routing.MentionRouting
 
@@ -25,7 +33,7 @@ defmodule Esr.Routing.RuleStoreTest do
     assert row.receivers == ["session://oncall"]
     assert row.created_by == "user://admin"
 
-    [loaded] = RuleStore.list(table)
+    [loaded] = admin_rules(table)
     assert loaded.id == row.id
     assert {:ok, _matcher} = Matcher.from_json(loaded.matcher_data)
   end
@@ -47,8 +55,8 @@ defmodule Esr.Routing.RuleStoreTest do
         nil
       )
 
-    assert length(RuleStore.list(EsrPluginChat.Routing.MentionRouting)) == 1
-    assert length(RuleStore.list(EsrPluginChat.Routing.SessionRouting)) == 1
+    assert length(admin_rules(EsrPluginChat.Routing.MentionRouting)) == 1
+    assert length(admin_rules(EsrPluginChat.Routing.SessionRouting)) == 1
   end
 
   test "delete removes by id" do
@@ -57,7 +65,7 @@ defmodule Esr.Routing.RuleStoreTest do
 
     assert :ok = RuleStore.delete(row.id)
     assert {:error, :not_found} = RuleStore.delete(row.id)
-    assert [] = RuleStore.list(EsrPluginChat.Routing.MentionRouting)
+    assert [] = admin_rules(EsrPluginChat.Routing.MentionRouting)
   end
 
   test "URI struct receiver gets serialized to string" do

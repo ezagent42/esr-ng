@@ -1,44 +1,70 @@
 defmodule EsrPluginChat.DefaultRules do
   @moduledoc """
-  Phase 3a-step 4: bootstrap idempotent system-default routing rules
-  for the chat plugin's RoutingRegistry tables.
+  Phase 4-completion PR 9 §A: declarative default routing rules for the
+  chat plugin's RoutingRegistry tables.
 
-  Currently empty — Phase 3 default fan-out (in-session members) is
-  implemented as the **fall-through** branch in
-  `Esr.Behavior.Chat.invoke(:send, ...)` (per P3-D impl
-  default-rules decision (b)) rather than as routing rules. This
-  module exists as the canonical insertion point for future
-  system-default rules (e.g. audit-fanout, mention-routing-built-ins).
+  Previously (Phase 3): default fan-out (send to in-session members)
+  was hardcoded in `Esr.Behavior.Chat.invoke(:send, ...)` as a
+  fall-through branch — a leak per "no scattered routing logic"
+  principle (Allen 2026-05-16).
 
-  ## How to bootstrap (future)
+  Now: the default fan-out is **a system_default rule** with magic
+  receiver token `"$session_members"` that `Esr.Routing.Resolver`
+  expands at resolve time. `/admin/routing` shows it as a real (but
+  protected) row.
 
-      def bootstrap_default_rules do
-        if not has_rule?(SomeTable, some_matcher) do
-          RuleStore.add(SomeTable, some_matcher, receivers, nil)
-        end
+  ## Bootstrap semantics
 
-        :ok = RuleStore.load_into_registry(SomeTable)
-      end
-
-  Called from `EsrPluginChat.Application.start/2` after the
-  RoutingRegistry tables are declared.
+  - Per-table idempotent: if `RuleStore.has_system_default?(table)` is
+    true → skip (don't double-seed)
+  - Admin's delete-then-restart preserved: `delete/1` refuses
+    system_default; `disable/1` is the path for admin to opt out
+  - `enabled` flag respected by `load_into_registry/1`
   """
 
-  alias Esr.Routing.RuleStore
+  require Logger
+
+  alias Esr.Routing.{Matcher, RuleStore}
   alias EsrPluginChat.Routing.{MentionRouting, SessionRouting}
 
   @doc """
-  Bootstrap default rules + load any persisted rules from SQLite into
-  live RoutingRegistry ETS. Idempotent — safe to call on every boot.
+  Bootstrap default rules + hydrate persisted rules into RoutingRegistry.
+  Idempotent — safe to call on every boot.
   """
   @spec bootstrap :: :ok
   def bootstrap do
-    # Phase 3: no system-default rules to insert (fall-through covers
-    # in-session default fan-out). Just hydrate any admin-added rules
-    # from SQLite into the live RoutingRegistry ETS tables.
+    :ok = ensure_session_members_default_rule()
     :ok = RuleStore.load_into_registry(MentionRouting)
     :ok = RuleStore.load_into_registry(SessionRouting)
-
     :ok
+  end
+
+  defp ensure_session_members_default_rule do
+    if RuleStore.has_system_default?(MentionRouting) do
+      :ok
+    else
+      Logger.info(
+        "EsrPluginChat.DefaultRules: seeding system_default rule " <>
+          "(always → $session_members) into MentionRouting"
+      )
+
+      case RuleStore.add(
+             MentionRouting,
+             Matcher.always(),
+             [Esr.Routing.Resolver.session_members_token()],
+             nil,
+             source: RuleStore.system_default_source()
+           ) do
+        {:ok, _row} ->
+          :ok
+
+        {:error, reason} ->
+          Logger.error(
+            "EsrPluginChat.DefaultRules: failed to seed system_default rule: #{inspect(reason)}"
+          )
+
+          :ok
+      end
+    end
   end
 end
