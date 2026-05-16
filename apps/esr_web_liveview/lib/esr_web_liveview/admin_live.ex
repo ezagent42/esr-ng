@@ -1,54 +1,41 @@
 defmodule EsrWebLiveview.AdminLive do
-  # PHASE4-SPLIT-FIRST: this module is 800+ LOC after Phase 3 multi-session
-  # UX additions (sessions sidebar + floating agents + add-to-session +
-  # @-dropdown scoping + create session form). DO NOT add features here
-  # before Phase 4 brainstorm decides the split (Phoenix.Component vs
-  # LiveComponent vs on_mount hooks; sub-component file boundaries
-  # informed by Phase 4 form factor — CLI surface, Workspace UI, login).
-  # See Decision Log #95-#104 and Phase 3 closeout notes.
-  #
-  # The decision to defer the split to Phase 4 is per Allen 2026-05-16
-  # — splitting now risks tearing at the wrong seams when Phase 4 adds
-  # new LV surfaces (Workspace operations, login, CLI command panels).
-  # Split + new features in the same Phase 4 spec.
   @moduledoc """
-  /admin LiveView — Phase 2 chat-window UI.
+  /admin LiveView — coordinator shell.
 
-  Main view (top to bottom):
+  Phase 4a split (per Phase 4 D2): render fragments live in stateless
+  Phoenix.Component modules under `EsrWebLiveview.Admin.*`. This module
+  keeps:
 
-  1. **Session header** — `session://main` with members sidebar inline
-     (URI / online status / last_seen).
-  2. **Chat stream** — `Phoenix.LiveView.stream(:messages, limit: 50)`,
-     mounted with `Esr.MessageStore.recent_in_session/2` and live-updated
-     from `chat_message` broadcasts on `session:events`. Every row uses
-     the same template — admin / agent sender differ only in subtle
-     background colour. Phase 2 visual invariant: admin and agent rows
-     are IDENTICAL DOM shape (no separate "from claude" panel).
-  3. **Compose** — agent dropdown (live from KindRegistry scheme:agent
-     entries) + text input + Send. Dispatches `session://main/behavior/chat/send`
-     with `mentions: [selected agent]` (or `[]` for room broadcast).
+  - mount + state assigns + stream setup
+  - all handle_info subscriptions (audit / bridge / member / chat_message)
+  - all handle_event handlers (echo / chat_compose / switch_session /
+    create_session / add_agent_to_session / manual_dispatch)
+  - a thin render/1 that composes the 4 components
 
-  Debug area (below the main chat), `<details>` collapsible:
-  - Phase 1 Echo button
-  - Phase 1 Manual Dispatch form
-  - Audit Log stream (`Phoenix.LiveView.stream(:invocations, limit: 50)`)
+  Sub-components (see `apps/esr_web_liveview/lib/esr_web_liveview/admin/`):
 
-  Phase 1 forms moved to Debug — they're still useful for plumbing
-  verification but should not occupy the main view (Phase 2 is
-  Allen-chats-with-claude territory).
+  - `EsrWebLiveview.Admin.SessionsSidebar` — left: sessions + new + floating
+  - `EsrWebLiveview.Admin.ChatWindow` — center: header + stream + compose
+  - `EsrWebLiveview.Admin.MemberPanel` — right: members table
+  - `EsrWebLiveview.Admin.DebugPanel` — below: cc-bridges + debug area
 
-  ## Removed from Phase 1
-
-  - `bridge_messages` assign + `:to_claude` / `:from_claude` rendering
-  - "Send to Claude (via channel)" form (replaced by chat compose)
-  - `channel_push` event handler (`push_to_claude` now happens inside
-    `Esr.Behavior.Chat` `:receive` for Agent Kind)
-  - `claude_reply` handle_info (replies now arrive via `chat_message`
-    broadcast, having walked the full Chat router path)
+  Phase 4 D2 originally specced LiveComponent-per-surface. We landed on
+  Phoenix.Component (stateless) because admin_live's state is tightly
+  coupled (sessions choice drives chat + members + sidebar). Stateless
+  components give the file-boundary split (the goal — let 4b/c/d add
+  features in their own files, not as new sections in admin_live)
+  without the `send_update` ceremony LiveComponent would force.
+  Promote individual components to LiveComponent later if/when they
+  earn their own state (likely candidate: Workspace member-picker in 4d).
   """
 
   use Phoenix.LiveView
   import Phoenix.Component
+
+  import EsrWebLiveview.Admin.SessionsSidebar
+  import EsrWebLiveview.Admin.ChatWindow
+  import EsrWebLiveview.Admin.MemberPanel
+  import EsrWebLiveview.Admin.DebugPanel
 
   @echo_target URI.parse("agent://echo/behavior/echo/say")
   @main_session_uri URI.new!("session://main")
@@ -90,6 +77,263 @@ defmodule EsrWebLiveview.AdminLive do
 
     {:ok, socket}
   end
+
+  # --- Stream / membership / audit handlers -----------------------------
+
+  @impl true
+  def handle_info({:audit_event, event}, socket) do
+    row = event_to_row(event)
+    {:noreply, stream_insert(socket, :invocations, row, at: 0)}
+  end
+
+  def handle_info({:cc_connected, _bridge_id, _entry}, socket) do
+    {:noreply,
+     socket
+     |> assign(:connected_bridges, list_bridges_safely())
+     |> assign(:agent_options, list_session_agent_uris(socket.assigns.current_session_uri))
+     |> assign(:floating_agents, list_floating_agents())}
+  end
+
+  def handle_info({:cc_disconnected, _bridge_id}, socket) do
+    {:noreply,
+     socket
+     |> assign(:connected_bridges, list_bridges_safely())
+     |> assign(:agent_options, list_session_agent_uris(socket.assigns.current_session_uri))
+     |> assign(:floating_agents, list_floating_agents())}
+  end
+
+  def handle_info({:member_joined, _uri}, socket),
+    do:
+      {:noreply,
+       socket
+       |> assign(:session_members, read_session_members(socket.assigns.current_session_uri))
+       |> assign(:agent_options, list_session_agent_uris(socket.assigns.current_session_uri))
+       |> assign(:floating_agents, list_floating_agents())}
+
+  def handle_info({:member_left, _uri}, socket),
+    do:
+      {:noreply,
+       socket
+       |> assign(:session_members, read_session_members(socket.assigns.current_session_uri))
+       |> assign(:agent_options, list_session_agent_uris(socket.assigns.current_session_uri))
+       |> assign(:floating_agents, list_floating_agents())}
+
+  def handle_info({:member_offline, _uri, _at}, socket),
+    do:
+      {:noreply,
+       assign(socket, :session_members, read_session_members(socket.assigns.current_session_uri))}
+
+  # Phase 3: chat_message carries the source session_uri; filter to
+  # current_session_uri before inserting to the stream.
+  def handle_info({:chat_message, source_session_uri, %Esr.Message{} = msg}, socket) do
+    if URI.to_string(source_session_uri) == URI.to_string(socket.assigns.current_session_uri) do
+      {:noreply, stream_insert(socket, :messages, message_to_row(msg), at: -1)}
+    else
+      {:noreply, socket}
+    end
+  end
+
+  # Phase 2 backward-compat (in case any code still emits the old shape)
+  def handle_info({:chat_message, %Esr.Message{} = msg}, socket) do
+    {:noreply, stream_insert(socket, :messages, message_to_row(msg), at: -1)}
+  end
+
+  # --- User actions -----------------------------------------------------
+
+  @impl true
+  def handle_event("echo_test", _params, socket) do
+    inv = %Esr.Invocation{
+      target: @echo_target,
+      mode: :call,
+      args: %{msg: "hello"},
+      ctx: ctx()
+    }
+
+    case Esr.Invocation.dispatch(inv) do
+      {:ok, _result} ->
+        {:noreply, assign(socket, :flash_error, nil)}
+
+      {:error, reason} ->
+        {:noreply, assign(socket, :flash_error, "Echo failed: #{inspect(reason)}")}
+    end
+  end
+
+  def handle_event("chat_compose", %{"chat" => %{"text" => text} = params}, socket)
+      when is_binary(text) and text != "" do
+    mentions =
+      case Map.get(params, "agent_uri", "") do
+        "" -> []
+        uri_str -> [URI.new!(uri_str)]
+      end
+
+    admin_uri = Esr.Entity.User.admin_uri()
+    msg = Esr.Message.new(admin_uri, %{text: text, attachments: []}, mentions: mentions)
+
+    target = URI.new!("#{URI.to_string(socket.assigns.current_session_uri)}/behavior/chat/send")
+
+    inv = %Esr.Invocation{
+      target: target,
+      mode: :cast,
+      args: %{message: msg},
+      ctx: ctx()
+    }
+
+    case Esr.Invocation.dispatch(inv) do
+      :ok ->
+        {:noreply,
+         socket
+         |> assign(:flash_error, nil)
+         |> assign(:compose_form, to_form(%{"text" => "", "agent_uri" => ""}, as: "chat"))}
+
+      {:ok, _} ->
+        {:noreply,
+         socket
+         |> assign(:flash_error, nil)
+         |> assign(:compose_form, to_form(%{"text" => "", "agent_uri" => ""}, as: "chat"))}
+
+      {:error, reason} ->
+        {:noreply, assign(socket, :flash_error, "Send failed: #{inspect(reason)}")}
+    end
+  end
+
+  def handle_event("chat_compose", _params, socket) do
+    {:noreply, assign(socket, :flash_error, "Message text is required.")}
+  end
+
+  def handle_event("switch_session", %{"session_uri" => session_uri_str}, socket) do
+    case URI.new(session_uri_str) do
+      {:ok, new_uri} ->
+        {:noreply,
+         socket
+         |> assign(:current_session_uri, new_uri)
+         |> assign(:session_members, read_session_members(new_uri))
+         |> assign(:agent_options, list_session_agent_uris(new_uri))
+         |> stream(:messages, load_session_messages(new_uri), reset: true, limit: @message_limit)}
+
+      _ ->
+        {:noreply, assign(socket, :flash_error, "Bad session URI: #{session_uri_str}")}
+    end
+  end
+
+  def handle_event("create_session", %{"new_session" => %{"short_name" => name}}, socket)
+      when is_binary(name) and name != "" do
+    case EsrPluginChat.create_session(String.trim(name), Esr.Entity.User.admin_uri()) do
+      {:ok, session_uri} ->
+        if connected?(socket) do
+          Phoenix.PubSub.subscribe(EsrCore.PubSub, session_events_topic(session_uri))
+        end
+
+        {:noreply,
+         socket
+         |> assign(:sessions, EsrPluginChat.list_sessions())
+         |> assign(:new_session_form, to_form(%{"short_name" => ""}, as: "new_session"))
+         |> assign(:flash_error, nil)}
+
+      {:error, reason} ->
+        {:noreply, assign(socket, :flash_error, "Create failed: #{inspect(reason)}")}
+    end
+  end
+
+  def handle_event("create_session", _params, socket) do
+    {:noreply, assign(socket, :flash_error, "Session name is required.")}
+  end
+
+  def handle_event(
+        "add_agent_to_session",
+        %{"agent_uri" => agent_uri_str, "session_uri" => session_uri_str},
+        socket
+      )
+      when session_uri_str != "" do
+    with {:ok, agent_uri} <- URI.new(agent_uri_str),
+         {:ok, session_uri} <- URI.new(session_uri_str) do
+      target = URI.new!("#{URI.to_string(session_uri)}/behavior/chat/join")
+
+      _ =
+        Esr.Invocation.dispatch(%Esr.Invocation{
+          target: target,
+          mode: :cast,
+          args: %{member: agent_uri},
+          ctx: ctx()
+        })
+
+      # member_joined broadcast will refresh assigns
+      {:noreply, assign(socket, :flash_error, nil)}
+    else
+      _ -> {:noreply, assign(socket, :flash_error, "Bad URI for add-to-session")}
+    end
+  end
+
+  # phx-change fires for every form update; ignore empty selection.
+  def handle_event("add_agent_to_session", _params, socket), do: {:noreply, socket}
+
+  def handle_event(
+        "manual_dispatch",
+        %{"manual_dispatch" => %{"target" => target, "args" => args_json, "mode" => mode}},
+        socket
+      ) do
+    with {:ok, target_uri} <- safe_uri(target),
+         {:ok, args_map} <- safe_args(args_json),
+         {:ok, mode_atom} <- safe_mode(mode) do
+      inv = %Esr.Invocation{
+        target: target_uri,
+        mode: mode_atom,
+        args: args_map,
+        ctx: ctx()
+      }
+
+      case Esr.Invocation.dispatch(inv) do
+        {:ok, _} -> {:noreply, assign(socket, :flash_error, nil)}
+        :ok -> {:noreply, assign(socket, :flash_error, nil)}
+        {:error, reason} -> {:noreply, assign(socket, :flash_error, "Dispatch failed: #{inspect(reason)}")}
+      end
+    else
+      {:error, reason} ->
+        {:noreply, assign(socket, :flash_error, reason)}
+    end
+  end
+
+  # --- Render -----------------------------------------------------------
+
+  @impl true
+  def render(assigns) do
+    ~H"""
+    <div style="max-width: 1200px; margin: 0 auto; padding: 24px; font-family: -apple-system, sans-serif;">
+      <header>
+        <h1 style="font-size: 22px; font-weight: 600;">Admin</h1>
+        <p style="font-size: 13px; color: #666;">
+          Caller: <code>{@caller_uri_str}</code>
+        </p>
+      </header>
+
+      <section id="layout" style="margin-top: 24px; display: grid; grid-template-columns: 200px 1fr 240px; gap: 16px;">
+        <.sessions_sidebar
+          sessions={@sessions}
+          current_session_uri={@current_session_uri}
+          floating_agents={@floating_agents}
+          new_session_form={@new_session_form}
+        />
+
+        <.chat_window
+          current_session_uri={@current_session_uri}
+          messages_stream={@streams.messages}
+          agent_options={@agent_options}
+          compose_form={@compose_form}
+          flash_error={@flash_error}
+        />
+
+        <.member_panel members={@session_members} />
+      </section>
+
+      <.debug_panel
+        connected_bridges={@connected_bridges}
+        form={@form}
+        invocations_stream={@streams.invocations}
+      />
+    </div>
+    """
+  end
+
+  # --- Helpers ----------------------------------------------------------
 
   defp session_events_topic(%URI{} = uri) do
     Esr.Behavior.Chat.session_events_topic(uri)
@@ -200,8 +444,6 @@ defmodule EsrWebLiveview.AdminLive do
   defp format_inserted_at(s) when is_binary(s), do: s
   defp format_inserted_at(other), do: inspect(other)
 
-  # Row template — admin / agent sender pick different bg colour but
-  # the SHAPE is identical (Phase 2 invariant per VERIFICATION 2c gate).
   defp message_to_row(%Esr.Message{} = msg) do
     sender_str = URI.to_string(msg.sender)
 
@@ -227,497 +469,6 @@ defmodule EsrWebLiveview.AdminLive do
   defp body_text(%{"text" => t}) when is_binary(t), do: t
   defp body_text(_), do: ""
 
-  # --- Stream / membership / audit handlers -----------------------------
-
-  @impl true
-  def handle_info({:audit_event, event}, socket) do
-    row = event_to_row(event)
-    {:noreply, stream_insert(socket, :invocations, row, at: 0)}
-  end
-
-  def handle_info({:cc_connected, _bridge_id, _entry}, socket) do
-    {:noreply,
-     socket
-     |> assign(:connected_bridges, list_bridges_safely())
-     |> assign(:agent_options, list_session_agent_uris(socket.assigns.current_session_uri))
-     |> assign(:floating_agents, list_floating_agents())}
-  end
-
-  def handle_info({:cc_disconnected, _bridge_id}, socket) do
-    {:noreply,
-     socket
-     |> assign(:connected_bridges, list_bridges_safely())
-     |> assign(:agent_options, list_session_agent_uris(socket.assigns.current_session_uri))
-     |> assign(:floating_agents, list_floating_agents())}
-  end
-
-  def handle_info({:member_joined, _uri}, socket),
-    do:
-      {:noreply,
-       socket
-       |> assign(:session_members, read_session_members(socket.assigns.current_session_uri))
-       |> assign(:agent_options, list_session_agent_uris(socket.assigns.current_session_uri))
-       |> assign(:floating_agents, list_floating_agents())}
-
-  def handle_info({:member_left, _uri}, socket),
-    do:
-      {:noreply,
-       socket
-       |> assign(:session_members, read_session_members(socket.assigns.current_session_uri))
-       |> assign(:agent_options, list_session_agent_uris(socket.assigns.current_session_uri))
-       |> assign(:floating_agents, list_floating_agents())}
-
-  def handle_info({:member_offline, _uri, _at}, socket),
-    do:
-      {:noreply,
-       assign(socket, :session_members, read_session_members(socket.assigns.current_session_uri))}
-
-  # Phase 3: chat_message carries the source session_uri; filter to
-  # current_session_uri before inserting to the stream. Other sessions'
-  # messages are visible if/when user switches to that session (mount
-  # reloads stream from MessageStore via load_session_messages).
-  def handle_info({:chat_message, source_session_uri, %Esr.Message{} = msg}, socket) do
-    if URI.to_string(source_session_uri) == URI.to_string(socket.assigns.current_session_uri) do
-      {:noreply, stream_insert(socket, :messages, message_to_row(msg), at: -1)}
-    else
-      # Future: increment unread badge for source_session_uri here
-      {:noreply, socket}
-    end
-  end
-
-  # Phase 2 backward-compat (in case any code still emits the old shape)
-  def handle_info({:chat_message, %Esr.Message{} = msg}, socket) do
-    {:noreply, stream_insert(socket, :messages, message_to_row(msg), at: -1)}
-  end
-
-  # --- User actions -----------------------------------------------------
-
-  @impl true
-  def handle_event("echo_test", _params, socket) do
-    inv = %Esr.Invocation{
-      target: @echo_target,
-      mode: :call,
-      args: %{msg: "hello"},
-      ctx: ctx()
-    }
-
-    case Esr.Invocation.dispatch(inv) do
-      {:ok, _result} ->
-        {:noreply, assign(socket, :flash_error, nil)}
-
-      {:error, reason} ->
-        {:noreply, assign(socket, :flash_error, "Echo failed: #{inspect(reason)}")}
-    end
-  end
-
-  def handle_event("chat_compose", %{"chat" => %{"text" => text} = params}, socket)
-      when is_binary(text) and text != "" do
-    mentions =
-      case Map.get(params, "agent_uri", "") do
-        "" -> []
-        uri_str -> [URI.new!(uri_str)]
-      end
-
-    admin_uri = Esr.Entity.User.admin_uri()
-    msg = Esr.Message.new(admin_uri, %{text: text, attachments: []}, mentions: mentions)
-
-    target = URI.new!("#{URI.to_string(socket.assigns.current_session_uri)}/behavior/chat/send")
-
-    inv = %Esr.Invocation{
-      target: target,
-      mode: :cast,
-      args: %{message: msg},
-      ctx: ctx()
-    }
-
-    case Esr.Invocation.dispatch(inv) do
-      :ok ->
-        {:noreply,
-         socket
-         |> assign(:flash_error, nil)
-         |> assign(:compose_form, to_form(%{"text" => "", "agent_uri" => ""}, as: "chat"))}
-
-      {:ok, _} ->
-        {:noreply,
-         socket
-         |> assign(:flash_error, nil)
-         |> assign(:compose_form, to_form(%{"text" => "", "agent_uri" => ""}, as: "chat"))}
-
-      {:error, reason} ->
-        {:noreply, assign(socket, :flash_error, "Send failed: #{inspect(reason)}")}
-    end
-  end
-
-  def handle_event("chat_compose", _params, socket) do
-    {:noreply, assign(socket, :flash_error, "Message text is required.")}
-  end
-
-  # --- Phase 3b: multi-session UX events --------------------------------
-
-  def handle_event("switch_session", %{"session_uri" => session_uri_str}, socket) do
-    case URI.new(session_uri_str) do
-      {:ok, new_uri} ->
-        # LV is subscribed to all sessions' events (mount + create_session
-        # both subscribe), so no need to re-sub here. Just update current
-        # focus + reload stream from MessageStore + refresh @-agent options
-        # (only members of the new current session, per #UX-floating-mention).
-        {:noreply,
-         socket
-         |> assign(:current_session_uri, new_uri)
-         |> assign(:session_members, read_session_members(new_uri))
-         |> assign(:agent_options, list_session_agent_uris(new_uri))
-         |> stream(:messages, load_session_messages(new_uri), reset: true, limit: @message_limit)}
-
-      _ ->
-        {:noreply, assign(socket, :flash_error, "Bad session URI: #{session_uri_str}")}
-    end
-  end
-
-  def handle_event("create_session", %{"new_session" => %{"short_name" => name}}, socket)
-      when is_binary(name) and name != "" do
-    case EsrPluginChat.create_session(String.trim(name), Esr.Entity.User.admin_uri()) do
-      {:ok, session_uri} ->
-        if connected?(socket) do
-          Phoenix.PubSub.subscribe(EsrCore.PubSub, session_events_topic(session_uri))
-        end
-
-        {:noreply,
-         socket
-         |> assign(:sessions, EsrPluginChat.list_sessions())
-         |> assign(:new_session_form, to_form(%{"short_name" => ""}, as: "new_session"))
-         |> assign(:flash_error, nil)}
-
-      {:error, reason} ->
-        {:noreply, assign(socket, :flash_error, "Create failed: #{inspect(reason)}")}
-    end
-  end
-
-  def handle_event("create_session", _params, socket) do
-    {:noreply, assign(socket, :flash_error, "Session name is required.")}
-  end
-
-  def handle_event(
-        "add_agent_to_session",
-        %{"agent_uri" => agent_uri_str, "session_uri" => session_uri_str},
-        socket
-      )
-      when session_uri_str != "" do
-    with {:ok, agent_uri} <- URI.new(agent_uri_str),
-         {:ok, session_uri} <- URI.new(session_uri_str) do
-      target = URI.new!("#{URI.to_string(session_uri)}/behavior/chat/join")
-
-      _ =
-        Esr.Invocation.dispatch(%Esr.Invocation{
-          target: target,
-          mode: :cast,
-          args: %{member: agent_uri},
-          ctx: ctx()
-        })
-
-      # member_joined broadcast will refresh assigns
-      {:noreply, assign(socket, :flash_error, nil)}
-    else
-      _ -> {:noreply, assign(socket, :flash_error, "Bad URI for add-to-session")}
-    end
-  end
-
-  # phx-change fires for every form update; ignore empty selection (e.g.
-  # initial state or user re-opens dropdown without choosing).
-  def handle_event("add_agent_to_session", _params, socket), do: {:noreply, socket}
-
-  def handle_event(
-        "manual_dispatch",
-        %{"manual_dispatch" => %{"target" => target, "args" => args_json, "mode" => mode}},
-        socket
-      ) do
-    with {:ok, target_uri} <- safe_uri(target),
-         {:ok, args_map} <- safe_args(args_json),
-         {:ok, mode_atom} <- safe_mode(mode) do
-      inv = %Esr.Invocation{
-        target: target_uri,
-        mode: mode_atom,
-        args: args_map,
-        ctx: ctx()
-      }
-
-      case Esr.Invocation.dispatch(inv) do
-        {:ok, _} -> {:noreply, assign(socket, :flash_error, nil)}
-        :ok -> {:noreply, assign(socket, :flash_error, nil)}
-        {:error, reason} -> {:noreply, assign(socket, :flash_error, "Dispatch failed: #{inspect(reason)}")}
-      end
-    else
-      {:error, reason} ->
-        {:noreply, assign(socket, :flash_error, reason)}
-    end
-  end
-
-  # --- Render -----------------------------------------------------------
-
-  @impl true
-  def render(assigns) do
-    ~H"""
-    <div style="max-width: 1200px; margin: 0 auto; padding: 24px; font-family: -apple-system, sans-serif;">
-      <header>
-        <h1 style="font-size: 22px; font-weight: 600;">Admin</h1>
-        <p style="font-size: 13px; color: #666;">
-          Caller: <code>{@caller_uri_str}</code>
-        </p>
-      </header>
-
-      <section id="layout" style="margin-top: 24px; display: grid; grid-template-columns: 200px 1fr 240px; gap: 16px;">
-        <aside id="sessions-sidebar" style="border-right: 1px solid #eaeef2; padding-right: 16px;">
-          <h3 style="font-size: 14px; font-weight: 500; margin: 0 0 8px 0;">Sessions</h3>
-          <ul id="sessions-list" style="list-style: none; padding: 0; margin: 0;">
-            <li :for={uri <- @sessions} style="margin-bottom: 4px;">
-              <button
-                type="button"
-                phx-click="switch_session"
-                phx-value-session_uri={URI.to_string(uri)}
-                style={session_button_style(URI.to_string(uri) == URI.to_string(@current_session_uri))}
-              >
-                {URI.to_string(uri)}
-              </button>
-            </li>
-          </ul>
-
-          <div id="new-session-form" style="margin-top: 12px; padding-top: 12px; border-top: 1px solid #eaeef2;">
-            <.form for={@new_session_form} phx-submit="create_session">
-              <label style="display: block; font-size: 11px; color: #57606a;" for="new_session_short_name">+ New session</label>
-              <input
-                type="text"
-                name="new_session[short_name]"
-                id="new_session_short_name"
-                placeholder="architect-review"
-                style="width: 100%; padding: 4px 6px; margin-top: 2px; font-size: 12px; border: 1px solid #d1d5da; border-radius: 4px;"
-              />
-              <button
-                type="submit"
-                style="margin-top: 4px; width: 100%; padding: 4px; font-size: 11px; background: white; color: #0969da; border: 1px solid #0969da; border-radius: 4px; cursor: pointer;"
-              >
-                Create
-              </button>
-            </.form>
-          </div>
-
-          <div id="floating-agents" :if={@floating_agents != []} style="margin-top: 16px; padding-top: 12px; border-top: 1px solid #eaeef2;">
-            <h4 style="font-size: 11px; color: #57606a; font-weight: 500; margin: 0 0 6px 0;">Floating agents</h4>
-            <div :for={agent <- @floating_agents} style="margin-bottom: 8px; padding: 4px; border: 1px dashed #d1d5da; border-radius: 4px; font-size: 11px;">
-              <div style="font-family: monospace;">{agent}</div>
-              <form phx-change="add_agent_to_session" style="margin-top: 2px;">
-                <input type="hidden" name="agent_uri" value={agent} />
-                <select
-                  name="session_uri"
-                  style="width: 100%; font-size: 10px; padding: 2px;"
-                >
-                  <option value="">Add to session…</option>
-                  <option :for={s <- @sessions} value={URI.to_string(s)}>{URI.to_string(s)}</option>
-                </select>
-              </form>
-            </div>
-          </div>
-        </aside>
-
-        <div>
-          <h2 style="font-size: 16px; font-weight: 500; margin: 0 0 8px 0;">
-            Session: <code>{URI.to_string(@current_session_uri)}</code>
-          </h2>
-
-          <div
-            id="messages"
-            phx-update="stream"
-            style="height: 360px; overflow-y: auto; border: 1px solid #d1d5da; border-radius: 4px; padding: 12px; background: #fafbfc;"
-          >
-            <div :for={{dom_id, row} <- @streams.messages} id={dom_id} style={message_row_style(row.sender_kind)}>
-              <div style="font-family: monospace; font-size: 11px; color: #57606a;">
-                [{row.sender}] · {DateTime.to_iso8601(row.at)}
-              </div>
-              <div style="margin-top: 2px; white-space: pre-wrap;">{row.text}</div>
-            </div>
-          </div>
-
-          <.form
-            for={@compose_form}
-            phx-submit="chat_compose"
-            style="display: flex; gap: 8px; align-items: end; margin-top: 12px;"
-          >
-            <div style="flex: 0 0 240px;">
-              <label style="display: block; font-size: 13px; font-weight: 500;" for="chat_agent_uri">@ agent</label>
-              <select
-                name="chat[agent_uri]"
-                id="chat_agent_uri"
-                style="width: 100%; padding: 6px 10px; border: 1px solid #d1d5da; border-radius: 4px;"
-              >
-                <option value="">— room (no mention) —</option>
-                <option :for={uri <- @agent_options} value={uri}>{uri}</option>
-              </select>
-              <p :if={@agent_options == []} style="font-size: 11px; color: #999; margin: 4px 0 0;">
-                (no agents in this session — add one via Floating list)
-              </p>
-            </div>
-            <div style="flex: 1 1 auto;">
-              <label style="display: block; font-size: 13px; font-weight: 500;" for="chat_text">message</label>
-              <input
-                type="text"
-                name="chat[text]"
-                id="chat_text"
-                value=""
-                autocomplete="off"
-                style="width: 100%; padding: 6px 10px; border: 1px solid #d1d5da; border-radius: 4px;"
-              />
-            </div>
-            <button
-              type="submit"
-              id="chat-send-btn"
-              style="padding: 8px 16px; background: #1f883d; color: white; border: none; border-radius: 4px; cursor: pointer;"
-            >
-              Send
-            </button>
-          </.form>
-          <p :if={@flash_error} style="color: #cf222e; font-size: 13px; margin-top: 8px;">{@flash_error}</p>
-        </div>
-
-        <aside id="session-members" style="border-left: 1px solid #eaeef2; padding-left: 16px;">
-          <h3 style="font-size: 14px; font-weight: 500; margin: 0 0 8px 0;">Members</h3>
-          <p :if={@session_members == []} id="session-members-empty" style="font-size: 12px; color: #57606a;">
-            (No members — Chat plugin failed to start?)
-          </p>
-          <table :if={@session_members != []} id="session-members-table" style="width: 100%; font-size: 12px; border-collapse: collapse;">
-            <tbody>
-              <tr :for={member <- @session_members} style="border-bottom: 1px solid #f0f0f0;">
-                <td style="padding: 4px 0;">
-                  <div style="font-family: monospace; font-size: 11px;">{member.uri}</div>
-                  <div style={member_status_style(member.online)}>
-                    {if member.online, do: "online", else: "offline"}
-                    <span :if={member.last_seen} style="color: #999; font-weight: normal;">
-                      · {DateTime.to_iso8601(member.last_seen)}
-                    </span>
-                  </div>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </aside>
-      </section>
-
-      <section id="cc-bridges" style="margin-top: 24px;">
-        <h2 style="font-size: 16px; font-weight: 500; margin: 0 0 8px 0;">CC Bridges (v1 prototype)</h2>
-        <p :if={@connected_bridges == []} id="bridge-empty" style="font-size: 13px; color: #57606a;">
-          No connected bridges. Start one with <code>bash scripts/cc-bridge-attach.sh</code>.
-        </p>
-        <table :if={@connected_bridges != []} id="bridges-table" style="width: 100%; font-size: 13px; border-collapse: collapse;">
-          <thead>
-            <tr style="border-bottom: 1px solid #d1d5da;">
-              <th style="text-align: left; padding: 4px 0;">bridge_id</th>
-              <th style="text-align: left;">status</th>
-              <th style="text-align: left;">connected_at</th>
-              <th style="text-align: left;">client</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr :for={{bridge_id, entry} <- @connected_bridges} style="border-bottom: 1px solid #eee;">
-              <td style="font-family: monospace; padding: 4px 0;">{bridge_id}</td>
-              <td style="color: #1f883d; font-weight: 600;">connected</td>
-              <td style="color: #57606a;">{DateTime.to_iso8601(entry.connected_at)}</td>
-              <td style="font-family: monospace; font-size: 11px;">{client_label(entry)}</td>
-            </tr>
-          </tbody>
-        </table>
-      </section>
-
-      <section id="debug-area" style="margin-top: 32px;">
-        <details>
-          <summary style="font-size: 14px; font-weight: 500; cursor: pointer; padding: 8px 0;">
-            Debug (Echo / Manual Dispatch / Audit Log)
-          </summary>
-
-          <div id="quick-actions" style="margin-top: 16px;">
-            <h3 style="font-size: 14px; font-weight: 500; margin: 0 0 8px 0;">Quick Actions</h3>
-            <button
-              type="button"
-              phx-click="echo_test"
-              id="echo-test-btn"
-              style="padding: 8px 16px; background: #0969da; color: white; border: none; border-radius: 4px; cursor: pointer;"
-            >
-              Echo 测试
-            </button>
-          </div>
-
-          <div id="manual-dispatch" style="margin-top: 16px;">
-            <h3 style="font-size: 14px; font-weight: 500; margin: 0 0 8px 0;">Manual Dispatch</h3>
-            <.form for={@form} phx-submit="manual_dispatch">
-              <div style="margin-bottom: 8px;">
-                <label style="display: block; font-size: 13px; font-weight: 500;" for="manual_dispatch_target">target</label>
-                <input
-                  type="text"
-                  name="manual_dispatch[target]"
-                  id="manual_dispatch_target"
-                  placeholder="agent://echo/behavior/echo/say"
-                  style="width: 100%; padding: 6px 10px; border: 1px solid #d1d5da; border-radius: 4px;"
-                />
-              </div>
-              <div style="margin-bottom: 8px;">
-                <label style="display: block; font-size: 13px; font-weight: 500;" for="manual_dispatch_args">args (JSON)</label>
-                <input
-                  type="text"
-                  name="manual_dispatch[args]"
-                  id="manual_dispatch_args"
-                  placeholder='{"msg": "hello"}'
-                  style="width: 100%; padding: 6px 10px; border: 1px solid #d1d5da; border-radius: 4px;"
-                />
-              </div>
-              <div style="margin-bottom: 8px;">
-                <label style="display: block; font-size: 13px; font-weight: 500;" for="manual_dispatch_mode">mode</label>
-                <select
-                  name="manual_dispatch[mode]"
-                  id="manual_dispatch_mode"
-                  style="padding: 6px 10px; border: 1px solid #d1d5da; border-radius: 4px;"
-                >
-                  <option value="call">call</option>
-                  <option value="cast">cast</option>
-                </select>
-              </div>
-              <button
-                type="submit"
-                style="padding: 8px 16px; background: white; color: #0969da; border: 1px solid #0969da; border-radius: 4px; cursor: pointer;"
-              >
-                Dispatch
-              </button>
-            </.form>
-          </div>
-
-          <div id="audit-stream" style="margin-top: 16px;">
-            <h3 style="font-size: 14px; font-weight: 500; margin: 0 0 8px 0;">Audit Log (last 50)</h3>
-            <table style="width: 100%; font-size: 13px; border-collapse: collapse;">
-              <thead>
-                <tr style="border-bottom: 1px solid #d1d5da;">
-                  <th style="text-align: left; padding: 6px 0;">target</th>
-                  <th style="text-align: left;">action</th>
-                  <th style="text-align: left;">authz</th>
-                  <th style="text-align: left;">result</th>
-                  <th style="text-align: left;">duration_us</th>
-                  <th style="text-align: left;">at</th>
-                </tr>
-              </thead>
-              <tbody id="invocations" phx-update="stream">
-                <tr :for={{dom_id, row} <- @streams.invocations} id={dom_id} style="border-bottom: 1px solid #eee;">
-                  <td style="padding: 4px 0; font-family: monospace; font-size: 11px;">{row.target}</td>
-                  <td>{row.action}</td>
-                  <td>{row.authz}</td>
-                  <td style="font-family: monospace; font-size: 11px;">{row.result}</td>
-                  <td>{row.duration_us}</td>
-                  <td style="color: #666;">{row.at}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </details>
-      </section>
-    </div>
-    """
-  end
-
-  # --- Helpers ----------------------------------------------------------
-
   defp ctx do
     %{
       caller: Esr.Entity.User.admin_uri(),
@@ -738,16 +489,7 @@ defmodule EsrWebLiveview.AdminLive do
     }
   end
 
-  defp client_label(%{info: %{claude_info: %{"name" => name, "version" => v}}}),
-    do: "#{name} #{v}"
-
-  defp client_label(%{info: %{claude_info: %{"name" => name}}}), do: name
-  defp client_label(_), do: "—"
-
-  # Phase 3d: :stub_grant gone (hard flip). Real cap path emits
-  # :granted / :denied via a separate authz event; :invoke :stop only
-  # fires for the success branch (denied short-circuits with :error
-  # :unauthorized at dispatch step 5.5).
+  # Phase 3d: :stub_grant gone. Real cap path emits :granted / :denied.
   defp authz_label([:esr, :authz, :granted]), do: "granted"
   defp authz_label([:esr, :authz, :denied]), do: "denied"
   defp authz_label([:esr, :invoke, :stop]), do: "granted"
@@ -794,26 +536,4 @@ defmodule EsrWebLiveview.AdminLive do
   defp safe_mode("call"), do: {:ok, :call}
   defp safe_mode("cast"), do: {:ok, :cast}
   defp safe_mode(other), do: {:error, "unsupported mode: #{inspect(other)}"}
-
-  defp member_status_style(true), do: "font-size: 11px; color: #1f883d; font-weight: 600;"
-  defp member_status_style(false), do: "font-size: 11px; color: #999;"
-
-  defp session_button_style(true) do
-    "width: 100%; text-align: left; padding: 6px 8px; background: #0969da; color: white; border: none; border-radius: 4px; cursor: pointer; font-family: monospace; font-size: 11px;"
-  end
-
-  defp session_button_style(false) do
-    "width: 100%; text-align: left; padding: 6px 8px; background: white; color: #0969da; border: 1px solid #d1d5da; border-radius: 4px; cursor: pointer; font-family: monospace; font-size: 11px;"
-  end
-
-  # Chat row backgrounds — admin浅蓝, agent浅绿. SAME DOM SHAPE — only
-  # the wrapper bg colour differs. Phase 2 visual invariant.
-  defp message_row_style(:user),
-    do: "padding: 8px 10px; margin-bottom: 6px; background: #ddf4ff; border-radius: 4px;"
-
-  defp message_row_style(:agent),
-    do: "padding: 8px 10px; margin-bottom: 6px; background: #dafbe1; border-radius: 4px;"
-
-  defp message_row_style(_),
-    do: "padding: 8px 10px; margin-bottom: 6px; background: #f6f8fa; border-radius: 4px;"
 end
