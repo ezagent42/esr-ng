@@ -35,7 +35,11 @@ defmodule Esr.Kind.ServerTest do
       target: URI.parse("#{URI.to_string(uri)}/behavior/test/noop"),
       mode: :call,
       args: %{msg: "hello"},
-      ctx: %{caller: URI.parse("user://admin"), caps: Esr.Entity.User.admin_caps(), reply: :ignore}
+      ctx: %{
+        caller: URI.parse("user://admin"),
+        caps: Esr.Entity.User.admin_caps(),
+        reply: :ignore
+      }
     }
 
     assert {:ok, %{echoed: "hello"}} = GenServer.call(pid, {:esr_dispatch, inv})

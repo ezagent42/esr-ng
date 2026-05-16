@@ -6,9 +6,11 @@ defmodule Esr.Kind.Runtime do
   specific pid by `Esr.Invocation.dispatch/1`:
 
   - **5**: `BehaviorRegistry.lookup({kind_module, action})`
-  - **5.5**: authz gate (Phase 1 stub — always grant + emit
-    `:stub_grant` telemetry; replaced in-place at Phase 3d per
-    Decision #82, hence the `PHASE-3D-STUB: DO NOT REMOVE` marker)
+  - **5.5**: authz gate — `Esr.Capability.matches?` against ctx.caps
+    (Phase 3d hard flip per P3-D6). Emits `[:esr, :authz, :granted]`
+    or `[:esr, :authz, :denied]`. The Phase 1-2 permissive stub
+    (emit `:stub_grant` + always grant) is GONE; check_invariants #9
+    enforces the atom no longer appears in code.
   - **5.7**: validate args against `behavior.interface()[action].args`
   - **6**: extract slice = `state[behavior.state_slice()]`
   - **7**: `behavior.invoke(action, slice, args, ctx)`
