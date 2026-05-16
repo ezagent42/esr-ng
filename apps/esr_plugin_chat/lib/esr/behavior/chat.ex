@@ -99,16 +99,30 @@ defmodule Esr.Behavior.Chat do
           {:chat_message, session_uri, msg}
         )
 
-        # 3. Fan out :receive to recipients.
-        # Phase 3c-step 1: routing decisions go through Esr.Routing.Resolver
-        # (queries MentionRouting + SessionRouting tables for cross-session
-        # rules). If Resolver returns [] (no rule fired), fall through to
-        # in-session default fan-out (current session members). Per P3-D
-        # impl decision (b).
-        recipients = derive_recipients(msg, slice, session_uri)
+        # 3. Fan out routing decisions in two flavors:
+        # (a) cross-session targets from Resolver → dispatch chat/send to
+        #     that target session (it'll handle its own member fan-out)
+        # (b) in-session members fan-out:
+        #     - if Resolver returned any cross-session targets: still
+        #       do in-session fan-out too (additive — message belongs
+        #       to current session too)
+        #     - if Resolver returned []: members-only (default)
+        cross_session_targets = Esr.Routing.Resolver.resolve(msg, session_uri)
+        in_session_members = Map.keys(slice.members)
 
-        for recipient_uri <- recipients, recipient_uri != msg.sender do
-          dispatch_receive(recipient_uri, msg, session_uri)
+        # Avoid recursion: don't dispatch to the current session as a
+        # cross-session target (would loop forever).
+        cross_filtered =
+          Enum.reject(cross_session_targets, fn target ->
+            URI.to_string(target) == URI.to_string(session_uri)
+          end)
+
+        for target_session <- cross_filtered do
+          dispatch_cross_session(target_session, msg)
+        end
+
+        for member_uri <- in_session_members, member_uri != msg.sender do
+          dispatch_receive(member_uri, msg, session_uri)
         end
 
         {:ok, slice, %{stored: true}}
@@ -396,14 +410,21 @@ defmodule Esr.Behavior.Chat do
 
   # --- Internals ---------------------------------------------------------
 
-  # Phase 3c-step 1: Resolver first, fall through to in-session members
-  # per P3-D impl decision (b). msg.mentions is consumed by the mention(URI)
-  # matcher inside Resolver, not directly here (per #P1-5).
-  defp derive_recipients(%Message{} = msg, slice, session_uri) do
-    case Esr.Routing.Resolver.resolve(msg, session_uri) do
-      [] -> Map.keys(slice.members)
-      routed -> routed
-    end
+  defp dispatch_cross_session(target_session_uri, %Message{} = msg) do
+    # Recursively dispatch chat/send on the target session — that
+    # session handles its own member fan-out + further routing rules.
+    target = URI.new!("#{URI.to_string(target_session_uri)}/behavior/chat/send")
+
+    Invocation.dispatch(%Invocation{
+      target: target,
+      mode: :cast,
+      args: %{message: msg},
+      ctx: %{
+        caller: msg.sender,
+        caps: Esr.Entity.User.admin_caps(),
+        reply: :ignore
+      }
+    })
   end
 
   defp dispatch_receive(recipient_uri, %Message{} = msg, session_uri) do
