@@ -27,9 +27,11 @@ defmodule EsrPluginChat do
   (via `{:already_started, pid}` → reuse pid).
   """
   @spec create_session(String.t(), URI.t() | nil) :: {:ok, URI.t()} | {:error, term()}
+  def create_session(short_name, creator_uri \\ nil)
+
   def create_session("main", _creator), do: {:error, :main_is_static}
 
-  def create_session(short_name, creator_uri \\ nil) when is_binary(short_name) do
+  def create_session(short_name, creator_uri) when is_binary(short_name) do
     session_uri = URI.new!("session://#{short_name}")
     spec = {Esr.Kind.Server, {Session, %{uri: session_uri}}}
 
