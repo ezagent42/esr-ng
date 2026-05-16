@@ -1,0 +1,182 @@
+defmodule Esr.Workspace.Store do
+  @moduledoc """
+  SQLite-persisted Workspace records (Phase 4c).
+
+  ## Schema
+
+      id                integer pk
+      name              string unique  (short name, e.g. "default")
+      uri               string unique  (workspace://default)
+      member_uris       text   (Jason-encoded [String.t()])
+      session_templates text   (Jason-encoded map)
+      routing_rules     text   (Jason-encoded [map])
+      created_by        string (URI of creator)
+      timestamps        utc_datetime_usec
+
+  ## Why JSON-text columns
+
+  SQLite has no native JSON column. Storing as text + Jason round-trip
+  keeps the schema simple and gives us flexible inner shapes (session
+  template structure evolves; we don't need a migration per change).
+  Read path always decodes via `decode_*` helpers before handing back.
+
+  ## API
+
+  - `create(name, attrs)` — insert + return decoded struct
+  - `get_by_name(name)` — fetch single row by name
+  - `list_all/0` — for the Loader on app start
+  - `update_members(name, [URI])` / `update_templates(name, map)` /
+    `update_routing_rules(name, [map])` — mutation paths called by
+    `Esr.Workspace` facade after a successful Kind dispatch
+  - `delete(name)` — destructive, used by `mix esr.workspace.delete`
+  """
+
+  use Ecto.Schema
+  import Ecto.Query
+  alias EsrCore.Repo
+
+  @primary_key {:id, :id, autogenerate: true}
+  schema "workspaces" do
+    field :name, :string
+    field :uri, :string
+    field :member_uris, :string
+    field :session_templates, :string
+    field :routing_rules, :string
+    field :created_by, :string
+    timestamps(type: :utc_datetime_usec)
+  end
+
+  @type decoded :: %{
+          id: integer() | nil,
+          name: String.t(),
+          uri: URI.t(),
+          members: [URI.t()],
+          session_templates: map(),
+          routing_rules: [map()],
+          created_by: URI.t() | nil
+        }
+
+  # --- write paths ----------------------------------------------------
+
+  @doc """
+  Insert a new Workspace row. `attrs` keys (all optional except handled
+  by defaults):
+  - `:members` — `[URI.t() | String.t()]`
+  - `:session_templates` — `map()`
+  - `:routing_rules` — `[map()]`
+  - `:created_by` — `URI.t() | nil`
+  """
+  @spec create(String.t(), map()) :: {:ok, decoded()} | {:error, term()}
+  def create(name, attrs \\ %{}) when is_binary(name) and name != "" do
+    uri_str = "workspace://#{name}"
+
+    changeset =
+      %__MODULE__{}
+      |> Ecto.Changeset.change(%{
+        name: name,
+        uri: uri_str,
+        member_uris: encode_uris(Map.get(attrs, :members, [])),
+        session_templates: Jason.encode!(Map.get(attrs, :session_templates, %{})),
+        routing_rules: Jason.encode!(Map.get(attrs, :routing_rules, [])),
+        created_by: uri_to_string_or_nil(Map.get(attrs, :created_by))
+      })
+      |> Ecto.Changeset.unique_constraint(:name, name: :workspaces_name_index)
+      |> Ecto.Changeset.unique_constraint(:uri, name: :workspaces_uri_index)
+
+    case Repo.insert(changeset) do
+      {:ok, inserted} -> {:ok, decode(inserted)}
+      err -> err
+    end
+  end
+
+  @spec update_members(String.t(), [URI.t() | String.t()]) ::
+          {:ok, decoded()} | {:error, term()}
+  def update_members(name, members) when is_binary(name) and is_list(members) do
+    update_field(name, :member_uris, encode_uris(members))
+  end
+
+  @spec update_templates(String.t(), map()) :: {:ok, decoded()} | {:error, term()}
+  def update_templates(name, templates) when is_binary(name) and is_map(templates) do
+    update_field(name, :session_templates, Jason.encode!(templates))
+  end
+
+  @spec update_routing_rules(String.t(), [map()]) :: {:ok, decoded()} | {:error, term()}
+  def update_routing_rules(name, rules) when is_binary(name) and is_list(rules) do
+    update_field(name, :routing_rules, Jason.encode!(rules))
+  end
+
+  defp update_field(name, field, value) do
+    case Repo.get_by(__MODULE__, name: name) do
+      nil ->
+        {:error, :not_found}
+
+      row ->
+        row
+        |> Ecto.Changeset.change(%{field => value})
+        |> Repo.update()
+        |> case do
+          {:ok, updated} -> {:ok, decode(updated)}
+          err -> err
+        end
+    end
+  end
+
+  @spec delete(String.t()) :: :ok | {:error, term()}
+  def delete(name) when is_binary(name) do
+    case Repo.get_by(__MODULE__, name: name) do
+      nil ->
+        :ok
+
+      row ->
+        case Repo.delete(row) do
+          {:ok, _} -> :ok
+          err -> err
+        end
+    end
+  end
+
+  # --- read paths ----------------------------------------------------
+
+  @spec get_by_name(String.t()) :: decoded() | nil
+  def get_by_name(name) when is_binary(name) do
+    case Repo.get_by(__MODULE__, name: name) do
+      nil -> nil
+      row -> decode(row)
+    end
+  end
+
+  @spec list_all() :: [decoded()]
+  def list_all do
+    Repo.all(from w in __MODULE__, order_by: w.name)
+    |> Enum.map(&decode/1)
+  end
+
+  # --- encoding helpers ----------------------------------------------
+
+  defp encode_uris(uris) do
+    uris
+    |> Enum.map(&uri_to_string/1)
+    |> Jason.encode!()
+  end
+
+  defp uri_to_string(%URI{} = u), do: URI.to_string(u)
+  defp uri_to_string(s) when is_binary(s), do: s
+
+  defp uri_to_string_or_nil(nil), do: nil
+  defp uri_to_string_or_nil(other), do: uri_to_string(other)
+
+  defp decode(%__MODULE__{} = row) do
+    %{
+      id: row.id,
+      name: row.name,
+      uri: URI.parse(row.uri),
+      members: row.member_uris |> Jason.decode!() |> Enum.map(&URI.parse/1),
+      session_templates: Jason.decode!(row.session_templates),
+      routing_rules: Jason.decode!(row.routing_rules),
+      created_by: parse_uri_or_nil(row.created_by)
+    }
+  end
+
+  defp parse_uri_or_nil(nil), do: nil
+  defp parse_uri_or_nil(s) when is_binary(s), do: URI.parse(s)
+end

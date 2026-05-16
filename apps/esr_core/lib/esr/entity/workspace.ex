@@ -52,8 +52,11 @@ defmodule Esr.Entity.Workspace do
   @impl Esr.Kind
   def behaviors, do: [Esr.Behavior.Workspace]
 
-  # Phase 4b: ephemeral (in-memory). Phase 4c flips to snapshot
-  # once the workspaces table + Loader exist.
+  # Stays `:ephemeral` even after Phase 4c persistence ships — the
+  # Kind itself is rehydrated by `Esr.Workspace.Loader` from the
+  # `workspaces` SQLite table (managed via `Esr.Workspace.Store`),
+  # not by per-Kind snapshot. Per Phase 4 D6/D7: config persistence
+  # vs runtime-state snapshot are different things.
   @impl Esr.Kind
   def persistence, do: :ephemeral
 
