@@ -36,7 +36,12 @@ defmodule EsrCore.Application do
       # `workspace://<name>` Kinds. Phase 4c's Loader queries the
       # `workspaces` table at app start and dispatches spawn_workspace
       # per row.
-      {DynamicSupervisor, name: Esr.Workspace.Supervisor, strategy: :one_for_one}
+      {DynamicSupervisor, name: Esr.Workspace.Supervisor, strategy: :one_for_one},
+
+      # ⑧ Snapshot async writer (Phase 4-completion Spec 04) — handles
+      # `:periodic` strategy; `:on_change` / `:on_terminate` go through
+      # `Esr.Kind.Snapshot.save_now/3` synchronously.
+      Esr.Snapshot.Writer
     ]
 
     result = Supervisor.start_link(children, strategy: :one_for_one, name: EsrCore.Supervisor)

@@ -44,6 +44,10 @@ defmodule Esr.Entity.Agent do
   @impl Esr.Kind
   def behaviors, do: [Esr.Behavior.Chat, Esr.Behavior.Identity]
 
+  # Phase 4-completion Spec 04: `:on_terminate` so granted Identity
+  # caps survive graceful shutdown. Abrupt crash still loses them
+  # (bridge re-announce re-creates Agent fresh; acceptable). Bump to
+  # `:on_change` in Phase 5 once Agent caps see real promotion volume.
   @impl Esr.Kind
-  def persistence, do: :ephemeral
+  def persistence, do: :on_terminate
 end

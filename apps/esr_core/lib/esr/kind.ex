@@ -29,11 +29,14 @@ defmodule Esr.Kind do
           :ephemeral
           | {:snapshot, :on_change}
           | {:snapshot, :periodic, ms :: pos_integer()}
+          | :on_terminate
+          | :external
 
   @callback type_name() :: atom()
   @callback behaviors() :: [module()]
   @callback persistence() :: persistence_policy()
   @callback uri_from_args(args :: map()) :: URI.t()
+  @callback snapshot_version() :: non_neg_integer()
 
-  @optional_callbacks [uri_from_args: 1]
+  @optional_callbacks [uri_from_args: 1, snapshot_version: 0]
 end
