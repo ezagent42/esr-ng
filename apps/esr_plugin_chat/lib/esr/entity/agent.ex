@@ -37,8 +37,12 @@ defmodule Esr.Entity.Agent do
   @impl Esr.Kind
   def type_name, do: :agent
 
+  # Phase 3d: Agent carries Identity Behavior alongside Chat. Default
+  # initial_caps is empty (Agent has no authority to initiate; chat
+  # receive only). Operators can grant caps via Identity invoke if
+  # they want to elevate a specific Agent.
   @impl Esr.Kind
-  def behaviors, do: [Esr.Behavior.Chat]
+  def behaviors, do: [Esr.Behavior.Chat, Esr.Behavior.Identity]
 
   @impl Esr.Kind
   def persistence, do: :ephemeral

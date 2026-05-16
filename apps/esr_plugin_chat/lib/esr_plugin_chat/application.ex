@@ -54,7 +54,7 @@ defmodule EsrPluginChat.Application do
 
   alias Esr.{BehaviorRegistry, Invocation, RoutingRegistry}
   alias Esr.Entity.{Agent, Session, User}
-  alias Esr.Behavior.Chat
+  alias Esr.Behavior.{Chat, Identity}
   alias EsrPluginChat.Routing.{MentionRouting, SessionRouting}
 
   @impl true
@@ -66,7 +66,11 @@ defmodule EsrPluginChat.Application do
       {DynamicSupervisor, name: EsrPluginChat.AgentSupervisor, strategy: :one_for_one},
       {DynamicSupervisor, name: EsrPluginChat.SessionSupervisor, strategy: :one_for_one},
       kind_server_spec(:session_main, Session, Session.default_uri()),
-      kind_server_spec(:user_admin, User, User.admin_uri())
+      # Phase 3d (#B1): admin User spawn passes initial_caps so Identity
+      # slice starts with admin's all-cap MapSet (vs. empty default).
+      kind_server_spec(:user_admin, User, User.admin_uri(), %{
+        initial_caps: User.admin_caps()
+      })
     ]
 
     case Supervisor.start_link(children, strategy: :one_for_one, name: __MODULE__) do
@@ -86,6 +90,14 @@ defmodule EsrPluginChat.Application do
     :ok = BehaviorRegistry.register(Session, :leave, Chat)
     :ok = BehaviorRegistry.register(User, :receive, Chat)
     :ok = BehaviorRegistry.register(Agent, :receive, Chat)
+
+    # Phase 3d: Identity Behavior actions on every Entity Kind that
+    # carries it (User + Agent). Adapters call list_caps/has_cap? via
+    # dispatch to read live cap state from slice.
+    :ok = BehaviorRegistry.register(User, :list_caps, Identity)
+    :ok = BehaviorRegistry.register(User, :has_cap?, Identity)
+    :ok = BehaviorRegistry.register(Agent, :list_caps, Identity)
+    :ok = BehaviorRegistry.register(Agent, :has_cap?, Identity)
     :ok
   end
 
@@ -100,9 +112,13 @@ defmodule EsrPluginChat.Application do
     :ok
   end
 
-  defp kind_server_spec(child_id, kind_module, uri) do
+  # Phase 3d (#B1): accept extra_args map so callers can pass keys like
+  # `:initial_caps` for Identity init_slice. Merges into `%{uri: uri}`.
+  defp kind_server_spec(child_id, kind_module, uri, extra_args \\ %{}) do
+    args = Map.merge(%{uri: uri}, extra_args)
+
     Supervisor.child_spec(
-      {Esr.Kind.Server, {kind_module, %{uri: uri}}},
+      {Esr.Kind.Server, {kind_module, args}},
       id: child_id
     )
   end

@@ -7,8 +7,8 @@ defmodule Esr.Entity.AgentTest do
       assert Agent.type_name() == :agent
     end
 
-    test "behaviors/0 returns [Esr.Behavior.Chat]" do
-      assert Agent.behaviors() == [Esr.Behavior.Chat]
+    test "behaviors/0 returns [Esr.Behavior.Chat, Esr.Behavior.Identity]" do
+      assert Agent.behaviors() == [Esr.Behavior.Chat, Esr.Behavior.Identity]
     end
 
     test "persistence/0 is :ephemeral" do

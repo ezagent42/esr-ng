@@ -56,14 +56,18 @@ defmodule Esr.Entity.User do
     ])
   end
 
-  # --- Esr.Kind callbacks (Phase 1 stub) -----------------------------
+  # --- Esr.Kind callbacks -----------------------------------------------
   @behaviour Esr.Kind
 
   @impl Esr.Kind
   def type_name, do: :user
 
+  # Phase 3d: User Kinds carry Identity Behavior so caps live in slice
+  # state (Decision #24). admin_caps/0 above still provides the
+  # bootstrap value — chat plugin passes it as initial_caps when
+  # spawning admin User.
   @impl Esr.Kind
-  def behaviors, do: []
+  def behaviors, do: [Esr.Behavior.Identity]
 
   @impl Esr.Kind
   def persistence, do: {:snapshot, :on_change}
