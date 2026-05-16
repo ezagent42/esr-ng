@@ -41,7 +41,9 @@ defmodule EsrWebLiveview.AdminLiveTest do
     html = render(lv)
 
     assert html =~ "agent://echo/behavior/echo/say"
-    assert html =~ "stub_grant"
+    # Phase 3d hard flip: :stub_grant is gone; admin's all-cap matches
+    # produce "granted" in the audit column.
+    assert html =~ "granted"
   end
 
   test "Manual dispatch form runs an arbitrary invocation", %{conn: conn} do
