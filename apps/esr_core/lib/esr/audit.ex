@@ -38,7 +38,11 @@ defmodule Esr.Audit do
     # Phase 3d quality hotfix: chat reply dispatch fail visibility
     # (was silent before — real-claude e2e exposed wrong session_uri
     # disappearing into the void).
-    [:esr, :chat, :reply_dispatch_failed]
+    [:esr, :chat, :reply_dispatch_failed],
+    # Phase 4-completion Spec 04: per-Kind state persistence events.
+    [:esr, :persistence, :restored],
+    [:esr, :persistence, :written],
+    [:esr, :persistence, :failed]
   ]
 
   @doc """
@@ -155,6 +159,37 @@ defmodule Esr.Audit do
           reason: inspect(Map.get(meta, :reason)),
           message_uri: Map.get(meta, :message_uri)
         }),
+      inserted_at: DateTime.utc_now()
+    }
+  end
+
+  # Phase 4-completion Spec 04: persistence telemetry as audit rows so
+  # operators see snapshot lifecycle in the same /admin Audit Log stream.
+  # Defensive target fallback: build_row must never produce NULL target
+  # (NOT NULL constraint on invocations.target).
+  defp build_row([:esr, :persistence, phase], measurements, meta)
+       when phase in [:restored, :written, :failed] do
+    %{
+      trace_id: nil,
+      caller: nil,
+      target: Map.get(meta, :uri) || "snapshot://unknown",
+      action: "snapshot.#{phase}",
+      args: nil,
+      result:
+        Jason.encode!(%{
+          slices: Map.get(measurements, :slices),
+          bytes: Map.get(measurements, :bytes),
+          kind_type: Map.get(meta, :kind_type),
+          version: Map.get(meta, :version)
+        }),
+      duration_us: 0,
+      authz: "n/a",
+      exception:
+        if phase == :failed do
+          Jason.encode!(%{reason: Map.get(meta, :reason)})
+        else
+          nil
+        end,
       inserted_at: DateTime.utc_now()
     }
   end

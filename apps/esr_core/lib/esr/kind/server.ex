@@ -73,11 +73,23 @@ defmodule Esr.Kind.Server do
     case Esr.KindRegistry.put_new(uri_str, self()) do
       :ok ->
         :ok = Esr.ReadyGate.put(uri_str, :not_ready)
+        schedule_periodic_snapshot(kind_module)
         {:ok, state, {:continue, :announce_ready}}
 
       {:error, {:already_registered, _other_pid}} ->
         # Let-it-crash — duplicate spawn is a bug at the caller layer.
         {:stop, {:already_registered, uri_str}}
+    end
+  end
+
+  defp schedule_periodic_snapshot(kind_module) do
+    case kind_module.persistence() do
+      {:snapshot, :periodic, ms} when is_integer(ms) and ms > 0 ->
+        Process.send_after(self(), :snapshot_tick, ms)
+        :ok
+
+      _ ->
+        :ok
     end
   end
 
@@ -148,6 +160,26 @@ defmodule Esr.Kind.Server do
   # everything (P2-D2 K-path principle: one Behavior, multiple Kinds —
   # not a Kind-wide message bus).
   @impl true
+  def handle_info(:snapshot_tick, %{kind: kind_module, uri: uri, state: slice_state} = wrapper) do
+    # Phase 4-completion: periodic strategy — write via Writer (async)
+    # then re-schedule. If Writer isn't running (e.g. test envs without
+    # full sup tree), fall back to sync save_now to remain useful.
+    case kind_module.persistence() do
+      {:snapshot, :periodic, ms} ->
+        if Process.whereis(Esr.Snapshot.Writer) do
+          Esr.Snapshot.Writer.async_save(uri, kind_module, slice_state)
+        else
+          _ = Esr.Kind.Snapshot.save_now(uri, kind_module, slice_state)
+        end
+
+        Process.send_after(self(), :snapshot_tick, ms)
+        {:noreply, wrapper}
+
+      _ ->
+        {:noreply, wrapper}
+    end
+  end
+
   def handle_info(message, %{kind: kind_module, uri: self_uri, state: slice_state} = wrapper) do
     new_slice_state =
       kind_module.behaviors()
@@ -174,8 +206,24 @@ defmodule Esr.Kind.Server do
   end
 
   @impl true
-  def terminate(_reason, _state) do
-    # Phase 1: no-op; Phase 3 wires snapshot-on-shutdown here.
-    :ok
+  def terminate(_reason, %{kind: kind_module, uri: uri, state: slice_state}) do
+    # Phase 4-completion: :on_terminate strategy writes on graceful
+    # shutdown. Use try/rescue so a failing save never prevents the
+    # Kind from going down.
+    case kind_module.persistence() do
+      :on_terminate ->
+        try do
+          _ = Esr.Kind.Snapshot.save_now(uri, kind_module, slice_state)
+        rescue
+          _ -> :ok
+        end
+
+        :ok
+
+      _ ->
+        :ok
+    end
   end
+
+  def terminate(_reason, _state), do: :ok
 end

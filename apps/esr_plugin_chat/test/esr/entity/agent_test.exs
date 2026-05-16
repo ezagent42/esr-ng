@@ -11,8 +11,8 @@ defmodule Esr.Entity.AgentTest do
       assert Agent.behaviors() == [Esr.Behavior.Chat, Esr.Behavior.Identity]
     end
 
-    test "persistence/0 is :ephemeral" do
-      assert Agent.persistence() == :ephemeral
+    test "persistence/0 is :on_terminate (Phase 4-completion Spec 04 §2.I)" do
+      assert Agent.persistence() == :on_terminate
     end
   end
 end
