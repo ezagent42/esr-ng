@@ -47,6 +47,8 @@ defmodule Esr.Routing.RuleStore do
     # of URI strings; loaded into `applies_to_users` field via helper.
     # Empty list = applies to every sender.
     field :applies_to_users_json, :string, source: :applies_to_users, default: "[]"
+    # Phase 6 PR 8: per-rule workspace scope. nil = applies globally.
+    field :workspace_uri, :string
   end
 
   @type t :: %__MODULE__{
@@ -84,6 +86,7 @@ defmodule Esr.Routing.RuleStore do
     receivers_str = Enum.map(receivers, &uri_to_string/1)
     source = Keyword.get(opts, :source, @admin)
     applies_to_users = Keyword.get(opts, :applies_to_users, []) |> Enum.map(&uri_to_string/1)
+    workspace_uri = Keyword.get(opts, :workspace_uri) |> uri_to_string_or_nil()
 
     rule = %__MODULE__{
       table_name: Atom.to_string(table_name_atom),
@@ -93,7 +96,8 @@ defmodule Esr.Routing.RuleStore do
       created_at: DateTime.utc_now(),
       source: source,
       enabled: true,
-      applies_to_users_json: Jason.encode!(applies_to_users)
+      applies_to_users_json: Jason.encode!(applies_to_users),
+      workspace_uri: workspace_uri
     }
 
     Repo.insert(rule)
@@ -149,7 +153,8 @@ defmodule Esr.Routing.RuleStore do
           # user filter" for those.
           value = %{
             receivers: row.receivers,
-            applies_to_users: applies_to_users(row)
+            applies_to_users: applies_to_users(row),
+            workspace_uri: row.workspace_uri
           }
 
           Esr.RoutingRegistry.put(table_name_atom, matcher_tuple, value)
