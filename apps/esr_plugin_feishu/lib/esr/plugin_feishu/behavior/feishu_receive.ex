@@ -50,24 +50,102 @@ defmodule EsrPluginFeishu.Behavior.FeishuReceive do
       {:ok, slice, %{skipped: :self_echo}}
     else
       text = extract_text(msg.body)
+      attachments = extract_attachments(msg.body)
       sender_label = sender_label(msg.sender)
       source_session = source_session_label(ctx)
-      formatted = "[#{source_session} | #{sender_label}] #{text}"
+      prefix = "[#{source_session} | #{sender_label}] "
 
-      case EsrPluginFeishu.Client.send_text(chat_id, formatted) do
-        :ok ->
+      # Phase 6 PR 14: send each attachment as the matching Feishu
+      # message_type. Text-only path stays unchanged. Mixed messages
+      # (text + attachments) send the text first then attachments.
+      text_result =
+        if text != "" do
+          formatted = prefix <> text
+          EsrPluginFeishu.Client.send_text(chat_id, formatted)
+        else
+          :ok
+        end
+
+      attachment_results =
+        Enum.map(attachments, fn att ->
+          send_attachment(chat_id, att, prefix)
+        end)
+
+      ok_count = Enum.count(attachment_results, &(&1 == :ok))
+      failures = Enum.filter(attachment_results, &match?({:error, _}, &1))
+
+      cond do
+        text_result == :ok and failures == [] ->
           {:ok,
            %{
              slice
              | send_calls: slice.send_calls + 1,
-               total_bytes: slice.total_bytes + byte_size(formatted)
-           }, %{bytes_sent: byte_size(formatted)}}
+               total_bytes:
+                 slice.total_bytes + byte_size(text || "") +
+                   Enum.sum(Enum.map(attachments, &(&1[:size_bytes] || 0)))
+           }, %{bytes_sent: byte_size(text || ""), attachments_sent: ok_count}}
 
-        {:error, reason} = err ->
-          Logger.warning("feishu_chat #{chat_id}: send_text failed: #{inspect(reason)}")
-          err
+        true ->
+          Logger.warning(
+            "feishu_chat #{chat_id}: send failures text=#{inspect(text_result)} attachments=#{inspect(failures)}"
+          )
+
+          {:error, {:partial_send, text_result, failures}}
       end
     end
+  end
+
+  defp send_attachment(chat_id, %{type: type, source: "feishu", file_key: file_key} = att, prefix)
+       when is_binary(file_key) do
+    # Inbound attachment from Feishu (sent by user). Forward by the
+    # original file_key — Feishu accepts it without re-upload as long
+    # as the same app owns both ends.
+    case type do
+      :image ->
+        _ = EsrPluginFeishu.Client.send_text(chat_id, prefix <> "[image: #{att[:name]}]")
+        EsrPluginFeishu.Client.send_image(chat_id, file_key)
+
+      :file ->
+        _ = EsrPluginFeishu.Client.send_text(chat_id, prefix <> "[file: #{att[:name]}]")
+        EsrPluginFeishu.Client.send_file(chat_id, file_key)
+
+      _ ->
+        EsrPluginFeishu.Client.send_text(
+          chat_id,
+          prefix <> "[unsupported attachment type=#{type} name=#{att[:name]}]"
+        )
+    end
+  end
+
+  defp send_attachment(chat_id, %{type: type, local_path: path, name: name} = att, prefix)
+       when is_binary(path) do
+    # Outbound attachment from CC / agent — upload bytes from local path.
+    case type do
+      :image ->
+        with {:ok, image_key} <- EsrPluginFeishu.Client.upload_image(path) do
+          _ = EsrPluginFeishu.Client.send_text(chat_id, prefix <> "[image: #{name}]")
+          EsrPluginFeishu.Client.send_image(chat_id, image_key)
+        end
+
+      :file ->
+        with {:ok, file_key} <- EsrPluginFeishu.Client.upload_file(path, name) do
+          _ = EsrPluginFeishu.Client.send_text(chat_id, prefix <> "[file: #{name}]")
+          EsrPluginFeishu.Client.send_file(chat_id, file_key)
+        end
+
+      _ ->
+        EsrPluginFeishu.Client.send_text(
+          chat_id,
+          prefix <> "[unsupported outbound attachment type=#{type} path=#{path}]"
+        )
+    end
+  end
+
+  defp send_attachment(chat_id, att, prefix) do
+    EsrPluginFeishu.Client.send_text(
+      chat_id,
+      prefix <> "[attachment metadata only: #{inspect(att)}]"
+    )
   end
 
   @impl Esr.Behavior
@@ -102,7 +180,26 @@ defmodule EsrPluginFeishu.Behavior.FeishuReceive do
 
   defp extract_text(%{text: t}) when is_binary(t), do: t
   defp extract_text(%{"text" => t}) when is_binary(t), do: t
+  defp extract_text(other) when is_map(other), do: ""
   defp extract_text(other), do: inspect(other)
+
+  defp extract_attachments(%{attachments: list}) when is_list(list), do: list
+  defp extract_attachments(%{"attachments" => list}) when is_list(list), do: normalize(list)
+  defp extract_attachments(_), do: []
+
+  defp normalize(list), do: Enum.map(list, &normalize_one/1)
+
+  defp normalize_one(%{} = m) do
+    Map.new(m, fn
+      {k, v} when is_binary(k) -> {String.to_atom(k), normalize_value(k, v)}
+      kv -> kv
+    end)
+  end
+
+  defp normalize_one(other), do: other
+
+  defp normalize_value("type", v) when is_binary(v), do: String.to_atom(v)
+  defp normalize_value(_, v), do: v
 
   defp sender_label(%URI{} = u), do: URI.to_string(u)
   defp sender_label(other), do: inspect(other)
