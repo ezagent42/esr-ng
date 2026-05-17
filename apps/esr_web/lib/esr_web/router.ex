@@ -82,6 +82,11 @@ defmodule EsrWeb.Router do
     post "/cc-events", CcEventsController, :report
   end
 
+  # Phase 5 PR 6: Feishu webhook receiver. The ONLY touch
+  # esr_plugin_feishu makes to esr_web — explicit exception per SPEC v2
+  # north star ("beyond webhook route registration").
+  forward "/api/feishu/webhook", EsrPluginFeishu.WebhookPlug
+
   # SSE route — separate scope because its accepts header differs.
   scope "/api", EsrWeb do
     pipe_through :sse

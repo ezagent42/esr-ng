@@ -65,6 +65,10 @@ defmodule EsrWeb.MixProject do
       # routing only, not for code calls.
       {:esr_web_liveview, in_umbrella: true},
       {:esr_plugin_echo, in_umbrella: true},
+      # Phase 5 PR 6: Feishu webhook route forwards to
+      # EsrPluginFeishu.WebhookPlug — needed at compile time so the
+      # router macro resolves the module atom.
+      {:esr_plugin_feishu, in_umbrella: true},
       {:jason, "~> 1.2"},
       {:bandit, "~> 1.5"}
     ]

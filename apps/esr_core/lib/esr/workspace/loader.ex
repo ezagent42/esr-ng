@@ -48,8 +48,23 @@ defmodule Esr.Workspace.Loader do
   """
   @spec load_all() :: [{String.t(), [{URI.t(), term()}]}]
   def load_all do
-    Workspace.Store.list_all()
-    |> Enum.map(&load_one/1)
+    # Phase 5 PR 6: defensive — when multiple plugin Applications all
+    # call load_all/0 at boot (Decision #112 pattern), the Repo's
+    # sandbox pool can saturate in test env. A boot-time DB unavailable
+    # state shouldn't crash the whole umbrella — log and return [].
+    # The plugin's later Loader.load_all runs catch up; tests checkout
+    # connections explicitly per Sandbox docs.
+    try do
+      Workspace.Store.list_all() |> Enum.map(&load_one/1)
+    rescue
+      e in [DBConnection.ConnectionError, DBConnection.OwnershipError] ->
+        Logger.warning(
+          "Workspace.Loader.load_all: DB unavailable at boot (#{inspect(e.__struct__)}); " <>
+            "skipping — plugin re-runs or per-test setup will pick up Workspaces"
+        )
+
+        []
+    end
   end
 
   defp load_one(%{name: name} = decoded) do
