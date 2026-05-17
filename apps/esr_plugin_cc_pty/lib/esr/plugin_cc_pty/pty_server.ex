@@ -120,6 +120,20 @@ defmodule Esr.PluginCcPty.PtyServer do
     end
   end
 
+  @doc """
+  Write bytes to the PTY's stdin (called by Esr.Behavior.Pty.invoke(:write, ...)).
+
+  Returns `:ok` on success or `{:error, reason}`. Test_mode short-circuits
+  to `:ok` without invoking erlexec.
+  """
+  def write_input(pid, bytes) when is_pid(pid) and is_binary(bytes) do
+    GenServer.call(pid, {:write_input, bytes}, 1000)
+  end
+
+  @doc "PubSub topic for an agent's PTY stdout/stderr stream (Phase 5 PR 4)."
+  def output_topic(%URI{} = agent_uri),
+    do: "pty:output:" <> URI.to_string(agent_uri)
+
   @doc "List all live PtyServer agent_uris under the DynamicSupervisor."
   def list_agents do
     sup_pid = Process.whereis(EsrPluginCcPty.PtyServerSupervisor)
@@ -234,6 +248,32 @@ defmodule Esr.PluginCcPty.PtyServer do
   # --- erlexec messages -----------------------------------------------
 
   @impl true
+  def handle_call({:write_input, _bytes}, _from, %__MODULE__{test_mode: true} = state) do
+    # Tests record bytes_written in slice without invoking erlexec; the
+    # invariant test asserts dispatch path was followed, not that the
+    # bytes physically reached a real PTY.
+    {:reply, :ok, state}
+  end
+
+  def handle_call({:write_input, bytes}, _from, %__MODULE__{exec_pid: exec_pid} = state)
+      when exec_pid != nil do
+    try do
+      :exec.send(exec_pid, bytes)
+      {:reply, :ok, state}
+    catch
+      kind, reason ->
+        Logger.warning(
+          "PtyServer.write_input failed (#{inspect(kind)}, #{inspect(reason)})"
+        )
+
+        {:reply, {:error, {kind, reason}}, state}
+    end
+  end
+
+  def handle_call({:write_input, _bytes}, _from, state),
+    do: {:reply, {:error, :pty_not_alive}, state}
+
+  @impl true
   def handle_info({:DOWN, _ref, :process, _pid, reason}, state) do
     Logger.warning(
       "PtyServer: child process exited for #{URI.to_string(state.agent_uri)}: #{inspect(reason)}"
@@ -248,6 +288,14 @@ defmodule Esr.PluginCcPty.PtyServer do
 
     Logger.debug(
       "PtyServer[#{state.os_pid}] #{stream}: #{chunk |> AnsiStrip.strip() |> String.trim_trailing()}"
+    )
+
+    # Phase 5 PR 4: fan out raw chunk to LV Pty-Web subscribers
+    # (xterm renders escape sequences directly — no ANSI strip here).
+    Phoenix.PubSub.broadcast(
+      EsrCore.PubSub,
+      output_topic(state.agent_uri),
+      {:pty_output, state.agent_uri, chunk}
     )
 
     new_buffer = state.pty_buffer <> chunk
