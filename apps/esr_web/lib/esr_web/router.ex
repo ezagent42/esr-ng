@@ -68,6 +68,11 @@ defmodule EsrWeb.Router do
     post "/cc-bridge/announce", CcBridgeAnnounceController, :announce
     delete "/cc-bridge/announce/:bridge_id", CcBridgeAnnounceController, :disconnect
     post "/cc-bridge/reply", CcBridgeAnnounceController, :reply
+
+    # Phase 4-plus follow-up (2026-05-17): CC hook error reporting.
+    # No auth — see CcEventsController moduledoc for trust-boundary
+    # rationale (the agent the hook reports about may be down).
+    post "/cc-events", CcEventsController, :report
   end
 
   # SSE route — separate scope because its accepts header differs.

@@ -12,9 +12,40 @@ defmodule EsrWebLiveview.Admin.DebugPanel do
   attr :connected_bridges, :list, required: true
   attr :form, :map, required: true
   attr :invocations_stream, :any, required: true
+  attr :cc_events, :list, default: []
 
   def debug_panel(assigns) do
     ~H"""
+    <section :if={@cc_events != []} id="cc-events-panel" style="margin-top: 24px;">
+      <h2 style="font-size: 16px; font-weight: 500; margin: 0 0 8px 0;">
+        CC Events (hook-reported, last 20)
+      </h2>
+      <p style="font-size: 12px; color: #57606a; margin: 0 0 8px 0;">
+        Errors reported directly by CC hooks via <code>POST /api/cc-events</code> —
+        bypasses the agent's dispatch path so failures survive when the agent itself is down.
+      </p>
+      <table id="cc-events-table" style="width: 100%; font-size: 13px; border-collapse: collapse;">
+        <thead>
+          <tr style="border-bottom: 1px solid #d1d5da;">
+            <th style="text-align: left; padding: 6px 0;">level</th>
+            <th style="text-align: left;">bridge_id</th>
+            <th style="text-align: left;">type</th>
+            <th style="text-align: left;">text</th>
+            <th style="text-align: left;">at</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr :for={ev <- @cc_events} style={cc_event_row_style(ev.level)}>
+            <td style="padding: 4px 6px; font-weight: 600;">{ev.level}</td>
+            <td style="font-family: monospace; font-size: 11px;">{ev.bridge_id}</td>
+            <td style="font-family: monospace; font-size: 11px;">{ev.type}</td>
+            <td>{ev.text}</td>
+            <td style="color: #666; font-size: 11px;">{DateTime.to_iso8601(ev.at)}</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
+
     <section id="cc-bridges" style="margin-top: 24px;">
       <h2 style="font-size: 16px; font-weight: 500; margin: 0 0 8px 0;">CC Bridges (v1 prototype)</h2>
       <p :if={@connected_bridges == []} id="bridge-empty" style="font-size: 13px; color: #57606a;">
@@ -136,4 +167,13 @@ defmodule EsrWebLiveview.Admin.DebugPanel do
 
   defp client_label(%{info: %{claude_info: %{"name" => name}}}), do: name
   defp client_label(_), do: "—"
+
+  defp cc_event_row_style("error"),
+    do: "border-bottom: 1px solid #eee; background: #ffebe9;"
+
+  defp cc_event_row_style("warning"),
+    do: "border-bottom: 1px solid #eee; background: #fff8c5;"
+
+  defp cc_event_row_style(_),
+    do: "border-bottom: 1px solid #eee; background: #ddf4ff;"
 end
