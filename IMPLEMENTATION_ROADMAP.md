@@ -61,7 +61,7 @@ phaseN git tag → 下一个 phase
 | **4** | LiveView IM 完整化 + CLI 自动派生 + View 同构 | 4a → 4b | ✅ done |
 | **4.5** | Operator/Admin Tools Maturity + Snapshot Observability + Per-rule CapBAC(in-flight 中临时插入) | 4.5-1 ... 4.5-5 | ✅ done |
 | **5** | Feishu + CC channel + Pty-Web | 5a → 5b → 5c | ✅ done w/ known gap(v1→v2 CC channel wire swap → moved to Phase 6) |
-| **6** | Production Hardening(详见 §9) | 6a → 6b → 6c → 6d | 🚧 planning |
+| **6** | Three-Layer Restructure(core / domain / plugin)+ shadcn-like UI + Python contract(详见 `phase-specs/phase6/SPEC.md`) | 6-1, 6-2, 6-3, 6-5, 6-11, 6-12 done; 6-4/6-7/6-8/6-9/6-10 moved to Phase 7 | ⚠️ partial — six PRs shipped (extraction + UI domain + applies_to_users + Python contract + closeout), CC channel v2 + multi-user surface deferred to Phase 7 |
 
 **sub-step 是 /goal 的内部 e2e gate,不是 Allen 介入点**(Decision #80):
 
