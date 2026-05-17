@@ -89,7 +89,15 @@ defmodule Esr.Behavior.Chat do
     # impl-time §write-failure; let-it-crash on Repo errors rather than
     # silently dropping the message.
     case MessageStore.write(msg, session_uri) do
-      {:ok, _stored} ->
+      {:ok, stored_msg} ->
+        # Plan B (2026-05-17): use stored_msg (which has session_uri
+        # stamped) for Resolver + downstream dispatch. The original
+        # `msg` arg has session_uri=nil at this point, which makes the
+        # new `in_session(session_uri)` matcher (introduced for Feishu
+        # binding) return false. Without this fix, in_session-scoped
+        # routing rules never fire even when the binding is correct.
+        msg = stored_msg
+
         # 2. Broadcast for in-session subscribers (LV chat stream).
         # Phase 3: include session_uri in payload so multi-session LV
         # subscribers can filter by current session.
@@ -104,13 +112,6 @@ defmodule Esr.Behavior.Chat do
         # in-session-member fan-out is now expressed as a system_default
         # rule with `receivers: ["$session_members"]` that Resolver
         # expands using the passed members list.
-        #
-        # Resolver returns the complete recipient list. Each recipient
-        # is either:
-        # - a session URI (cross-session route) → dispatch chat/send there
-        # - a non-session URI (member / agent) → dispatch chat/receive
-        #
-        # Recursion guard for the current session is inside Resolver.
         in_session_members = Map.keys(slice.members)
         recipients = Esr.Routing.Resolver.resolve(msg, session_uri, in_session_members)
 
