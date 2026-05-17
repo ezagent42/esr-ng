@@ -1,121 +1,87 @@
 defmodule Mix.Tasks.Esr do
-  @shortdoc "Auto-derived CLI for ESR Behavior actions + facade ops"
+  @shortdoc "Thin CLI shell over running ESR server (POSTs argv to /api/cli/exec)"
   @moduledoc """
-  Phase 4-completion Spec 02: top-level `mix esr` task that auto-derives
-  subcommands from `Esr.BehaviorRegistry` + `EsrCLI.FacadeRegistry`.
+  Post-Phase-5 pivot (Allen 2026-05-17): this task is a **thin shell
+  over the running server**. It does NOT boot ESR locally; instead it
+  POSTs `{argv: [...]}` to `<server>/api/cli/exec`, prints the response,
+  exits with the server-reported exit code.
+
+  This restores CLI ↔ LV runtime isomorphism: both CLI invocations
+  and LV form-submits execute inside the same BEAM that runs phx.server,
+  hit the same KindRegistry, write to the same Repo, fire the same
+  audit telemetry.
 
   ## Usage
 
-      mix esr <kind> <action> [--<arg>=<val> ...] [--as <user_uri>] [--cast] [--json]
+      mix esr <kind> <action> [--<arg>=<val> ...]
+      mix esr --help
+      mix esr help <subcommand>
 
-  Examples:
+  ## Environment
 
-      mix esr workspace add_member --workspace default --member agent://x
-      mix esr workspace create default --members user://admin,agent://x
-      mix esr user list_caps --user admin
+      ESR_SERVER_URL    base URL of running server (default http://localhost:4000)
 
-  Run `mix esr --help` for the full subcommand tree.
+  ## What if the server isn't running?
+
+  Prints a clear error + exit 5. Start phx.server then re-run.
   """
 
   use Mix.Task
 
-  alias EsrCLI.{Dispatch, Formatter, TreeBuilder}
-
   @impl Mix.Task
   def run(argv) do
-    # Boot core + plugins so registries are populated
-    boot_apps()
+    Application.ensure_all_started(:inets)
+    Application.ensure_all_started(:ssl)
 
-    spec = TreeBuilder.build()
+    server_url = System.get_env("ESR_SERVER_URL") || "http://localhost:4000"
 
-    case Optimus.parse(spec, argv) do
-      {:ok, _parsed_top_no_subcommand} ->
-        IO.puts(Optimus.help(spec))
-        exit_with(0)
+    case post_exec(server_url, argv) do
+      {:ok, %{"output" => output, "exit_code" => code}} ->
+        IO.write(output)
+        exit_with(code)
 
-      {:ok, subcommand_path, parsed} ->
-        handle_subcommand(subcommand_path, parsed)
+      {:error, :server_not_running} ->
+        IO.puts(:stderr,
+          "error: ESR server not running at #{server_url}\n" <>
+            "       start it with: cd " <>
+            File.cwd!() <> " && mix phx.server\n" <>
+            "       or set ESR_SERVER_URL to point at the running instance"
+        )
 
-      {:error, _subcommand_path, errors} ->
-        Enum.each(errors, fn e -> IO.puts(:stderr, "error: #{e}") end)
-        exit_with(2)
+        exit_with(5)
 
-      {:error, errors} when is_list(errors) ->
-        Enum.each(errors, fn e -> IO.puts(:stderr, "error: #{e}") end)
-        exit_with(2)
-
-      :help ->
-        IO.puts(Optimus.help(spec))
-        exit_with(0)
-
-      {:help, subcommand_path} ->
-        sub_spec = Optimus.fetch_subcommand(spec, subcommand_path)
-        IO.puts(Optimus.help(sub_spec))
-        exit_with(0)
-
-      :version ->
-        IO.puts("esr 0.1.0")
-        exit_with(0)
+      {:error, reason} ->
+        IO.puts(:stderr, "error: #{inspect(reason)}")
+        exit_with(1)
     end
   end
 
-  defp handle_subcommand([kind_atom], _parsed) do
-    # User typed `mix esr workspace` with no action — print subcommand help
-    spec = TreeBuilder.build()
-    sub = Optimus.fetch_subcommand(spec, [kind_atom])
-    IO.puts(Optimus.help(sub))
-    exit_with(0)
-  end
+  defp post_exec(server_url, argv) do
+    body = Jason.encode!(%{argv: argv})
 
-  defp handle_subcommand([kind_atom, action_atom], parsed) do
-    # Two paths: Behavior action OR facade op
-    case find_behavior_for(kind_atom, action_atom) do
-      {:ok, kind_module, behavior_module} ->
-        result = Dispatch.run_action(kind_module, behavior_module, action_atom, parsed)
-        json? = Map.get(parsed.flags, :json, false)
-        exit_code = Formatter.render(result, json?)
-        exit_with(exit_code)
+    request =
+      {String.to_charlist(server_url <> "/api/cli/exec"),
+       [{~c"Content-Type", ~c"application/json"}], ~c"application/json", body}
 
-      :error ->
-        # Try facade op
-        result = Dispatch.run_facade(kind_atom, action_atom, parsed)
-        json? = Map.get(parsed.flags, :json, false)
-        exit_code = Formatter.render(result, json?)
-        exit_with(exit_code)
+    case :httpc.request(:post, request,
+           [{:timeout, 30_000}, {:connect_timeout, 2_000}],
+           []
+         ) do
+      {:ok, {{_, 200, _}, _, resp}} ->
+        Jason.decode(to_string(resp))
+
+      {:ok, {{_, status, _}, _, resp}} ->
+        {:error, {:http_status, status, to_string(resp)}}
+
+      {:error, {:failed_connect, _}} ->
+        {:error, :server_not_running}
+
+      {:error, reason} ->
+        {:error, {:http_error, reason}}
     end
-  end
-
-  defp handle_subcommand(other, _parsed) do
-    IO.puts(:stderr, "error: unknown subcommand path: #{inspect(other)}")
-    exit_with(2)
-  end
-
-  defp find_behavior_for(kind_atom, action_atom) do
-    triples = Esr.BehaviorRegistry.list_all()
-
-    Enum.find_value(triples, :error, fn {{kind_module, action}, behavior_module} ->
-      if kind_module.type_name() == kind_atom and action == action_atom do
-        {:ok, kind_module, behavior_module}
-      else
-        nil
-      end
-    end)
-  end
-
-  defp boot_apps do
-    {:ok, _} = Application.ensure_all_started(:esr_core)
-    plugins = Application.get_env(:esr_core, :cli_plugins, [:esr_plugin_echo, :esr_plugin_chat])
-
-    Enum.each(plugins, fn app ->
-      _ = Application.ensure_all_started(app)
-    end)
-
-    {:ok, _} = Application.ensure_all_started(:esr_cli)
-    :ok
   end
 
   defp exit_with(code) when is_integer(code) do
-    # In test env, raise instead of System.halt so ExUnit can catch.
     if Mix.env() == :test do
       throw({:cli_exit, code})
     else

@@ -80,6 +80,12 @@ defmodule EsrWeb.Router do
     # No auth — see CcEventsController moduledoc for trust-boundary
     # rationale (the agent the hook reports about may be down).
     post "/cc-events", CcEventsController, :report
+
+    # Post-Phase-5 fix (Allen 2026-05-17): CLI server-side entry point.
+    # `mix esr` is a thin shell that POSTs argv here; the server-side
+    # EsrCLI.Exec.exec/1 runs in the SAME BEAM as LV — restores CLI ↔ LV
+    # runtime isomorphism (Roadmap §1.4). See CliController moduledoc.
+    post "/cli/exec", CliController, :exec
   end
 
   # Phase 5 PR 6: Feishu webhook receiver. The ONLY touch

@@ -18,7 +18,10 @@ defmodule EsrCLI.MixProject do
 
   def application do
     [
-      extra_applications: [:logger],
+      # :inets + :ssl for :httpc HTTP client used by remote-dispatch
+      # (Allen 2026-05-17: CLI POSTs to running server instead of
+      # local Esr.Invocation.dispatch).
+      extra_applications: [:logger, :inets, :ssl, :crypto],
       mod: {EsrCLI.Application, []}
     ]
   end
