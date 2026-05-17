@@ -33,6 +33,12 @@ defmodule EsrWebLiveview.WorkspaceAddTemplateLiveTest do
 
     {:ok, lv, _html} = live(conn, "/admin/workspaces/#{ws_name}")
 
+    # Phase 5 PR 2: select_template_class drives which form_fields render.
+    # Default is alphabetically first (cc.pty) so click session.generic.
+    lv
+    |> element("button[phx-click='select_template_class'][phx-value-class='session.generic']")
+    |> render_click()
+
     lv
     |> form("#add-template form",
       add_template: %{

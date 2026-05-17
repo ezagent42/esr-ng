@@ -36,6 +36,7 @@ defmodule Esr.Template.GenericSession do
   """
 
   @behaviour Esr.Kind.Template
+  @behaviour Esr.UI.Form
 
   require Logger
 
@@ -157,4 +158,42 @@ defmodule Esr.Template.GenericSession do
   end
 
   defp parse_uri(_), do: {:error, :not_a_string}
+
+  # --- Esr.UI.Form ---------------------------------------------------------
+
+  @impl Esr.UI.Form
+  def form_fields do
+    [
+      %{
+        name: "session_name",
+        type: :text,
+        label: "Session name",
+        required: true,
+        placeholder: "architect-review (becomes session://X)"
+      },
+      %{
+        name: "members_csv",
+        type: :text,
+        label: "Members (comma-separated URIs)",
+        required: false,
+        placeholder: "user://admin,agent://cc-architect"
+      }
+    ]
+  end
+
+  @impl Esr.UI.Form
+  def form_to_args(params) do
+    members =
+      params
+      |> Map.get("members_csv", "")
+      |> String.split(",", trim: true)
+      |> Enum.map(&String.trim/1)
+      |> Enum.reject(&(&1 == ""))
+
+    %{
+      "class" => template_name(),
+      "session_name" => Map.get(params, "session_name", ""),
+      "members" => members
+    }
+  end
 end

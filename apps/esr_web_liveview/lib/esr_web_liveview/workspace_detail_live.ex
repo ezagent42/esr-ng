@@ -32,22 +32,21 @@ defmodule EsrWebLiveview.WorkspaceDetailLive do
          |> assign(:name, name)
          |> assign(:workspace, ws)
          |> assign(:flash_error, nil)
-         |> assign(:template_mode, "form")
+         # Phase 5 PR 2: selected_class is "<template_name>" for any
+         # registered Class implementing Esr.UI.Form, or "__json__"
+         # for the JSON escape hatch. Default is first registered Class.
+         |> assign(:selected_class, default_selected_class())
+         |> assign(:form_classes, Esr.UI.Form.list_form_classes())
          |> assign(:add_form, to_form(%{"member_uri" => ""}, as: "add_member"))
-         |> assign(
-           :add_template_form,
-           to_form(
-             %{
-               "tmpl_name" => "",
-               "class" => "session.generic",
-               "session_name" => "",
-               "members_csv" => "",
-               "json" => ""
-             },
-             as: "add_template"
-           )
-         )
+         |> assign(:add_template_form, to_form(%{"tmpl_name" => ""}, as: "add_template"))
          |> assign(:registered_template_classes, Esr.TemplateRegistry.registered_template_names())}
+    end
+  end
+
+  defp default_selected_class do
+    case Esr.UI.Form.list_form_classes() do
+      [{name, _, _} | _] -> name
+      [] -> "__json__"
     end
   end
 
@@ -75,6 +74,15 @@ defmodule EsrWebLiveview.WorkspaceDetailLive do
 
   defp template_status_style(_),
     do: "font-size: 11px; color: #cf222e;"
+
+  defp input_style_for(:path),
+    do: "padding: 5px 8px; border: 1px solid #d1d5da; border-radius: 4px; font-size: 12px; font-family: monospace;"
+
+  defp input_style_for(:uri),
+    do: "padding: 5px 8px; border: 1px solid #d1d5da; border-radius: 4px; font-size: 12px; font-family: monospace;"
+
+  defp input_style_for(_),
+    do: "padding: 5px 8px; border: 1px solid #d1d5da; border-radius: 4px; font-size: 12px;"
 
   defp tmpl_mode_btn_style(true),
     do: "padding: 4px 12px; background: #0969da; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 11px;"
@@ -108,47 +116,16 @@ defmodule EsrWebLiveview.WorkspaceDetailLive do
     {:noreply, assign(socket, :flash_error, "Member URI is required.")}
   end
 
-  def handle_event("toggle_template_mode", %{"mode" => mode}, socket)
-      when mode in ["form", "json"] do
-    {:noreply, assign(socket, :template_mode, mode)}
+  # Phase 5 PR 2: Class picker drives form_fields/0 rendering.
+  def handle_event("select_template_class", %{"class" => class_name}, socket) do
+    {:noreply, assign(socket, :selected_class, class_name)}
   end
 
+  # JSON escape hatch — Class is read from JSON's "class" field.
   def handle_event(
         "add_template",
         %{"add_template" => params},
-        %{assigns: %{template_mode: "form"}} = socket
-      ) do
-    tmpl_name = Map.get(params, "tmpl_name", "") |> String.trim()
-    session_name = Map.get(params, "session_name", "") |> String.trim()
-
-    members =
-      Map.get(params, "members_csv", "")
-      |> String.split(",", trim: true)
-      |> Enum.map(&String.trim/1)
-      |> Enum.reject(&(&1 == ""))
-
-    cond do
-      tmpl_name == "" ->
-        {:noreply, assign(socket, :flash_error, "template name required")}
-
-      session_name == "" ->
-        {:noreply, assign(socket, :flash_error, "session_name required for session.generic")}
-
-      true ->
-        tmpl = %{
-          "class" => "session.generic",
-          "session_name" => session_name,
-          "members" => members
-        }
-
-        do_add_template(socket, tmpl_name, tmpl)
-    end
-  end
-
-  def handle_event(
-        "add_template",
-        %{"add_template" => params},
-        %{assigns: %{template_mode: "json"}} = socket
+        %{assigns: %{selected_class: "__json__"}} = socket
       ) do
     tmpl_name = Map.get(params, "tmpl_name", "") |> String.trim()
     json = Map.get(params, "json", "")
@@ -168,6 +145,37 @@ defmodule EsrWebLiveview.WorkspaceDetailLive do
     end
   end
 
+  # Dynamic class-driven form — delegates translation to the Class's
+  # form_to_args/1 (or default_form_to_args if not overridden).
+  def handle_event(
+        "add_template",
+        %{"add_template" => params},
+        %{assigns: %{selected_class: class_name}} = socket
+      ) do
+    tmpl_name = Map.get(params, "tmpl_name", "") |> String.trim()
+
+    cond do
+      tmpl_name == "" ->
+        {:noreply, assign(socket, :flash_error, "template name required")}
+
+      true ->
+        case Esr.TemplateRegistry.lookup(class_name) do
+          {:ok, class_module} ->
+            tmpl =
+              if function_exported?(class_module, :form_to_args, 1) do
+                class_module.form_to_args(params)
+              else
+                Esr.UI.Form.default_form_to_args(class_module, Map.drop(params, ["tmpl_name"]))
+              end
+
+            do_add_template(socket, tmpl_name, tmpl)
+
+          :error ->
+            {:noreply, assign(socket, :flash_error, "no registered Class: #{class_name}")}
+        end
+    end
+  end
+
   defp do_add_template(socket, tmpl_name, tmpl) do
     case Esr.Workspace.add_template(socket.assigns.name, tmpl_name, tmpl) do
       :ok ->
@@ -178,19 +186,7 @@ defmodule EsrWebLiveview.WorkspaceDetailLive do
         {:noreply,
          socket
          |> assign(:workspace, Esr.Workspace.Store.get_by_name(socket.assigns.name))
-         |> assign(
-           :add_template_form,
-           to_form(
-             %{
-               "tmpl_name" => "",
-               "class" => "session.generic",
-               "session_name" => "",
-               "members_csv" => "",
-               "json" => ""
-             },
-             as: "add_template"
-           )
-         )
+         |> assign(:add_template_form, to_form(%{"tmpl_name" => ""}, as: "add_template"))
          |> assign(:flash_error, nil)}
 
       {:error, reason} ->
@@ -355,60 +351,81 @@ defmodule EsrWebLiveview.WorkspaceDetailLive do
         <div id="add-template" style="margin-top: 16px; padding-top: 16px; border-top: 1px solid #eaeef2;">
           <h3 style="font-size: 13px; font-weight: 500; margin: 0 0 8px 0;">Add template</h3>
 
-          <div style="margin-bottom: 8px; display: flex; gap: 8px;">
+          <p style="font-size: 11px; color: #57606a; margin: 0 0 8px 0;">
+            Class picker drives the form below — each registered Template Class self-describes its
+            fields via <code>Esr.UI.Form.form_fields/0</code>. JSON mode is the escape hatch for
+            custom Classes that don't implement the form behaviour.
+          </p>
+
+          <div style="margin-bottom: 12px; display: flex; gap: 6px; flex-wrap: wrap;">
+            <button
+              :for={{class_name, _module, _fields} <- @form_classes}
+              type="button"
+              phx-click="select_template_class"
+              phx-value-class={class_name}
+              style={tmpl_mode_btn_style(@selected_class == class_name)}
+            >{class_name}</button>
             <button
               type="button"
-              phx-click="toggle_template_mode"
-              phx-value-mode="form"
-              style={tmpl_mode_btn_style(@template_mode == "form")}
-            >Form (session.generic)</button>
-            <button
-              type="button"
-              phx-click="toggle_template_mode"
-              phx-value-mode="json"
-              style={tmpl_mode_btn_style(@template_mode == "json")}
+              phx-click="select_template_class"
+              phx-value-class="__json__"
+              style={tmpl_mode_btn_style(@selected_class == "__json__")}
             >JSON (custom class)</button>
           </div>
 
           <.form for={@add_template_form} phx-submit="add_template">
-            <div style="display: grid; grid-template-columns: 200px 1fr; gap: 6px; margin-bottom: 8px;">
+            <div style="display: grid; grid-template-columns: 200px 1fr; gap: 6px; margin-bottom: 12px;">
               <input
                 type="text"
                 name="add_template[tmpl_name]"
                 placeholder="template name (e.g. main)"
                 style="padding: 5px 8px; border: 1px solid #d1d5da; border-radius: 4px; font-size: 12px;"
               />
-              <span :if={@template_mode == "form"} style="font-size: 11px; color: #57606a; align-self: center;">Class = session.generic (form mode)</span>
-              <span :if={@template_mode == "json"} style="font-size: 11px; color: #57606a; align-self: center;">Class is read from JSON's "class" field</span>
+              <span style="font-size: 11px; color: #57606a; align-self: center;">
+                Class = <code>{@selected_class}</code>
+              </span>
             </div>
 
-            <div :if={@template_mode == "form"} style="display: grid; grid-template-columns: 200px 1fr; gap: 6px; margin-bottom: 8px;">
-              <input
-                type="text"
-                name="add_template[session_name]"
-                placeholder="session_name (becomes session://X)"
-                style="padding: 5px 8px; border: 1px solid #d1d5da; border-radius: 4px; font-size: 12px; font-family: monospace;"
-              />
-              <input
-                type="text"
-                name="add_template[members_csv]"
-                placeholder="members CSV (user://admin,agent://x)"
-                style="padding: 5px 8px; border: 1px solid #d1d5da; border-radius: 4px; font-size: 12px; font-family: monospace;"
-              />
-            </div>
+            <%= if @selected_class == "__json__" do %>
+              <div style="margin-bottom: 8px;">
+                <textarea
+                  name="add_template[json]"
+                  rows="5"
+                  placeholder={~s({"class":"some.class","field":"value"})}
+                  style="width: 100%; padding: 6px 10px; border: 1px solid #d1d5da; border-radius: 4px; font-family: monospace; font-size: 11px;"
+                ></textarea>
+                <p style="font-size: 10px; color: #57606a; margin: 4px 0 0;">
+                  Full template JSON — "class" field must reference a registered Class.
+                </p>
+              </div>
+            <% else %>
+              <% selected_fields =
+                Enum.find_value(@form_classes, [], fn {n, _m, fields} ->
+                  if n == @selected_class, do: fields
+                end) %>
 
-            <div :if={@template_mode == "json"} style="margin-bottom: 8px;">
-              <textarea
-                name="add_template[json]"
-                rows="5"
-                placeholder={~s({"class":"cc.pty","agent_uri":"agent://cc-architect","cwd":"/path/to/project"})}
-                style="width: 100%; padding: 6px 10px; border: 1px solid #d1d5da; border-radius: 4px; font-family: monospace; font-size: 11px;"
-              ></textarea>
-              <p style="font-size: 10px; color: #57606a; margin: 4px 0 0;">
-                Full template JSON. Class must be one of the registered Classes above.
-                For cc.pty: <code>"class":"cc.pty","agent_uri":"agent://X","cwd":"/path"</code>
-              </p>
-            </div>
+              <div :for={field <- selected_fields} style="display: grid; grid-template-columns: 200px 1fr; gap: 6px; margin-bottom: 8px;">
+                <label style="font-size: 12px; color: #57606a; align-self: center;">
+                  {field.label}{if Map.get(field, :required, false), do: " *", else: ""}
+                </label>
+                <%= case field.type do %>
+                  <% :select -> %>
+                    <select
+                      name={"add_template[" <> field.name <> "]"}
+                      style="padding: 5px 8px; border: 1px solid #d1d5da; border-radius: 4px; font-size: 12px; font-family: monospace;"
+                    >
+                      <option :for={opt <- Map.get(field, :options, [])} value={opt}>{opt}</option>
+                    </select>
+                  <% _ -> %>
+                    <input
+                      type="text"
+                      name={"add_template[" <> field.name <> "]"}
+                      placeholder={Map.get(field, :placeholder, "")}
+                      style={input_style_for(field.type)}
+                    />
+                <% end %>
+              </div>
+            <% end %>
 
             <button
               type="submit"
