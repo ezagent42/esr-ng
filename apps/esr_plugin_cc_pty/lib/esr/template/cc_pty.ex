@@ -25,6 +25,7 @@ defmodule Esr.PluginCcPty.Template do
   """
 
   @behaviour Esr.Kind.Template
+  @behaviour Esr.UI.Form
 
   require Logger
 
@@ -87,4 +88,26 @@ defmodule Esr.PluginCcPty.Template do
   end
 
   def instantiate(_tmpl_name, tmpl, _workspace_uri), do: {:error, {:invalid_template, tmpl}}
+
+  # --- Esr.UI.Form ---------------------------------------------------------
+
+  @impl Esr.UI.Form
+  def form_fields do
+    [
+      %{
+        name: "agent_uri",
+        type: :uri,
+        label: "Agent URI",
+        required: true,
+        placeholder: "agent://cc-architect"
+      },
+      %{
+        name: "cwd",
+        type: :path,
+        label: "Working directory",
+        required: true,
+        placeholder: "/Users/you/Workspace/project"
+      }
+    ]
+  end
 end
