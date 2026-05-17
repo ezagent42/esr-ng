@@ -33,9 +33,14 @@ defmodule Mix.Tasks.Esr do
 
   @impl Mix.Task
   def run(argv) do
+    # Phase 6 PR 7: peel off CLI-level flags before passing argv to Exec.
+    # --token / ESR_USER_TOKEN auth-tags the call so Exec resolves the
+    # token → user → caps. Token-less calls fall back to admin (BC).
+    {token, argv} = extract_token(argv)
+
     case Esr.Runtime.connect_as_cli() do
       {:ok, runtime_node} ->
-        case :rpc.call(runtime_node, EsrCLI.Exec, :exec, [argv], 30_000) do
+        case :rpc.call(runtime_node, EsrCLI.Exec, :exec, [argv, [token: token]], 30_000) do
           %{output: output, exit_code: code} ->
             IO.write(output)
             exit_with(code)
@@ -59,6 +64,20 @@ defmodule Mix.Tasks.Esr do
         exit_with(1)
     end
   end
+
+  # Pluck --token=VAL or --token VAL out of argv; falls back to ESR_USER_TOKEN.
+  defp extract_token(argv) do
+    {tok, rest} = pluck_token(argv, [])
+    {tok || System.get_env("ESR_USER_TOKEN"), rest}
+  end
+
+  defp pluck_token([], acc), do: {nil, Enum.reverse(acc)}
+
+  defp pluck_token(["--token=" <> v | tail], acc), do: {v, Enum.reverse(acc) ++ tail}
+
+  defp pluck_token(["--token", v | tail], acc), do: {v, Enum.reverse(acc) ++ tail}
+
+  defp pluck_token([h | t], acc), do: pluck_token(t, [h | acc])
 
   defp exit_with(code) when is_integer(code) do
     if Mix.env() == :test do

@@ -26,7 +26,37 @@ defmodule EsrCLI.Exec do
   alias EsrCLI.{Dispatch, Formatter, TreeBuilder}
 
   @spec exec([String.t()]) :: %{output: String.t(), exit_code: integer()}
-  def exec(argv) when is_list(argv) do
+  def exec(argv) when is_list(argv), do: exec(argv, [])
+
+  @doc """
+  Phase 6 PR 7: 2-arg form accepts CLI-level options. Currently:
+
+    * `:token` — bearer token (looked up via `Esr.Users.lookup_by_cli_token/1`).
+      If valid, derived caller = that user URI + their caps.
+      If absent / invalid, falls back to admin caps (BC for single-user
+      installs).
+  """
+  @spec exec([String.t()], keyword()) :: %{output: String.t(), exit_code: integer()}
+  def exec(argv, opts) when is_list(argv) and is_list(opts) do
+    case resolve_caller(opts[:token]) do
+      {:ok, caller_uri, caller_caps} ->
+        # Store on the per-call process dict so Dispatch.derive_caller
+        # (in the same RPC-handling pid) picks it up without threading
+        # opts through every command.
+        Process.put(:esr_cli_caller_override, {caller_uri, caller_caps})
+
+        try do
+          do_exec(argv)
+        after
+          Process.delete(:esr_cli_caller_override)
+        end
+
+      {:error, :invalid_token} ->
+        %{output: "error: invalid or revoked CLI token\n", exit_code: 4}
+    end
+  end
+
+  defp do_exec(argv) do
     spec = TreeBuilder.build()
 
     case Optimus.parse(spec, argv) do
@@ -51,6 +81,24 @@ defmodule EsrCLI.Exec do
 
       :version ->
         %{output: "esr 0.1.0", exit_code: 0}
+    end
+  end
+
+  # nil / empty token → no override → Dispatch falls through to admin.
+  defp resolve_caller(nil), do: {:ok, nil, nil}
+  defp resolve_caller(""), do: {:ok, nil, nil}
+
+  defp resolve_caller(token) when is_binary(token) do
+    case Esr.Users.lookup_by_cli_token(token) do
+      {:ok, user_uri} ->
+        # User Kind already has the caps in its :identity slice. We
+        # could route through Esr.Identity.list_caps_for/1 (the
+        # canonical lookup) — that returns a MapSet already.
+        caps = Esr.Identity.list_caps_for(user_uri)
+        {:ok, user_uri, caps}
+
+      :error ->
+        {:error, :invalid_token}
     end
   end
 
