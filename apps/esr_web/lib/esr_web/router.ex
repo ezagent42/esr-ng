@@ -51,6 +51,10 @@ defmodule EsrWeb.Router do
 
     # Phase 5 PR 3: Snapshots observability.
     live "/admin/snapshots", SnapshotsLive
+
+    # Real Phase 5 PR 3: PTY agent live status.
+    live "/admin/agents", AgentsLive
+    live "/admin/agents/:uri", AgentDetailLive
   end
 
   # Liveness probe — plain JSON, no ESR dispatch path involved.

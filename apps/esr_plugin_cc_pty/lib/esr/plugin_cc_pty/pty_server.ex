@@ -59,6 +59,90 @@ defmodule Esr.PluginCcPty.PtyServer do
     GenServer.start_link(__MODULE__, args)
   end
 
+  @doc """
+  Status snapshot for `/admin/agents/:uri` LV (Phase 5 PR 3).
+
+  Returns the live PTY's introspectable state — operator-facing fields
+  only. Heavy fields (full pty_buffer) are trimmed; recent output is
+  ANSI-stripped + bounded.
+  """
+  def status(pid) when is_pid(pid) do
+    state = :sys.get_state(pid, 500)
+
+    recent_lines =
+      state.pty_buffer
+      |> AnsiStrip.strip()
+      |> String.split("\n")
+      |> Enum.reject(&(&1 == ""))
+      |> Enum.take(-50)
+
+    %{
+      agent_uri: state.agent_uri,
+      cwd: state.cwd,
+      os_pid: state.os_pid,
+      exec_pid: state.exec_pid,
+      test_mode: state.test_mode,
+      running: state.exec_pid != nil or state.test_mode,
+      dev_channels_confirmed: state.dev_channels_confirmed,
+      recent_output: recent_lines,
+      buffer_bytes: byte_size(state.pty_buffer)
+    }
+  end
+
+  @doc """
+  Walks the DynamicSupervisor's children looking for a PtyServer whose
+  state's `agent_uri` matches. Returns `{:ok, pid}` or `:error`.
+
+  Cheap enough for v1 (~few children typically); switch to a Registry
+  if PtyServer count gets into the dozens.
+  """
+  def find_by_agent_uri(%URI{} = agent_uri) do
+    target = URI.to_string(agent_uri)
+
+    sup_pid = Process.whereis(EsrPluginCcPty.PtyServerSupervisor)
+
+    if sup_pid do
+      DynamicSupervisor.which_children(sup_pid)
+      |> Enum.find_value(:error, fn
+        {_, child_pid, :worker, _} when is_pid(child_pid) ->
+          try do
+            state = :sys.get_state(child_pid, 500)
+            if URI.to_string(state.agent_uri) == target, do: {:ok, child_pid}, else: nil
+          catch
+            _, _ -> nil
+          end
+
+        _ ->
+          nil
+      end)
+    else
+      :error
+    end
+  end
+
+  @doc "List all live PtyServer agent_uris under the DynamicSupervisor."
+  def list_agents do
+    sup_pid = Process.whereis(EsrPluginCcPty.PtyServerSupervisor)
+
+    if sup_pid do
+      DynamicSupervisor.which_children(sup_pid)
+      |> Enum.flat_map(fn
+        {_, child_pid, :worker, _} when is_pid(child_pid) ->
+          try do
+            state = :sys.get_state(child_pid, 500)
+            [%{agent_uri: state.agent_uri, pid: child_pid, os_pid: state.os_pid}]
+          catch
+            _, _ -> []
+          end
+
+        _ ->
+          []
+      end)
+    else
+      []
+    end
+  end
+
   @impl true
   def init(args) do
     agent_uri = Map.fetch!(args, :agent_uri)
