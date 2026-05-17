@@ -274,6 +274,26 @@ Kind 三子类之一。**Principal**——发起 Invocation,持有 caps。例:`a
 
 参考: ARCHITECTURE.md §3.1,Decision #7
 
+### ESR_HOME
+
+Runtime persistence root —— `~/.esr-ng/<profile>/` by default,overridable via `ESR_HOME` env。包含:
+- `credentials/` — Feishu app key、CC channel tokens 等(chmod 600)
+- `db/` — SQLite location(post-Phase-5 迁移目标;当前仍在 repo root)
+- `snapshots/` / `logs/` / `plugins/`
+- `runtime/cookie` — distributed Erlang cookie(Esr.Runtime 自动 mint)
+
+Profile model: 多 profile 同 host(`default` / `staging` / `personal`)。Init: `mix esr.home.init`;Migration from old esrd: `mix esr.home.import_from_esrd_dev`.
+
+参考: phase-specs/phase5/ESR_HOME.md,Decision #130
+
+### Esr.Runtime
+
+模块管理 distributed Erlang node name + cookie。Runtime 启动时(EsrCore.Application.start)调 `configure_for_runtime!/0` → `:net_kernel.start([esr_runtime@127.0.0.1, :longnames])`。CLI(mix esr)启动时调 `connect_as_cli/0` → Node.connect + `:rpc.call(EsrCLI.Exec, :exec, [argv])`。
+
+⚠️ **CLI ↔ runtime 单机假设**:CLI 永远只跟 local runtime 通信;远程操作走 runtime↔runtime federation(Decision #48 形态 A)。
+
+参考: ARCHITECTURE.md Decision #130, apps/esr_core/lib/esr/runtime.ex
+
 ### `@interface`
 
 Behavior 声明的 action schema(args / returns / errors / modes)。**Single Source of Truth**:所有 UI(LiveView slash command / CLI / HTTP / MCP)从 `@interface` 自动派生,**不写两遍**。
@@ -414,6 +434,16 @@ Kind 三子类之一。**被操作,无 cap**。例:`workspace://...` / `resource
 
 参考: ARCHITECTURE.md §3.1
 
+### Receiver Kind
+
+Plugin pattern for any Kind that consumes session messages and writes externally (Feishu, Slack, Discord, email, webhook, ...). Implements `Esr.Behavior.Chat` (or equivalent) `:receive` action; bound to sessions via routing rules. External API call happens inside `invoke(:receive, ...)`,所以 dispatch + CapBAC + audit + idempotency 全部都过。
+
+**Forbidden anti-pattern**: plugin GenServer that `Phoenix.PubSub.subscribe`s to `esr:session:*:events` and writes externally in `handle_info`. Bypasses dispatch, breaks `audit_row_count == external_side_effect_count` invariant. CI gate: `apps/esr_core/test/invariants/receiver_kind_pattern_test.exs`.
+
+Reference impl: `apps/esr_plugin_feishu/`(`Esr.Entity.FeishuChat` + `EsrPluginFeishu.Behavior.FeishuReceive`)。
+
+参考: ARCHITECTURE.md Decision #127, memory `feedback_plugin_external_integration_is_receiver_kind`, `docs/notes/plugin-receiver-kind-contract.md`
+
 ### RoutingAdmin
 
 Synthetic singleton Kind(`routing-admin://default`,Phase 5 PR 4 落地 Decision #125)— 不是真实业务实体,而是把 RoutingRegistry 的 add/delete/disable/enable 操作包成 Behavior(`Esr.Behavior.RoutingAdmin`),从而让 routing 规则修改也走 `Invocation.dispatch` → 命中 CapBAC step 5.5。non-admin 没有 `routing_admin` cap 调用 → `:unauthorized` + audit row。
@@ -421,6 +451,14 @@ Synthetic singleton Kind(`routing-admin://default`,Phase 5 PR 4 落地 Decision 
 ⚠️ 是 "**operation-as-Kind**" 模式实例 — 当某类高权限操作没有自然 owner Kind 时,合成一个 singleton 把它们集中到一处 cap-gate。RoutingLive(`/admin/routing`)dispatches 经此走;CLI mix task 也走同路径。
 
 参考: ARCHITECTURE.md Decision #125,SPEC Phase 5 P5-D6
+
+### Routing matcher: in_session
+
+`{:in_session, "session://X"}` — gates a routing rule to messages **originating in a specific session**。新 matcher 加于 post-Phase-5 Plan B(Decision #128)。其他 matcher(mention/from/text_contains/text_matches/always/...) 都看消息内容,只有 `in_session` 看 `msg.session_uri` 字段。**必须配合 stored_msg fix**(Decision #129)否则 always false。
+
+典型用法:Feishu binding 加规则 `in_session(session://main) → [feishu://oc_xxx]`,确保只 session://main 的消息转 Feishu,不污染其他 session。
+
+参考: ARCHITECTURE.md Decision #128, Matcher.ex `in_session/1` 构造器
 
 ### RoutingRegistry
 

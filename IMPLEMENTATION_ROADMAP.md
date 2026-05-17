@@ -48,16 +48,20 @@ phaseN git tag → 下一个 phase
 
 ## 1. 总体结构
 
-### 1.1 6 个 phase + sub-step 模型
+### 1.1 7 个 phase + sub-step 模型
 
-| Phase | 主题 | sub-step |
-|---|---|---|
-| **0** | 项目骨架 + 工具链 | 单块 |
-| **1** | esr_core MVP + LiveView admin + CC bridge 原型 | 1a → 1b → 1c |
-| **2** | Routing + Matcher + Chat + 单 session IM | 2a → 2b |
-| **3** | Persistence + Kind 模型补全(Templates / Workspace / Agent / CapBAC) | 3a → 3b → 3c → 3d |
-| **4** | LiveView IM 完整化 + CLI 自动派生 + View 同构 | 4a → 4b |
-| **5** | Feishu + CC channel(production)+ Pty-Web | 5a → 5b → 5c |
+(原 v0.4 roadmap 写 6 个 phase 收尾于 Phase 5;post-Phase-5 实施期 Allen 加 Phase 6,scope 见 §9 below。)
+
+| Phase | 主题 | sub-step | status |
+|---|---|---|---|
+| **0** | 项目骨架 + 工具链 | 单块 | ✅ done |
+| **1** | esr_core MVP + LiveView admin + CC bridge 原型 | 1a → 1b → 1c | ✅ done |
+| **2** | Routing + Matcher + Chat + 单 session IM | 2a → 2b | ✅ done |
+| **3** | Persistence + Kind 模型补全(Templates / Workspace / Agent / CapBAC) | 3a → 3b → 3c → 3d | ✅ done |
+| **4** | LiveView IM 完整化 + CLI 自动派生 + View 同构 | 4a → 4b | ✅ done |
+| **4.5** | Operator/Admin Tools Maturity + Snapshot Observability + Per-rule CapBAC(in-flight 中临时插入) | 4.5-1 ... 4.5-5 | ✅ done |
+| **5** | Feishu + CC channel + Pty-Web | 5a → 5b → 5c | ✅ done w/ known gap(v1→v2 CC channel wire swap → moved to Phase 6) |
+| **6** | Production Hardening(详见 §9) | 6a → 6b → 6c → 6d | 🚧 planning |
 
 **sub-step 是 /goal 的内部 e2e gate,不是 Allen 介入点**(Decision #80):
 
@@ -79,7 +83,7 @@ phaseN git tag → 下一个 phase
 | **e2e flow track** | manual-check feishu-cc 流程抽成 transport-agnostic 操作流程(§2),Phase 1+ 走 LiveView 验、Phase 5 走 Feishu 验;**作为 /goal 的 sub-step 内 gate**(§1.1) | Phase 1 |
 | **词汇 track** | `GLOSSARY.md` 术语表 + 易混淆词表 + 消歧 convention;新文档/代码复用易混淆词必须用消歧写法 | Phase 0 |
 
-### 1.3 8 条硬不变式
+### 1.3 10 条硬不变式
 
 来自 `ARCHITECTURE.md` v0.4 Decision Log,任何 phase 不能违反(违反 = bug,即使代码"工作"):
 
@@ -91,16 +95,19 @@ phaseN git tag → 下一个 phase
 6. **Audit 异步 cast,不阻塞 invoke**(Decision #60)
 7. **零匹配路由必须 telemetry + DLQ unroutable,不能静默**(Decision #68)
 8. **CC channel 用 stdio**(Channels 协议要求)
+9. **CLI ↔ LV 同 BEAM** — CLI 永远不起独立 VM dispatch;通过 distributed Erlang RPC 连 runtime(Decision #130)。CI gate: `apps/esr_cli/test/integration/cli_lv_same_server_invariant_test.exs`
+10. **External-integration plugins go through Receiver Kind + routing rule** — 禁止 PubSub-subscribe + 直接外部写(Decision #127)。CI gate: `apps/esr_core/test/invariants/receiver_kind_pattern_test.exs`
 
 ### 1.4 CLI ↔ LiveView 同构等价 — 精确定义
 
-**同构等价 = Invocation 等价 + Coverage 等价,不含渲染。**
+**同构等价 = Invocation 等价 + Coverage 等价 + 同 BEAM,不含渲染。**
 
 - **Invocation 等价**:对同一个 `(Behavior, action, args)`,两个 UI 构造出的 `%Invocation{}` 的 `target` / `mode` / `args` **完全相同**;只允许 `ctx.reply`(transport 决定)和 `ctx.caller`(principal 决定)不同。
 - **Coverage 等价**:`@interface` 里声明的每个 action,两个 UI 都调得到;不存在「只在一端有」的 action。
+- **同 BEAM**(post-Phase-5 strengthening,Allen 2026-05-17 + Decision #130):两端的 dispatch 必须 hit **同一个 BEAM**——CLI 用 distributed Erlang RPC 进入 runtime 节点,LV 本来就在 runtime 节点内。任何走"CLI 自己 boot 一个 VM" 的设计都违反此条。
 - **不含渲染**:`Esr.View` 层(LiveView HTML vs CLI ANSI)故意不同,不在等价范围内。
 
-执行机制随 phase 演化:**Phase 2-3 手动 spot-check**(CLI 还是手写的)→ **Phase 4+ 自动 CI property test**(对每个注册 action,LiveView 解析出的 Invocation 和 CLI 解析出的 Invocation 相等 modulo `ctx.reply`/`ctx.caller`)。
+执行机制随 phase 演化:**Phase 2-3 手动 spot-check**(CLI 还是手写的)→ **Phase 4+ 自动 CI property test**(对每个注册 action,LiveView 解析出的 Invocation 和 CLI 解析出的 Invocation 相等 modulo `ctx.reply`/`ctx.caller`)→ **post-Phase-5 同-BEAM gate**(`cli_lv_same_server_invariant_test.exs`)。
 
 ### 1.5 长期组件的 phase 增量
 
@@ -320,7 +327,18 @@ Deliverable 项:
 
 ## 8. Phase 5 — Feishu adapter + CC channel(production)+ Pty-Web
 
-> **📌 Naming note (2026-05-17)**: PRs #27-#32 were shipped under the label "Phase 5" but their scope (operator/admin LV tools maturity + snapshot observability + per-rule routing cap-check) **is not** what this section describes. That work was reassigned to **Phase 4.5** and lives at `phase-specs/phase4.5/`. The original roadmap Phase 5 below (Feishu adapter + CC channel production rewrite + Pty-Web) remains the **next** real Phase 5 and is being re-planned per Allen's 2026-05-17 directive: Feishu adapter must **integrate with the current LV** (session-bound feishu chat_id; Feishu↔LV bidirectional), not be standalone. Branch prefix and PR titles in git history will keep saying "Phase 5" — read those as `Phase 4.5` retroactively.
+> **📌 Naming note (2026-05-17)**: PRs #27-#32 were shipped under the label "Phase 5" but their scope (operator/admin LV tools maturity + snapshot observability + per-rule routing cap-check) **is not** what this section describes. That work was reassigned to **Phase 4.5** and lives at `phase-specs/phase4.5/`. The real Phase 5 below (Feishu adapter + CC channel production + Pty-Web) was then completed end-to-end the same day via PRs #36-#51. See "Status (2026-05-17)" below.
+
+> **📊 Status (2026-05-17): complete-with-known-gap**
+>
+> | Deliverable | Status | PRs |
+> |---|---|---|
+> | 5a Feishu adapter (LV-integrated) | ✅ done — `Esr.Entity.FeishuChat` Receiver Kind + `WebhookPlug` + lark API client + session↔chat_id binding via Template + routing rule | #42, #45, #46, #51 |
+> | 5b CC channel production | ⚠️ **partial** — `esr_plugin_cc_channel` Template Class + connect-token persistence shipped (#41); Phase 1 v1_prototype HTTP/SSE wire continues to be production transport. Full WS rewrite still TODO | #41, #49 |
+> | 5c Pty-Web | ✅ done — xterm.js + dispatch path invariant test | #40 |
+> | (4 post-Phase-5 follow-ups Allen drove same day) | ✅ | #43 (hotfix), #45 (Receiver Kind drift correction), #48 then #50 (CLI HTTP→RPC pivot), #49 (PtyServer agent_uri via mcp.json) |
+>
+> Phase 5 is closed as `complete-with-known-gap`; the v1→v2 CC channel wire-swap moves into Phase 6 scope.
 
 **1. 目标**：Feishu 群里 @ 一下 → ESR 路由 → CC session 收到 → 回复回 Feishu；在 LiveView 里看完整链路；Pty-Web（TUI 显示）接入。
 
@@ -348,7 +366,31 @@ Deliverable 项:
 
 ---
 
-## 9. 文件清单
+## 9. Phase 6 — Production Hardening(post-Phase-5,实施期补加)
+
+**1. 目标**：把 v0 demo-quality 系统抬到能跑真实小团队的 production state。补 Phase 5 留的硬 gap,把 ESR_HOME 迁移落地,补长期组件成熟度。
+
+**2. 测试员体验 / demo**：(待 brainstorm)
+
+**3. Deliverables 草稿(待 brainstorm 锁定)**：
+- **6a CC channel v1 → v2 wire swap** — Phase 5 5b 的未完成部分;`esr_plugin_cc_channel` 加 WS endpoint + Phoenix.Channel handshake,替代 v1_prototype 的 HTTP/SSE。Token-based auth(用 Phase 5 PR 5 落的 cc-channels.yaml)
+- **6b ESR_HOME DB 迁移** — 把 `esr_core_dev.db` 从 repo root 搬到 `$ESR_HOME/<profile>/db/`;`mix esr.home.adopt_db` 任务做安全 copy + config 切换 + 验证启动。注意:路径用 ESR_HOME env 动态组合,不写死(Allen 2026-05-17)
+- **6c CLI token-based auth** — Phase 5 PR 5 的 CLI RPC 当前 admin-all-cap;Phase 6 加 cookie + token 双层,non-admin CLI 用户也能受 CapBAC 保护
+- **6d Workspace-scoped routing rules + 多 Feishu app 支持** — 当前 routing_rules 是 global,workspace 间不能隔离;Plan B 默认 + Phase 5d 的 Class 注册都是 plugin-global。生产化第一性原则:dev/prod 必须能差异化路由
+- **6e Federation MVP**(可选)— Decision #48 形态 A 落地;runtime↔runtime 协议;CLI 通过 local runtime 调远程
+- **6f Plugin scaffolder**(Allen 2026-05-17 现在不做)— `mix esr.gen.plugin` 模板,等积累到 3+ plugin 再考虑
+
+**4. 前序依赖**:Phase 5 + 4 post-Phase-5 PRs 全部 done。Phase 6 brainstorm 时再细化决策点。
+
+**5. 测试**:F1-F8 全部 e2e 真生产路径跑通(已经基本满足,Phase 5 demo 验证过);新增"CC channel WS 路径 = Phase 1 v1 HTTP 路径"等价性 property test。
+
+**6. 相关不变式**:#1-#10(已完整)。Phase 6 不引入新不变式,只是补全前面的承诺。
+
+**7. brainstorm 重点**:(待 Allen 决定 6a/6b/6c/6d/6e/6f 优先级 + scope cut);6b DB 迁移的安全策略;6c token format;6d workspace.config 加 routing_rules 是否破坏 §5.4.6 "core 不预定义 table"。
+
+---
+
+## 10. 文件清单
 
 phase 0 起 esr-ng repo 里应该有：
 
@@ -375,7 +417,7 @@ esr-ng/
 
 ---
 
-## 10. 风险点
+## 11. 风险点
 
 | 风险 | Phase | 缓解 |
 |---|---|---|
@@ -388,7 +430,7 @@ esr-ng/
 
 ---
 
-## 11. 下一步
+## 12. 下一步
 
 1. **本文档 + ARCHITECTURE.md(Patch A/B/C)双双 sign-off**
 2. **写 `phase-specs/e2e-parity/FLOWS.md`** —— e2e flow track 的 8 条 flow 详细化(可跟 Phase 0 并行)
