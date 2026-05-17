@@ -97,14 +97,23 @@ defmodule EsrCLI.Dispatch do
   defp scheme_for(type_name), do: to_string(type_name)
 
   defp derive_caller(options) do
-    case Map.get(options, :as) do
-      nil ->
-        {Esr.Entity.User.admin_uri(), Esr.Entity.User.admin_caps()}
+    # Phase 6 PR 7: per-process override set by `EsrCLI.Exec.exec/2`
+    # when a valid CLI bearer token is presented. This takes precedence
+    # over the legacy `--as` flag — token auth IS the caller identity.
+    case Process.get(:esr_cli_caller_override) do
+      {%URI{} = uri, %MapSet{} = caps} ->
+        {uri, caps}
 
-      as_str ->
-        case System.get_env("ESR_CLI_ALLOW_AS") do
-          "1" -> derive_other_user(as_str)
-          _ -> {:error, :as_not_allowed}
+      _ ->
+        case Map.get(options, :as) do
+          nil ->
+            {Esr.Entity.User.admin_uri(), Esr.Entity.User.admin_caps()}
+
+          as_str ->
+            case System.get_env("ESR_CLI_ALLOW_AS") do
+              "1" -> derive_other_user(as_str)
+              _ -> {:error, :as_not_allowed}
+            end
         end
     end
   end
