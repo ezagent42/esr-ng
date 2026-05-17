@@ -72,9 +72,21 @@ defmodule EsrPluginFeishu.Behavior.FeishuReceive do
 
   @impl Esr.Behavior
   def interface do
+    # Mirror Esr.Behavior.Chat's message schema — same dispatch path
+    # delivers the same payload shape. InterfaceValidator rejects bare
+    # `:any` for the struct, so the per-field schema is required.
+    msg_schema = %{
+      uri: :string,
+      sender: :uri,
+      mentions: {:list, :uri},
+      body: :map,
+      ref: {:option, :uri},
+      inserted_at: :map
+    }
+
     %{
       receive: %{
-        args: %{message: :any},
+        args: %{message: msg_schema},
         returns: %{bytes_sent: :integer},
         modes: [:call, :cast]
       }
