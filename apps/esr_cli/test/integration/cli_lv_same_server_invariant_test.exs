@@ -5,14 +5,17 @@ defmodule EsrCLI.Integration.CliLvSameServerInvariantTest do
   hit isolated state — LV couldn't see CLI mutations. That was a real
   drift.
 
-  Fix: `Mix.Tasks.Esr` is now a thin HTTP shell over `/api/cli/exec`;
-  the server-side `EsrCLI.Exec.exec(argv)` runs in the RUNNING server
-  BEAM.
+  Final design: `Mix.Tasks.Esr` connects via distributed Erlang RPC
+  (Allen 2026-05-17 second pivot — dropping HTTP indirection). The
+  CLI process does `Node.connect(runtime) + :rpc.call(runtime,
+  EsrCLI.Exec, :exec, [argv])`. Same BEAM, same KindRegistry, zero
+  serde.
 
   This test pins the invariant by:
   1. Spawning a Session Kind in THIS test process's BEAM
   2. Calling `EsrCLI.Exec.exec(["session", "join", ...])` directly
-     (server-side path — same as what /api/cli/exec invokes)
+     (server-side path — same as what `:rpc.call` invokes on the
+     runtime node in real CLI use)
   3. Asserting the Session GenServer's state changed in THIS BEAM
      (member list now contains the joined member)
 

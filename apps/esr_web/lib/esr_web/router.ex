@@ -81,12 +81,12 @@ defmodule EsrWeb.Router do
     # rationale (the agent the hook reports about may be down).
     post "/cc-events", CcEventsController, :report
 
-    # Post-Phase-5 fix (Allen 2026-05-17): CLI server-side entry point.
-    # `mix esr` is a thin shell that POSTs argv here; the server-side
-    # EsrCLI.Exec.exec/1 runs in the SAME BEAM as LV — restores CLI ↔ LV
-    # runtime isomorphism (Roadmap §1.4). See CliController moduledoc.
-    post "/cli/exec", CliController, :exec
   end
+
+  # (Post-Phase-5 cleanup, Allen 2026-05-17: the `/api/cli/exec` HTTP
+  # endpoint and CliController are gone. CLI now reaches the runtime via
+  # distributed Erlang RPC — see Esr.Runtime + Mix.Tasks.Esr. LV ↔
+  # runtime was never HTTP either — LV runs in the same BEAM.)
 
   # Phase 5 PR 6: Feishu webhook receiver. The ONLY touch
   # esr_plugin_feishu makes to esr_web — explicit exception per SPEC v2
