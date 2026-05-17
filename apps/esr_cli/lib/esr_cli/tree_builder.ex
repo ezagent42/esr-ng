@@ -24,24 +24,35 @@ defmodule EsrCLI.TreeBuilder do
     # Filter stale entries — when test suites register fake Kind
     # modules per-test, those modules may no longer be loadable when
     # build() runs later. Skip rather than crash.
+    # Pre-resolve type_name for each kind module, dropping any that
+    # can't answer (test-leaked fake modules, unloaded code).
+    # safe_type_name returns nil on any failure.
+    kind_to_type =
+      behavior_triples
+      |> Enum.map(fn {{kind_mod, _action}, _bhv} -> kind_mod end)
+      |> Enum.uniq()
+      |> Enum.map(fn kind_mod -> {kind_mod, safe_type_name(kind_mod)} end)
+      |> Enum.reject(fn {_, t} -> is_nil(t) end)
+      |> Map.new()
+
     by_kind =
       behavior_triples
-      |> Enum.filter(fn {{kind_mod, _action}, _bhv} ->
-        Code.ensure_loaded?(kind_mod) and function_exported?(kind_mod, :type_name, 0)
-      end)
+      |> Enum.filter(fn {{kind_mod, _action}, _bhv} -> Map.has_key?(kind_to_type, kind_mod) end)
       |> Enum.group_by(fn {{kind_mod, _action}, _bhv} -> kind_mod end)
 
     kind_subcommands =
       by_kind
       |> Enum.map(fn {kind_module, actions} ->
-        type_name = kind_module.type_name()
+        type_name = Map.fetch!(kind_to_type, kind_module)
         {type_name, kind_subcommand(kind_module, type_name, actions)}
       end)
+
+    type_names_in_use = MapSet.new(Map.values(kind_to_type))
 
     # Facade-only kinds (registered ops with no matching Behavior actions)
     facade_only_kinds =
       FacadeRegistry.list_kinds()
-      |> Enum.reject(fn kt -> Enum.any?(by_kind, fn {km, _} -> km.type_name() == kt end) end)
+      |> Enum.reject(fn kt -> MapSet.member?(type_names_in_use, kt) end)
       |> Enum.reject(&is_nil/1)
 
     facade_only_subcommands =
@@ -189,4 +200,21 @@ defmodule EsrCLI.TreeBuilder do
     end
 
   defp parser_for(_), do: :string
+
+  # Safely resolve type_name/0 — returns nil if the module isn't loaded
+  # or doesn't export type_name/0 (test-spawned fake modules can be
+  # left in BehaviorRegistry ETS after their parent test exits).
+  defp safe_type_name(kind_mod) do
+    if Code.ensure_loaded?(kind_mod) and function_exported?(kind_mod, :type_name, 0) do
+      try do
+        kind_mod.type_name()
+      rescue
+        _ -> nil
+      catch
+        _, _ -> nil
+      end
+    else
+      nil
+    end
+  end
 end

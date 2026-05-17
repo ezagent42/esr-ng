@@ -135,13 +135,18 @@ defmodule EsrCLI.Dispatch do
     end
   end
 
+  # Restored to local dispatch — the pivot (Allen 2026-05-17) moves the
+  # CLI VM problem upstream: Mix.Tasks.Esr no longer runs Dispatch
+  # locally; it POSTs argv to the server's /api/cli/exec which runs
+  # EsrCLI.Exec.exec → eventually calls THIS function inside the
+  # running phx BEAM. So this code stays local — it's just that it
+  # now runs in the right BEAM.
   defp do_dispatch(inv, :call, deadline_ms) do
     case Invocation.dispatch(inv) do
       {:ok, result} ->
         {:ok, result}
 
       :ok ->
-        # cast-style return for a call mode (e.g. some behaviors return just :ok)
         receive do
           {:esr_reply, reply} -> {:ok, reply}
         after
