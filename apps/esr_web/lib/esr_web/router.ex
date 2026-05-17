@@ -55,6 +55,9 @@ defmodule EsrWeb.Router do
     # Real Phase 5 PR 3: PTY agent live status.
     live "/admin/agents", AgentsLive
     live "/admin/agents/:uri", AgentDetailLive
+
+    # Real Phase 5 PR 4: Pty-Web (xterm.js in browser).
+    live "/admin/agents/:uri/terminal", PtyTerminalLive
   end
 
   # Liveness probe — plain JSON, no ESR dispatch path involved.

@@ -38,6 +38,7 @@ defmodule EsrPluginCcPty.Application do
     case Supervisor.start_link(children, strategy: :one_for_one, name: __MODULE__) do
       {:ok, sup_pid} ->
         :ok = register_template_class()
+        :ok = register_pty_input_kind()
 
         # Boot-ordering fix: chat plugin's Application.start calls
         # Esr.Workspace.Loader.load_all/0 BEFORE this plugin starts —
@@ -45,12 +46,6 @@ defmodule EsrPluginCcPty.Application do
         # any Workspace declaring `"class" => "cc.pty"` gets logged
         # "no Template Class registered" + skipped. Re-run Loader now
         # that we're registered to pick up those Workspaces.
-        #
-        # Loader is idempotent: Workspace Kinds return :already_started;
-        # SpawnRegistry.spawn returns existing pid; Template.instantiate
-        # uses idempotent SpawnRegistry — safe to re-run. Phase 5+ may
-        # introduce an explicit "all-plugins-ready" gate (per Spec 01
-        # Q4 note) and remove this per-plugin re-run.
         _ = Esr.Workspace.Loader.load_all()
 
         {:ok, sup_pid}
@@ -63,5 +58,34 @@ defmodule EsrPluginCcPty.Application do
   defp register_template_class do
     :ok = Esr.TemplateRegistry.register(Esr.PluginCcPty.Template)
     :ok
+  end
+
+  # Phase 5 PR 4: synthetic PtyInput Kind + Behavior.Pty for xterm.js
+  # LV's input dispatch path. Mirrors RoutingAdmin pattern (Decision #125).
+  defp register_pty_input_kind do
+    alias Esr.BehaviorRegistry
+    alias Esr.Behavior.Pty, as: PtyB
+    alias Esr.Entity.PtyInput, as: PtyK
+
+    Enum.each(PtyB.actions(), fn action ->
+      :ok = BehaviorRegistry.register(PtyK, action, PtyB)
+    end)
+
+    uri = PtyK.default_uri()
+
+    case Esr.KindRegistry.lookup(uri) do
+      {:ok, _pid} ->
+        :ok
+
+      :error ->
+        case DynamicSupervisor.start_child(
+               Esr.Workspace.Supervisor,
+               {Esr.Kind.Server, {PtyK, %{uri: uri}}}
+             ) do
+          {:ok, _pid} -> :ok
+          {:error, {:already_started, _pid}} -> :ok
+          err -> err
+        end
+    end
   end
 end

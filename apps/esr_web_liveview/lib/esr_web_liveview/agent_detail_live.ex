@@ -127,7 +127,11 @@ defmodule EsrWebLiveview.AgentDetailLive do
               </tbody>
             </table>
 
-            <div style="margin-top: 12px;">
+            <div style="margin-top: 12px; display: flex; gap: 8px;">
+              <a
+                href={"/admin/agents/#{URI.encode_www_form(URI.to_string(@agent_uri))}/terminal"}
+                style="padding: 6px 14px; background: #1f883d; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; text-decoration: none;"
+              >📺 Open terminal (xterm)</a>
               <button
                 type="button"
                 phx-click="restart"
