@@ -320,7 +320,7 @@ Deliverable 项:
 
 ## 8. Phase 5 — Feishu adapter + CC channel(production)+ Pty-Web
 
-> **📌 Naming note (2026-05-17)**: PRs #27-#32 were shipped under the label "Phase 5" but their scope (operator/admin LV tools maturity + snapshot observability + per-rule routing cap-check) **is not** what this section describes. That work was reassigned to **Phase 4-plus** and lives at `phase-specs/phase4-plus/`. The original roadmap Phase 5 below (Feishu adapter + CC channel production rewrite + Pty-Web) remains the **next** real Phase 5 and has not started yet. Branch prefix and PR titles in git history will keep saying "Phase 5" — read those as `Phase 4-plus` retroactively.
+> **📌 Naming note (2026-05-17)**: PRs #27-#32 were shipped under the label "Phase 5" but their scope (operator/admin LV tools maturity + snapshot observability + per-rule routing cap-check) **is not** what this section describes. That work was reassigned to **Phase 4.5** and lives at `phase-specs/phase4.5/`. The original roadmap Phase 5 below (Feishu adapter + CC channel production rewrite + Pty-Web) remains the **next** real Phase 5 and is being re-planned per Allen's 2026-05-17 directive: Feishu adapter must **integrate with the current LV** (session-bound feishu chat_id; Feishu↔LV bidirectional), not be standalone. Branch prefix and PR titles in git history will keep saying "Phase 5" — read those as `Phase 4.5` retroactively.
 
 **1. 目标**：Feishu 群里 @ 一下 → ESR 路由 → CC session 收到 → 回复回 Feishu；在 LiveView 里看完整链路；Pty-Web（TUI 显示）接入。
 
