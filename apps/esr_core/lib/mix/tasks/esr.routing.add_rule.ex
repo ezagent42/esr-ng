@@ -18,11 +18,11 @@ defmodule Mix.Tasks.Esr.Routing.AddRule do
   ### Examples
 
       # text_contains rule: any urgent message → oncall session
-      mix esr.routing.add_rule EsrPluginChat.Routing.MentionRouting \\
+      mix esr.routing.add_rule EsrDomainChat.Routing.MentionRouting \\
           text_contains:urgent receivers:session://oncall
 
       # mention rule: @cc-builder → architect session
-      mix esr.routing.add_rule EsrPluginChat.Routing.MentionRouting \\
+      mix esr.routing.add_rule EsrDomainChat.Routing.MentionRouting \\
           mention:agent://cc-builder receivers:session://architect
 
   ## Behavior
@@ -42,7 +42,7 @@ defmodule Mix.Tasks.Esr.Routing.AddRule do
 
   @impl Mix.Task
   def run(args) do
-    {:ok, _} = Application.ensure_all_started(:esr_plugin_chat)
+    {:ok, _} = Application.ensure_all_started(:esr_domain_chat)
 
     case args do
       [table_str, matcher_spec, "receivers:" <> receivers_csv] ->

@@ -11,7 +11,7 @@ defmodule EsrWebLiveview.RoutingLive do
   ## Form shape
 
   - **Table** select — registered table modules
-    (`EsrPluginChat.Routing.MentionRouting` / `SessionRouting`)
+    (`EsrDomainChat.Routing.MentionRouting` / `SessionRouting`)
   - **Matcher** — two modes via toggle:
     - **Form mode** (default): pick leaf type (mention / from /
       text_contains / text_matches / always) + arg input
@@ -39,8 +39,8 @@ defmodule EsrWebLiveview.RoutingLive do
   @routing_admin_uri Esr.Entity.RoutingAdmin.default_uri()
 
   @tables [
-    {"MentionRouting", EsrPluginChat.Routing.MentionRouting},
-    {"SessionRouting", EsrPluginChat.Routing.SessionRouting}
+    {"MentionRouting", EsrDomainChat.Routing.MentionRouting},
+    {"SessionRouting", EsrDomainChat.Routing.SessionRouting}
   ]
 
   @matcher_types [

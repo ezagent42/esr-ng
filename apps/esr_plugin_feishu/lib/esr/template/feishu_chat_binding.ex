@@ -26,7 +26,7 @@ defmodule Esr.Template.FeishuChatBinding do
   require Logger
 
   alias Esr.Routing.{Matcher, RuleStore}
-  alias EsrPluginChat.Routing.MentionRouting
+  alias EsrDomainChat.Routing.MentionRouting
 
   @impl Esr.Kind.Template
   def template_name, do: "feishu.chat_binding"

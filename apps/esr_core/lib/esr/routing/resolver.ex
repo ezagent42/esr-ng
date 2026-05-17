@@ -39,8 +39,8 @@ defmodule Esr.Routing.Resolver do
   alias Esr.Routing.Matcher
 
   @default_routing_tables [
-    EsrPluginChat.Routing.MentionRouting,
-    EsrPluginChat.Routing.SessionRouting
+    EsrDomainChat.Routing.MentionRouting,
+    EsrDomainChat.Routing.SessionRouting
   ]
 
   @session_members_token "$session_members"

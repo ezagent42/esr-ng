@@ -29,7 +29,9 @@ defmodule EsrPluginFeishu.MixProject do
   defp deps do
     [
       {:esr_core, in_umbrella: true},
-      {:esr_plugin_chat, in_umbrella: true},
+      {:esr_domain_identity, in_umbrella: true},
+      {:esr_domain_workspace, in_umbrella: true},
+      {:esr_domain_chat, in_umbrella: true},
       {:jason, "~> 1.2"},
       {:plug, "~> 1.18"},
       {:yaml_elixir, "~> 2.9"}

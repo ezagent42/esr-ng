@@ -12,14 +12,14 @@ defmodule Esr.SpawnRegistry do
 
       Esr.SpawnRegistry.register("agent", fn uri ->
         DynamicSupervisor.start_child(
-          EsrPluginChat.AgentSupervisor,
+          EsrDomainChat.AgentSupervisor,
           {Esr.Kind.Server, {Esr.Entity.Agent, %{uri: uri}}}
         )
       end)
 
   When the Loader sees `agent://cc-builder` it calls
   `Esr.SpawnRegistry.spawn(uri)` and esr_core never has to know about
-  `EsrPluginChat.AgentSupervisor`.
+  `EsrDomainChat.AgentSupervisor`.
 
   ## Idempotency
 

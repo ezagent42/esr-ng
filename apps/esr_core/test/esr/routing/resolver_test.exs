@@ -5,7 +5,7 @@ defmodule Esr.Routing.ResolverTest do
   Each test declares its OWN routing table (unique per test, owned by
   the test process) and configures `Esr.Routing.Resolver` to query
   that table via `Application.put_env(:esr_core, :routing_tables, ...)`.
-  This avoids conflict with the live `EsrPluginChat.Application` which
+  This avoids conflict with the live `EsrDomainChat.Application` which
   owns `MentionRouting` and `SessionRouting` for the running app.
   """
 

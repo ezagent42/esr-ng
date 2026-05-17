@@ -1,0 +1,370 @@
+defmodule Esr.Behavior.ChatTest do
+  @moduledoc """
+  Phase 2b-step 2: Chat Behavior full invoke clause tests.
+
+  Direct invoke/4 unit tests with crafted slices + ctx (no live
+  KindRegistry / PubSub setup besides what the umbrella starts).
+  Integration coverage (full dispatch path through Session GenServer
+  + admin User membership) lives in
+  `EsrDomainChat.Integration.ChatRoutingTest`.
+  """
+
+  use ExUnit.Case
+  alias Esr.{Message, MessageStore}
+  alias Esr.Behavior.Chat
+  alias Esr.InterfaceValidator
+  alias EsrCore.Repo
+
+  setup do
+    :ok = Ecto.Adapters.SQL.Sandbox.checkout(Repo)
+    Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+    :ok
+  end
+
+  describe "Behavior contract surface" do
+    test "actions/0 returns the 4 K-path actions" do
+      assert Chat.actions() == [:send, :receive, :join, :leave]
+    end
+
+    test "state_slice/0 returns :chat" do
+      assert Chat.state_slice() == :chat
+    end
+
+    test "init_slice/1 returns slice with members / monitors / last_seen empty maps" do
+      assert Chat.init_slice(%{}) == %{members: %{}, monitors: %{}, last_seen: %{}}
+    end
+
+    test "interface/0 declares all 4 actions" do
+      keys = Chat.interface() |> Map.keys() |> Enum.sort()
+      assert keys == [:join, :leave, :receive, :send]
+    end
+  end
+
+  describe "invoke(:send, ...) routing (Phase 3c-step 1)" do
+    test "with no routing rules → falls through to in-session members fan-out" do
+      session_uri = URI.new!("session://chat-fallback-#{System.unique_integer([:positive])}")
+      sender = URI.new!("user://admin")
+      other_member = URI.new!("user://other-#{System.unique_integer([:positive])}")
+      msg = Message.new(sender, %{text: "no rules here", attachments: []})
+
+      slice = %{
+        members: %{sender => %{online: true}, other_member => %{online: true}},
+        monitors: %{},
+        last_seen: %{}
+      }
+
+      ctx = %{self_uri: session_uri, kind_module: Esr.Entity.Session, caller: sender}
+
+      # Just verify the invoke succeeds; Resolver returns [] (no rule),
+      # so fall-through fan-outs to members minus sender. dispatch_receive
+      # may return :error :no_such_actor for unregistered URIs but that's
+      # fire-and-forget — invoke still {:ok, ...}.
+      assert {:ok, _, %{stored: true}} = Chat.invoke(:send, slice, %{message: msg}, ctx)
+    end
+
+    test "with active mention routing rule → respects rule receivers" do
+      test_table = :"chat_routing_test_#{System.unique_integer([:positive])}"
+      :ok = Esr.RoutingRegistry.declare_table(test_table, key_uniqueness: :duplicate)
+
+      original = Application.get_env(:esr_core, :routing_tables)
+      Application.put_env(:esr_core, :routing_tables, [test_table])
+
+      on_exit(fn ->
+        if original do
+          Application.put_env(:esr_core, :routing_tables, original)
+        else
+          Application.delete_env(:esr_core, :routing_tables)
+        end
+      end)
+
+      target_session = URI.new!("session://chat-routed-#{System.unique_integer([:positive])}")
+      session_uri = URI.new!("session://current")
+      sender = URI.new!("user://admin")
+      msg = Message.new(sender, %{text: "urgent help", attachments: []})
+
+      :ok =
+        Esr.RoutingRegistry.put(
+          test_table,
+          Esr.Routing.Matcher.text_contains("urgent"),
+          [URI.to_string(target_session)]
+        )
+
+      slice = %{
+        members: %{sender => %{online: true}},
+        monitors: %{},
+        last_seen: %{}
+      }
+
+      ctx = %{self_uri: session_uri, kind_module: Esr.Entity.Session, caller: sender}
+
+      # invoke fires routing path; recipients = [target_session] (per rule),
+      # NOT the in-session member list. invoke still succeeds.
+      assert {:ok, _, %{stored: true}} = Chat.invoke(:send, slice, %{message: msg}, ctx)
+    end
+  end
+
+  describe "invoke(:send, ...)" do
+    test "writes to MessageStore + broadcasts on session events topic + returns {:ok, slice, %{stored: true}}" do
+      session_uri = URI.new!("session://chat-test-#{System.unique_integer([:positive])}")
+      sender = URI.new!("user://admin")
+      msg = Message.new(sender, %{text: "hello world", attachments: []})
+
+      slice = Chat.init_slice(%{})
+      ctx = %{self_uri: session_uri, kind_module: Esr.Entity.Session, caller: sender}
+
+      topic = Chat.session_events_topic(session_uri)
+      :ok = Phoenix.PubSub.subscribe(EsrCore.PubSub, topic)
+
+      assert {:ok, ^slice, %{stored: true}} =
+               Chat.invoke(:send, slice, %{message: msg}, ctx)
+
+      # MessageStore now has it
+      assert {:ok, loaded} = MessageStore.by_uri(msg.uri)
+      assert loaded.session_uri == session_uri
+
+      # Subscribers receive the chat_message broadcast
+      assert_receive {:chat_message, _session_uri, %Message{uri: stored_uri}}, 500
+      assert stored_uri == msg.uri
+    end
+
+    test "fan-out :receive on members when no mentions" do
+      session_uri = URI.new!("session://chat-fanout-#{System.unique_integer([:positive])}")
+      sender = URI.new!("user://admin")
+      member_2 = URI.new!("agent://test-bot-#{System.unique_integer([:positive])}")
+      msg = Message.new(sender, %{text: "everyone hi", attachments: []})
+
+      # Two members in slice (no Process.monitor needed for this test —
+      # dispatch will fail :no_such_actor for the agent since it's not
+      # registered, but that's the dispatch-level error, not invoke's).
+      slice = %{
+        members: %{sender => %{online: true}, member_2 => %{online: true}},
+        monitors: %{},
+        last_seen: %{}
+      }
+
+      ctx = %{self_uri: session_uri, kind_module: Esr.Entity.Session, caller: sender}
+
+      # invoke succeeds even if dispatch to absent member fails (cast
+      # dispatch returns :ok or {:error, :no_such_actor} but we don't
+      # consume the return — fan-out is fire-and-forget).
+      assert {:ok, _new_slice, %{stored: true}} =
+               Chat.invoke(:send, slice, %{message: msg}, ctx)
+    end
+
+    test "returns error when MessageStore write fails (let-it-crash policy)" do
+      # Force a write failure by giving the schema something it can't
+      # encode (URI struct in a place that expects URI but is malformed).
+      # Easiest: corrupt session_uri so the Ecto.URI dump branch hits
+      # the catch-all. We pass an atom instead of %URI{} which dump
+      # rejects with :error.
+      sender = URI.new!("user://admin")
+      msg = Message.new(sender, %{text: "boom", attachments: []})
+      slice = Chat.init_slice(%{})
+      ctx = %{self_uri: :not_a_uri, kind_module: Esr.Entity.Session, caller: sender}
+
+      assert_raise FunctionClauseError, fn ->
+        Chat.invoke(:send, slice, %{message: msg}, ctx)
+      end
+    end
+  end
+
+  describe "invoke(:receive, ...) — User branch" do
+    test "broadcasts {:message_received, msg} on user events topic" do
+      user_uri = URI.new!("user://admin-recv-#{System.unique_integer([:positive])}")
+      sender = URI.new!("agent://cc-builder")
+      msg = Message.new(sender, %{text: "reply incoming", attachments: []})
+
+      topic = Chat.user_events_topic(user_uri)
+      :ok = Phoenix.PubSub.subscribe(EsrCore.PubSub, topic)
+
+      slice = %{}
+      ctx = %{self_uri: user_uri, kind_module: Esr.Entity.User, caller: sender}
+
+      assert {:ok, ^slice} = Chat.invoke(:receive, slice, %{message: msg}, ctx)
+      assert_receive {:message_received, %Message{uri: ru}}, 500
+      assert ru == msg.uri
+    end
+  end
+
+  describe "invoke(:receive, ...) — Agent branch" do
+    test "no-op in 2b (bridge wiring is 2c)" do
+      agent_uri = URI.new!("agent://cc-builder")
+      sender = URI.new!("user://admin")
+      msg = Message.new(sender, %{text: "hi agent", attachments: []})
+
+      slice = %{}
+      ctx = %{self_uri: agent_uri, kind_module: Esr.Entity.Agent, caller: sender}
+
+      assert {:ok, ^slice} = Chat.invoke(:receive, slice, %{message: msg}, ctx)
+    end
+  end
+
+  describe "invoke(:join, ...)" do
+    test "Process.monitor target Kind + add to members + returns members list" do
+      session_uri = URI.new!("session://join-#{System.unique_integer([:positive])}")
+      member_uri = URI.new!("user://transient-#{System.unique_integer([:positive])}")
+
+      # Spawn a minimal GenServer to play the member role; it self-registers
+      # so KindRegistry.lookup returns ITS pid (the Registry's owner-pid).
+      {:ok, member_pid} = GenServer.start_link(__MODULE__.NoopServer, member_uri)
+
+      slice = Chat.init_slice(%{})
+      ctx = %{self_uri: session_uri, kind_module: Esr.Entity.Session, caller: member_uri}
+
+      assert {:ok, new_slice, %{members: [^member_uri]}} =
+               Chat.invoke(:join, slice, %{member: member_uri}, ctx)
+
+      assert Map.has_key?(new_slice.members, member_uri)
+      assert new_slice.members[member_uri].online == true
+      assert map_size(new_slice.monitors) == 1
+      [{ref, ^member_uri}] = Map.to_list(new_slice.monitors)
+      assert is_reference(ref)
+
+      GenServer.stop(member_pid)
+    end
+
+    test "returns error when member URI not in KindRegistry" do
+      session_uri = URI.new!("session://join-missing-#{System.unique_integer([:positive])}")
+      missing_uri = URI.new!("user://does-not-exist-#{System.unique_integer([:positive])}")
+
+      slice = Chat.init_slice(%{})
+      ctx = %{self_uri: session_uri, kind_module: Esr.Entity.Session, caller: missing_uri}
+
+      assert {:error, {:member_not_registered, ^missing_uri}} =
+               Chat.invoke(:join, slice, %{member: missing_uri}, ctx)
+    end
+
+    test "replays missed messages on rejoin (last_seen populated)" do
+      session_uri = URI.new!("session://replay-#{System.unique_integer([:positive])}")
+      member_uri = URI.new!("user://rejoin-#{System.unique_integer([:positive])}")
+      sender = URI.new!("user://other")
+
+      # Persist 2 messages in the session before "rejoin"
+      base = ~U[2026-05-16 09:00:00.000000Z]
+
+      _m1 =
+        Message.new(sender, %{text: "missed-1", attachments: []},
+          inserted_at: DateTime.add(base, 60, :second)
+        )
+        |> MessageStore.write(session_uri)
+
+      _m2 =
+        Message.new(sender, %{text: "missed-2", attachments: []},
+          inserted_at: DateTime.add(base, 120, :second)
+        )
+        |> MessageStore.write(session_uri)
+
+      # Start a member that will receive replayed messages
+      {:ok, member_pid} = GenServer.start_link(__MODULE__.NoopServer, member_uri)
+
+      # Slice has last_seen at `base` — both messages are strictly after.
+      slice = %{members: %{}, monitors: %{}, last_seen: %{member_uri => base}}
+      ctx = %{self_uri: session_uri, kind_module: Esr.Entity.Session, caller: member_uri}
+
+      assert {:ok, new_slice, _} = Chat.invoke(:join, slice, %{member: member_uri}, ctx)
+      # last_seen for this member is cleared
+      refute Map.has_key?(new_slice.last_seen, member_uri)
+
+      GenServer.stop(member_pid)
+    end
+  end
+
+  describe "invoke(:leave, ...)" do
+    test "drops member + demonitors + clears last_seen" do
+      session_uri = URI.new!("session://leave-#{System.unique_integer([:positive])}")
+      member_uri = URI.new!("user://leaver-#{System.unique_integer([:positive])}")
+      ref = make_ref()
+
+      slice = %{
+        members: %{member_uri => %{online: true}},
+        monitors: %{ref => member_uri},
+        last_seen: %{member_uri => DateTime.utc_now()}
+      }
+
+      ctx = %{self_uri: session_uri, kind_module: Esr.Entity.Session, caller: member_uri}
+
+      assert {:ok, new_slice} = Chat.invoke(:leave, slice, %{member: member_uri}, ctx)
+
+      refute Map.has_key?(new_slice.members, member_uri)
+      refute Map.has_key?(new_slice.monitors, ref)
+      refute Map.has_key?(new_slice.last_seen, member_uri)
+    end
+  end
+
+  describe "handle_kind_message/3 (:DOWN forwarder)" do
+    test "marks member offline + records last_seen" do
+      member_uri = URI.new!("user://crashed-#{System.unique_integer([:positive])}")
+      ref = make_ref()
+
+      slice = %{
+        members: %{member_uri => %{online: true}},
+        monitors: %{ref => member_uri},
+        last_seen: %{}
+      }
+
+      ctx = %{self_uri: URI.new!("session://x"), kind_module: Esr.Entity.Session}
+
+      down_msg = {:DOWN, ref, :process, self(), :normal}
+
+      assert {:ok, new_slice} = Chat.handle_kind_message(down_msg, slice, ctx)
+      assert new_slice.members[member_uri].online == false
+      refute Map.has_key?(new_slice.monitors, ref)
+      assert %DateTime{} = new_slice.last_seen[member_uri]
+    end
+
+    test "ignores unknown refs" do
+      slice = %{members: %{}, monitors: %{}, last_seen: %{}}
+      ctx = %{self_uri: URI.new!("session://y"), kind_module: Esr.Entity.Session}
+
+      assert :ignore =
+               Chat.handle_kind_message(
+                 {:DOWN, make_ref(), :process, self(), :normal},
+                 slice,
+                 ctx
+               )
+    end
+
+    test "ignores non-:DOWN messages" do
+      slice = Chat.init_slice(%{})
+      ctx = %{self_uri: URI.new!("session://z"), kind_module: Esr.Entity.Session}
+
+      assert :ignore = Chat.handle_kind_message(:tick, slice, ctx)
+      assert :ignore = Chat.handle_kind_message({:any, "thing"}, slice, ctx)
+    end
+  end
+
+  describe "interface schema validates real Message envelope" do
+    test ":send action's message schema accepts a fully-formed Message" do
+      sender = URI.new!("user://admin")
+
+      message =
+        sender
+        |> Message.new(%{text: "hi", attachments: []})
+        |> Map.from_struct()
+
+      schema = Chat.interface()[:send].args
+      assert :ok = InterfaceValidator.validate(%{message: message}, schema)
+    end
+
+    test ":join args schema accepts URI member, rejects string" do
+      schema = Chat.interface()[:join].args
+      assert :ok = InterfaceValidator.validate(%{member: URI.new!("user://admin")}, schema)
+
+      assert {:error, {:invalid_args, _}} =
+               InterfaceValidator.validate(%{member: "user://admin"}, schema)
+    end
+  end
+
+  # --- Test support ------------------------------------------------------
+
+  defmodule NoopServer do
+    @moduledoc false
+    use GenServer
+
+    @impl true
+    def init(uri) do
+      :ok = Esr.KindRegistry.put_new(uri)
+      {:ok, %{}}
+    end
+  end
+end

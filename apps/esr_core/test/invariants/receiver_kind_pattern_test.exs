@@ -34,7 +34,7 @@ defmodule EsrCore.Invariants.ReceiverKindPatternTest do
   use ExUnit.Case, async: true
 
   @plugin_dirs ~w(
-    apps/esr_plugin_chat
+    apps/esr_domain_chat
     apps/esr_plugin_cc_bridge_v1_prototype
     apps/esr_plugin_cc_channel
     apps/esr_plugin_cc_pty

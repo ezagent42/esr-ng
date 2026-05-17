@@ -15,7 +15,7 @@ defmodule Esr.Integration.RoutingAdminCapTest do
   use EsrCore.DataCase, async: false
 
   alias Esr.{Invocation, Routing.Matcher}
-  alias EsrPluginChat.Routing.MentionRouting
+  alias EsrDomainChat.Routing.MentionRouting
 
   defp admin_ctx do
     %{

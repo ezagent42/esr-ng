@@ -34,7 +34,7 @@ defmodule EsrWebLiveview.RoutingLiveTest do
     lv
     |> form("#add-rule form",
       rule: %{
-        table: "Elixir.EsrPluginChat.Routing.MentionRouting",
+        table: "Elixir.EsrDomainChat.Routing.MentionRouting",
         matcher_type: "mention",
         matcher_arg: "agent://lv-test-#{System.unique_integer([:positive])}",
         receivers: "session://lv-rcv-#{System.unique_integer([:positive])}"
@@ -51,7 +51,7 @@ defmodule EsrWebLiveview.RoutingLiveTest do
     {:ok, lv, _html} = live(conn, "/admin/routing")
 
     lv
-    |> element("button[phx-value-table='Elixir.EsrPluginChat.Routing.SessionRouting']")
+    |> element("button[phx-value-table='Elixir.EsrDomainChat.Routing.SessionRouting']")
     |> render_click()
 
     html = render(lv)
@@ -76,7 +76,7 @@ defmodule EsrWebLiveview.RoutingLiveTest do
     lv
     |> form("#add-rule form",
       rule: %{
-        table: "Elixir.EsrPluginChat.Routing.MentionRouting",
+        table: "Elixir.EsrDomainChat.Routing.MentionRouting",
         matcher_json: combinator_json,
         receivers: "session://oncall"
       }
@@ -93,7 +93,7 @@ defmodule EsrWebLiveview.RoutingLiveTest do
     lv
     |> form("#add-rule form",
       rule: %{
-        table: "Elixir.EsrPluginChat.Routing.MentionRouting",
+        table: "Elixir.EsrDomainChat.Routing.MentionRouting",
         matcher_type: "mention",
         matcher_arg: "agent://x",
         receivers: ""

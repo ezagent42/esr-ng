@@ -31,6 +31,8 @@ defmodule EsrCLI.MixProject do
   defp deps do
     [
       {:esr_core, in_umbrella: true},
+      {:esr_domain_identity, in_umbrella: true},
+      {:esr_domain_workspace, in_umbrella: true},
       {:optimus, "~> 0.5"},
       {:jason, ">= 0.0.0"}
     ]
