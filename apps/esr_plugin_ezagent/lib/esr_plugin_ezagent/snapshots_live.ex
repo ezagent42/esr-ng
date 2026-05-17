@@ -1,4 +1,4 @@
-defmodule EsrWebLiveview.SnapshotsLive do
+defmodule EsrPluginEzagent.SnapshotsLive do
   @moduledoc """
   /admin/snapshots — operator visibility into the `kind_snapshots` table
   (Phase 5 PR 3).

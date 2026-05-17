@@ -1,0 +1,98 @@
+defmodule EsrCore.Invariants.LayerPurityTest do
+  @moduledoc """
+  Phase 6 PR 3 invariant — three-layer model integrity.
+
+  Layer rules:
+
+  - `apps/esr_core/`         — depends on: nothing in umbrella
+  - `apps/esr_domain_*/`     — depends on: esr_core + other esr_domain_*
+  - `apps/esr_plugin_*/`     — depends on: esr_core + esr_domain_* + other
+                                esr_plugin_* allowed (e.g. ezagent uses
+                                cc_pty's Template Class)
+  - `apps/esr_web*/`         — depends on: anything (endpoint + router)
+  - `apps/esr_cli/`          — depends on: anything (CLI surface)
+
+  This test parses each app's mix.exs `deps` list and asserts:
+
+  1. **core has no umbrella deps** — core is the bottom of the stack.
+  2. **domain apps depend only on core + other domain** — no plugin
+     dep allowed (else "domain" would be impossible to use without
+     pulling a specific plugin).
+
+  Exemptions: add `# layer-violation-exempt: <reason>` on the offending
+  line. Example: esr_domain_chat depends on
+  esr_plugin_cc_bridge_v1_prototype because Chat.invoke(:receive) on
+  Agent pushes to the bridge; the dep disappears in PR 4 (6a).
+
+  Plugins are unrestricted on purpose — composition between plugins
+  (e.g. ezagent imports cc_pty's Template form fields) is fine; the
+  goal is keeping the LOWER layers clean.
+  """
+  use ExUnit.Case, async: true
+
+  defp apps_root do
+    # cwd is the umbrella app being tested (apps/esr_core), so go up
+    # two levels and back into apps/.
+    {out, 0} = System.cmd("git", ["rev-parse", "--show-toplevel"])
+    Path.join(String.trim(out), "apps")
+  end
+
+  test "esr_core has zero umbrella deps" do
+    deps = read_in_umbrella_deps(:esr_core)
+
+    assert deps == [],
+           """
+           esr_core must not depend on any umbrella app.
+           Found: #{inspect(deps)}
+           """
+  end
+
+  test "esr_domain_* apps only depend on core + other esr_domain_* apps" do
+    for app <- list_apps(~r/^esr_domain_/) do
+      deps = read_in_umbrella_deps(app)
+
+      offending =
+        Enum.reject(deps, fn dep ->
+          dep == :esr_core or
+            (Atom.to_string(dep) |> String.starts_with?("esr_domain_")) or
+            exempt?(app, dep)
+        end)
+
+      assert offending == [],
+             """
+             #{app}/mix.exs has disallowed umbrella deps: #{inspect(offending)}.
+
+             Domain apps must only depend on esr_core or other esr_domain_* apps.
+             Add `# layer-violation-exempt: <reason>` on the dep line to opt out
+             (only for transient violations being repaid in a tracked PR).
+             """
+    end
+  end
+
+  defp list_apps(pattern) do
+    File.ls!(apps_root())
+    |> Enum.filter(&File.dir?(Path.join(apps_root(), &1)))
+    |> Enum.filter(&Regex.match?(pattern, &1))
+    |> Enum.map(&String.to_atom/1)
+  end
+
+  defp read_in_umbrella_deps(app) do
+    mix_path = Path.join([apps_root(), Atom.to_string(app), "mix.exs"])
+    source = File.read!(mix_path)
+
+    Regex.scan(~r/\{:([a-z_][a-z_0-9]*),\s*in_umbrella:\s*true\}/, source)
+    |> Enum.map(fn [_match, dep] -> String.to_atom(dep) end)
+  end
+
+  defp exempt?(app, dep) do
+    mix_path = Path.join([apps_root(), Atom.to_string(app), "mix.exs"])
+    source = File.read!(mix_path)
+
+    # Exemption can appear on the same line as the dep, OR on the line
+    # immediately above (which is the natural form for a multi-line list).
+    line_pattern = ~r/\{:#{dep},\s*in_umbrella:\s*true\}.*?layer-violation-exempt/
+    above_pattern = ~r/layer-violation-exempt[^\n]*\n\s*\{:#{dep},\s*in_umbrella:\s*true\}/
+
+    Regex.match?(line_pattern, source) or Regex.match?(above_pattern, source)
+  end
+end

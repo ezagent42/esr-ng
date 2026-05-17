@@ -9,7 +9,7 @@ defmodule Esr.UI.Form do
   what the module does.
 
   This is the meta-enabler that lets future plugin authors ship
-  operator UI without touching `esr_web_liveview`.
+  operator UI without touching `esr_plugin_ezagent`.
 
   ## Callback
 

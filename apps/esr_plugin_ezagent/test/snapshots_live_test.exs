@@ -1,4 +1,4 @@
-defmodule EsrWebLiveview.SnapshotsLiveTest do
+defmodule EsrPluginEzagent.SnapshotsLiveTest do
   use ExUnit.Case
   import Phoenix.ConnTest
   import Phoenix.LiveViewTest

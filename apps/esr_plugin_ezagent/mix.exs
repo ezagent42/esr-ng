@@ -1,9 +1,9 @@
-defmodule EsrWebLiveview.MixProject do
+defmodule EsrPluginEzagent.MixProject do
   use Mix.Project
 
   def project do
     [
-      app: :esr_web_liveview,
+      app: :esr_plugin_ezagent,
       version: "0.1.0",
       build_path: "../../_build",
       config_path: "../../config/config.exs",
@@ -31,6 +31,8 @@ defmodule EsrWebLiveview.MixProject do
       {:esr_core, in_umbrella: true},
       {:esr_domain_identity, in_umbrella: true},
       {:esr_domain_workspace, in_umbrella: true},
+      # Phase 6 PR 3: shadcn-like HEEx primitives shared across plugin UIs.
+      {:esr_domain_ui, in_umbrella: true},
       # NOTE: deliberately do NOT depend on :esr_web here. esr_web
       # owns routing and references this plugin's LiveView modules by
       # atom — having the plugin also depend on esr_web would create a

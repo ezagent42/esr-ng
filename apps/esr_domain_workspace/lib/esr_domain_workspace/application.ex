@@ -18,7 +18,7 @@ defmodule EsrDomainWorkspace.Application do
 
   Solution: domain_workspace does NOT call load_all here. Instead it
   exposes `EsrDomainWorkspace.boot_complete/0` which the LAST app to
-  boot (currently esr_domain_chat, post-PR-3 esr_web_liveview)
+  boot (currently esr_domain_chat, post-PR-3 esr_plugin_ezagent)
   invokes after all spawn fns are registered. PR 3+ will move this
   call site to an explicit "registry-ready" gate.
   """

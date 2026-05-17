@@ -1,4 +1,4 @@
-defmodule EsrWebLiveview.Admin.MemberPanel do
+defmodule EsrPluginEzagent.Admin.MemberPanel do
   @moduledoc """
   Right pane: session members table (uri / online / last_seen).
   Stateless — parent (AdminLive) reads members from the Session Kind
