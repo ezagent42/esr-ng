@@ -41,7 +41,7 @@ defmodule Esr.Behavior.Identity do
   @behaviour Esr.Behavior
 
   @impl Esr.Behavior
-  def actions, do: [:list_caps, :has_cap?]
+  def actions, do: [:list_caps, :has_cap?, :grant_cap, :revoke_cap]
 
   @impl Esr.Behavior
   def state_slice, do: :identity
@@ -68,6 +68,20 @@ defmodule Esr.Behavior.Identity do
     {:ok, slice, %{has: has?}}
   end
 
+  # Phase 6 PR 6: live cap mutation via behavior action. The CapBAC
+  # gate at dispatch step 5.5 enforces that only callers with admin
+  # caps can grant — so the action itself stays unconditional and
+  # trusts the dispatch-level check.
+  def invoke(:grant_cap, slice, %{cap: cap}, _ctx) do
+    new_slice = %{slice | caps: MapSet.put(slice.caps, cap)}
+    {:ok, new_slice, %{caps: MapSet.to_list(new_slice.caps)}}
+  end
+
+  def invoke(:revoke_cap, slice, %{cap: cap}, _ctx) do
+    new_slice = %{slice | caps: MapSet.delete(slice.caps, cap)}
+    {:ok, new_slice, %{caps: MapSet.to_list(new_slice.caps)}}
+  end
+
   @impl Esr.Behavior
   def interface do
     %{
@@ -79,6 +93,16 @@ defmodule Esr.Behavior.Identity do
       has_cap?: %{
         args: %{cap: :map},
         returns: %{has: :boolean},
+        modes: [:call]
+      },
+      grant_cap: %{
+        args: %{cap: :map},
+        returns: %{caps: {:list, :map}},
+        modes: [:call]
+      },
+      revoke_cap: %{
+        args: %{cap: :map},
+        returns: %{caps: {:list, :map}},
         modes: [:call]
       }
     }

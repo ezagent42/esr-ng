@@ -46,17 +46,16 @@ defmodule EsrDomainIdentity.Application do
   end
 
   defp register_identity_behaviors do
-    :ok = BehaviorRegistry.register(User, :list_caps, Identity)
-    :ok = BehaviorRegistry.register(User, :has_cap?, Identity)
-    # Agent identity-cap binding stays here too — Agent Kind belongs to
-    # chat plugin but :list_caps/:has_cap? on it is an Identity concern.
-    # Both apps load before plugins start dispatching, so registering
-    # against Esr.Entity.Agent here is safe even though Agent is defined
-    # in esr_domain_chat (the atom resolves; the actual entity module
-    # only needs to exist before someone *invokes* it, not at register
-    # time).
-    :ok = BehaviorRegistry.register(Esr.Entity.Agent, :list_caps, Identity)
-    :ok = BehaviorRegistry.register(Esr.Entity.Agent, :has_cap?, Identity)
+    for action <- Identity.actions() do
+      :ok = BehaviorRegistry.register(User, action, Identity)
+      # Agent identity-cap binding stays here too — Agent Kind belongs
+      # to chat plugin but identity actions on it are an Identity
+      # concern. Both apps load before plugins start dispatching, so
+      # registering against Esr.Entity.Agent here is safe even though
+      # Agent is defined in esr_domain_chat.
+      :ok = BehaviorRegistry.register(Esr.Entity.Agent, action, Identity)
+    end
+
     :ok
   end
 
