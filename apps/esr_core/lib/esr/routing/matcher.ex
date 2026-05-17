@@ -51,6 +51,7 @@ defmodule Esr.Routing.Matcher do
           | {:from, String.t()}
           | {:text_contains, String.t()}
           | {:text_matches, String.t()}
+          | {:in_session, String.t()}
           | {:always}
           | {:and, [matcher()]}
           | {:or, [matcher()]}
@@ -83,6 +84,19 @@ defmodule Esr.Routing.Matcher do
   @doc "Always match — catchall rule constructor."
   @spec always() :: matcher()
   def always, do: {:always}
+
+  @doc """
+  Match if message originated in a specific session (Plan B 2026-05-17).
+
+  Without this, all routing rules apply globally — a rule
+  `always() → [feishu://oc_xxx]` would fire for EVERY session's send.
+  `in_session(session_uri)` scopes a rule to one session so plugins
+  like Feishu can bind one chat to one session via routing rule
+  without affecting unrelated sessions.
+  """
+  @spec in_session(URI.t() | String.t()) :: matcher()
+  def in_session(%URI{} = uri), do: {:in_session, URI.to_string(uri)}
+  def in_session(uri) when is_binary(uri), do: {:in_session, uri}
 
   # --- Combinators (Phase 4-completion Spec 05 Part B B.1) -------------
 
@@ -128,6 +142,14 @@ defmodule Esr.Routing.Matcher do
     case sender do
       %URI{} = u -> URI.to_string(u) == uri_str
       s when is_binary(s) -> s == uri_str
+    end
+  end
+
+  def match?({:in_session, session_str}, %Esr.Message{session_uri: session_uri}) do
+    case session_uri do
+      %URI{} = u -> URI.to_string(u) == session_str
+      s when is_binary(s) -> s == session_str
+      _ -> false
     end
   end
 
@@ -178,6 +200,7 @@ defmodule Esr.Routing.Matcher do
   def to_json({:text_contains, sub}), do: %{"type" => "text_contains", "arg" => sub}
   def to_json({:text_matches, re}), do: %{"type" => "text_matches", "arg" => re}
   def to_json({:always}), do: %{"type" => "always"}
+  def to_json({:in_session, uri_str}), do: %{"type" => "in_session", "arg" => uri_str}
 
   # Combinators
   def to_json({:and, list}) when is_list(list),
@@ -212,6 +235,9 @@ defmodule Esr.Routing.Matcher do
   end
 
   def from_json(%{"type" => "always"}), do: {:ok, always()}
+
+  def from_json(%{"type" => "in_session", "arg" => uri}) when is_binary(uri),
+    do: {:ok, in_session(uri)}
 
   # Combinators — recursive descent
   def from_json(%{"type" => "and", "items" => items}) when is_list(items) do
