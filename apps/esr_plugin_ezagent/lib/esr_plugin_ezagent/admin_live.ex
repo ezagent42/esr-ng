@@ -1,9 +1,9 @@
-defmodule EsrWebLiveview.AdminLive do
+defmodule EsrPluginEzagent.AdminLive do
   @moduledoc """
   /admin LiveView — coordinator shell.
 
   Phase 4a split (per Phase 4 D2): render fragments live in stateless
-  Phoenix.Component modules under `EsrWebLiveview.Admin.*`. This module
+  Phoenix.Component modules under `EsrPluginEzagent.Admin.*`. This module
   keeps:
 
   - mount + state assigns + stream setup
@@ -12,12 +12,12 @@ defmodule EsrWebLiveview.AdminLive do
     create_session / add_agent_to_session / manual_dispatch)
   - a thin render/1 that composes the 4 components
 
-  Sub-components (see `apps/esr_web_liveview/lib/esr_web_liveview/admin/`):
+  Sub-components (see `apps/esr_plugin_ezagent/lib/esr_plugin_ezagent/admin/`):
 
-  - `EsrWebLiveview.Admin.SessionsSidebar` — left: sessions + new + floating
-  - `EsrWebLiveview.Admin.ChatWindow` — center: header + stream + compose
-  - `EsrWebLiveview.Admin.MemberPanel` — right: members table
-  - `EsrWebLiveview.Admin.DebugPanel` — below: cc-bridges + debug area
+  - `EsrPluginEzagent.Admin.SessionsSidebar` — left: sessions + new + floating
+  - `EsrPluginEzagent.Admin.ChatWindow` — center: header + stream + compose
+  - `EsrPluginEzagent.Admin.MemberPanel` — right: members table
+  - `EsrPluginEzagent.Admin.DebugPanel` — below: cc-bridges + debug area
 
   Phase 4 D2 originally specced LiveComponent-per-surface. We landed on
   Phoenix.Component (stateless) because admin_live's state is tightly
@@ -32,10 +32,10 @@ defmodule EsrWebLiveview.AdminLive do
   use Phoenix.LiveView
   import Phoenix.Component
 
-  import EsrWebLiveview.Admin.SessionsSidebar
-  import EsrWebLiveview.Admin.ChatWindow
-  import EsrWebLiveview.Admin.MemberPanel
-  import EsrWebLiveview.Admin.DebugPanel
+  import EsrPluginEzagent.Admin.SessionsSidebar
+  import EsrPluginEzagent.Admin.ChatWindow
+  import EsrPluginEzagent.Admin.MemberPanel
+  import EsrPluginEzagent.Admin.DebugPanel
 
   @echo_target URI.parse("agent://echo/behavior/echo/say")
   @main_session_uri URI.new!("session://main")

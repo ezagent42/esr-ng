@@ -1,4 +1,4 @@
-defmodule EsrWebLiveview.WorkspaceAddTemplateLiveTest do
+defmodule EsrPluginEzagent.WorkspaceAddTemplateLiveTest do
   @moduledoc """
   Phase 5 PR 1 invariant test: Workspace LV add-template (form mode)
   results in a Session spawned via GenericSession Template Class

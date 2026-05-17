@@ -1,4 +1,4 @@
-defmodule EsrWebLiveview.RoutingLive do
+defmodule EsrPluginEzagent.RoutingLive do
   @moduledoc """
   /admin/routing — global RoutingRegistry rules editor.
 

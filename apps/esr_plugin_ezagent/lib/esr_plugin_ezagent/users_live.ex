@@ -1,4 +1,4 @@
-defmodule EsrWebLiveview.UsersLive do
+defmodule EsrPluginEzagent.UsersLive do
   @moduledoc """
   /admin/users — list + create + disable Users (Phase 5 PR 2).
 

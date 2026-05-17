@@ -1,4 +1,4 @@
-defmodule EsrWebLiveview.Admin.DebugPanel do
+defmodule EsrPluginEzagent.Admin.DebugPanel do
   @moduledoc """
   Below-the-fold: CC Bridges table + collapsible Debug area
   (Echo button + Manual Dispatch form + Audit Log stream).

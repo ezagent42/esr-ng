@@ -1,4 +1,4 @@
-defmodule EsrWebLiveview.AgentDetailLive do
+defmodule EsrPluginEzagent.AgentDetailLive do
   @moduledoc """
   Phase 5 PR 3: per-agent PTY status detail at `/admin/agents/:uri`.
 

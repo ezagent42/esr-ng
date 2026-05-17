@@ -1,4 +1,4 @@
-defmodule EsrWebLiveview.PtyTerminalLive do
+defmodule EsrPluginEzagent.PtyTerminalLive do
   @moduledoc """
   Phase 5 PR 4: Pty-Web — xterm.js rendering of a live cc-pty TUI in
   the browser.
