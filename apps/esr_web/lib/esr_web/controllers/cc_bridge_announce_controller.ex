@@ -193,6 +193,10 @@ defmodule EsrWeb.CcBridgeAnnounceController do
     text = Map.get(params, "text", "")
     session_uris = Map.get(params, "session_uris", [])
     ref = Map.get(params, "ref")
+    # Phase 6 PR 14: optional `attachments` list:
+    #   [{"type": "file"|"image", "local_path": "/abs/path", "name": "x"}]
+    # Bridge sends LOCAL PATHS — Feishu adapter uploads when sending.
+    attachments = Map.get(params, "attachments", [])
 
     cond do
       not is_binary(text) ->
@@ -205,8 +209,13 @@ defmodule EsrWeb.CcBridgeAnnounceController do
         |> put_status(:unprocessable_entity)
         |> json(%{ok: false, error: "session_uris must be a list of strings"})
 
+      not is_list(attachments) ->
+        conn
+        |> put_status(:unprocessable_entity)
+        |> json(%{ok: false, error: "attachments must be a list of maps"})
+
       true ->
-        case BridgeServer.forward_reply_to_agent(bridge_id, session_uris, text, ref) do
+        case BridgeServer.forward_reply_to_agent(bridge_id, session_uris, text, ref, attachments) do
           :ok ->
             json(conn, %{ok: true})
 

@@ -108,12 +108,14 @@ def post_disconnect() -> bool:
         return False
 
 
-def post_reply(session_uris, text: str, ref=None) -> bool:
+def post_reply(session_uris, text: str, ref=None, attachments=None) -> bool:
     """Forward claude's reply tool call to esrd.
 
-    Phase 3c: D8 contract — must include session_uris (list) and may
-    include ref (optional). esrd's controller routes via Agent Kind
-    (per session_uri) so reply lands in the chat router.
+    Phase 3c: D8 contract — session_uris (list) + text required;
+    ref optional.
+    Phase 6 PR 14: attachments optional list of
+        {"type": "image"|"file", "local_path": "/abs/path", "name": "x"}
+    Esr-side Feishu adapter uploads from local_path.
     """
     payload = {
         "bridge_id": BRIDGE_ID,
@@ -122,6 +124,8 @@ def post_reply(session_uris, text: str, ref=None) -> bool:
     }
     if ref:
         payload["ref"] = ref
+    if attachments:
+        payload["attachments"] = list(attachments)
 
     body = json.dumps(payload).encode("utf-8")
     req = urllib.request.Request(
@@ -269,6 +273,26 @@ def handle(msg: dict):
                                         "session_uris (soft warning on mismatch)."
                                     ),
                                 },
+                                "attachments": {
+                                    "type": "array",
+                                    "description": (
+                                        "Phase 6 PR 14: optional list of files to attach. "
+                                        "Each item: {type: 'image'|'file', local_path: "
+                                        "'/abs/path', name: 'display.ext'}. "
+                                        "The Feishu adapter uploads from local_path "
+                                        "and sends as the matching Feishu message_type. "
+                                        "Use this when the user asks for a file/image back."
+                                    ),
+                                    "items": {
+                                        "type": "object",
+                                        "properties": {
+                                            "type": {"type": "string", "enum": ["image", "file"]},
+                                            "local_path": {"type": "string"},
+                                            "name": {"type": "string"},
+                                        },
+                                        "required": ["type", "local_path", "name"],
+                                    },
+                                },
                             },
                             "required": ["session_uris", "text"],
                         },
@@ -281,7 +305,8 @@ def handle(msg: dict):
         text = args.get("text", "")
         session_uris = args.get("session_uris", [])
         ref = args.get("ref")
-        ok = post_reply(session_uris, text, ref)
+        attachments = args.get("attachments")
+        ok = post_reply(session_uris, text, ref, attachments)
         respond(
             req_id,
             {

@@ -150,7 +150,21 @@ defmodule Esr.Bridge.V1Prototype.Server do
           :ok | {:error, :no_agent}
   def forward_reply_to_agent(bridge_id, session_uris, text, ref \\ nil)
       when is_binary(bridge_id) and is_list(session_uris) and is_binary(text) do
-    GenServer.call(__MODULE__, {:forward_reply, bridge_id, session_uris, text, ref})
+    forward_reply_to_agent(bridge_id, session_uris, text, ref, [])
+  end
+
+  @doc """
+  Phase 6 PR 14: reply with attachments. `attachments` is a list of
+  `%{"type" => "image" | "file", "local_path" => "/abs", "name" => "x"}`
+  maps. Sent to Agent Kind as
+  `{:reply_received, sessions, text, ref, attachments}`.
+  """
+  @spec forward_reply_to_agent(String.t(), [String.t()], String.t(), String.t() | nil, [map()]) ::
+          :ok | {:error, :no_agent}
+  def forward_reply_to_agent(bridge_id, session_uris, text, ref, attachments)
+      when is_binary(bridge_id) and is_list(session_uris) and is_binary(text) and
+             is_list(attachments) do
+    GenServer.call(__MODULE__, {:forward_reply, bridge_id, session_uris, text, ref, attachments})
   end
 
   @doc "Look up the bridge_id bound to an Agent URI (for outbound to_claude push)."
@@ -268,7 +282,13 @@ defmodule Esr.Bridge.V1Prototype.Server do
     {:reply, :ok, new_state}
   end
 
-  def handle_call({:forward_reply, bridge_id, session_uris, text, ref}, _from, state) do
+  # Phase 6 PR 14: old 5-tuple kept for back-compat with any caller
+  # that doesn't pass attachments — delegates with empty list.
+  def handle_call({:forward_reply, bridge_id, session_uris, text, ref}, from, state) do
+    handle_call({:forward_reply, bridge_id, session_uris, text, ref, []}, from, state)
+  end
+
+  def handle_call({:forward_reply, bridge_id, session_uris, text, ref, attachments}, _from, state) do
     case Map.get(state.bridge_to_agent, bridge_id) do
       nil ->
         {:reply, {:error, :no_agent}, state}
@@ -276,9 +296,9 @@ defmodule Esr.Bridge.V1Prototype.Server do
       agent_pid when is_pid(agent_pid) ->
         # send/2 lands in Esr.Kind.Server.handle_info/2 which fans out
         # to each composed Behavior's handle_kind_message/3. Chat's
-        # clause for {:reply_received, session_uris, text, ref}
+        # clause for {:reply_received, session_uris, text, ref, attachments}
         # dispatches chat/send per session_uri (envelope reused).
-        send(agent_pid, {:reply_received, session_uris, text, ref})
+        send(agent_pid, {:reply_received, session_uris, text, ref, attachments})
         {:reply, :ok, state}
     end
   end

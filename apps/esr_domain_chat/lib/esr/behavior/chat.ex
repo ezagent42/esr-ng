@@ -155,12 +155,28 @@ defmodule Esr.Behavior.Chat do
             _ -> ""
           end
 
+        # Phase 6 PR 14: pass attachments through to claude so it sees
+        # what the operator sent, even when the bridge can't render
+        # binary content. Format as a text breadcrumb attached after
+        # the body text; the structured `meta.attachments` array
+        # carries the same info for clients that can parse it.
+        attachments = body_attachments(msg.body)
+        attachment_hint = attachment_hint_text(attachments)
+        text_with_hint =
+          case {body_text(msg.body), attachment_hint} do
+            {"", ""} -> ""
+            {t, ""} -> t
+            {"", hint} -> hint
+            {t, hint} -> t <> "\n" <> hint
+          end
+
         payload = %{
-          "content" => body_text(msg.body),
+          "content" => text_with_hint,
           "meta" => %{
             "sender" => URI.to_string(msg.sender),
             "message_uri" => msg.uri,
-            "session" => source_session
+            "session" => source_session,
+            "attachments" => Enum.map(attachments, &serialize_attachment/1)
           }
         }
 
@@ -174,12 +190,8 @@ defmodule Esr.Behavior.Chat do
               {:ok, bridge_id} ->
                 Esr.Bridge.V1Prototype.Server.push_to_claude(
                   bridge_id,
-                  body_text(msg.body),
-                  %{
-                    "sender" => URI.to_string(msg.sender),
-                    "message_uri" => msg.uri,
-                    "session" => source_session
-                  }
+                  text_with_hint,
+                  payload["meta"]
                 )
 
               :error ->
@@ -300,10 +312,23 @@ defmodule Esr.Behavior.Chat do
   # STILL routes per the explicit session_uris (trust claude's choice).
   def handle_kind_message(
         {:reply_received, session_uris, text, ref_str_or_nil},
+        slice,
+        ctx
+      )
+      when is_list(session_uris) and is_binary(text) do
+    handle_kind_message(
+      {:reply_received, session_uris, text, ref_str_or_nil, []},
+      slice,
+      ctx
+    )
+  end
+
+  def handle_kind_message(
+        {:reply_received, session_uris, text, ref_str_or_nil, attachments},
         _slice,
         %{kind_module: Esr.Entity.Agent} = ctx
       )
-      when is_list(session_uris) and is_binary(text) do
+      when is_list(session_uris) and is_binary(text) and is_list(attachments) do
     agent_uri = ctx.self_uri
 
     # Construct envelope once (identity invariant). ref is string at
@@ -315,8 +340,14 @@ defmodule Esr.Behavior.Chat do
         s when is_binary(s) -> URI.new!(s)
       end
 
+    # Phase 6 PR 14: reply attachments come in as
+    # `[%{"type" => "file", "local_path" => "/abs/path", "name" => "x"}]`
+    # from the Python bridge. Normalize keys to atoms for the
+    # FeishuReceive consumer.
     msg =
-      Message.new(agent_uri, %{text: text, attachments: []},
+      Message.new(
+        agent_uri,
+        %{text: text, attachments: normalize_attachments(attachments)},
         ref: ref_uri
       )
 
@@ -532,6 +563,51 @@ defmodule Esr.Behavior.Chat do
   defp body_text(%{text: t}) when is_binary(t), do: t
   defp body_text(%{"text" => t}) when is_binary(t), do: t
   defp body_text(_), do: ""
+
+  # Phase 6 PR 14 — attachment helpers for bridge payload.
+  defp body_attachments(%{attachments: list}) when is_list(list), do: list
+  defp body_attachments(%{"attachments" => list}) when is_list(list), do: list
+  defp body_attachments(_), do: []
+
+  defp serialize_attachment(%{} = att) do
+    Map.new(att, fn
+      {k, v} when is_atom(k) -> {Atom.to_string(k), serialize_value(v)}
+      {k, v} -> {k, serialize_value(v)}
+    end)
+  end
+
+  defp serialize_value(v) when is_atom(v) and v not in [nil, true, false], do: Atom.to_string(v)
+  defp serialize_value(v), do: v
+
+  defp attachment_hint_text([]), do: ""
+
+  defp attachment_hint_text(list) do
+    parts =
+      Enum.map(list, fn att ->
+        type = att[:type] || att["type"] || "unknown"
+        name = att[:name] || att["name"] || "?"
+        "[attachment: type=#{type} name=#{name}]"
+      end)
+
+    Enum.join(parts, " ")
+  end
+
+  defp normalize_attachments(list) when is_list(list) do
+    Enum.map(list, fn
+      %{} = m -> normalize_attachment_keys(m)
+      other -> other
+    end)
+  end
+
+  defp normalize_attachment_keys(m) do
+    Map.new(m, fn
+      {k, v} when is_binary(k) -> {String.to_atom(k), normalize_attachment_value(k, v)}
+      kv -> kv
+    end)
+  end
+
+  defp normalize_attachment_value("type", v) when is_binary(v), do: String.to_atom(v)
+  defp normalize_attachment_value(_, v), do: v
 
   defp message_schema do
     %{

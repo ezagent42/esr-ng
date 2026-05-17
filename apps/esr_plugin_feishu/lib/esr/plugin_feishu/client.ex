@@ -38,6 +38,42 @@ defmodule EsrPluginFeishu.Client do
     GenServer.call(__MODULE__, {:send_text, chat_id, text}, 10_000)
   end
 
+  # --- Phase 6 PR 14: image / file pass-through --------------------------
+
+  @doc """
+  Download a Feishu resource (image, file, audio, video) to the local
+  filesystem. Returns `{:ok, path}` on success.
+
+  Path is written under `\$ESR_HOME/<profile>/inbox/feishu/<filename>`
+  so the operator can browse what arrived (and CC has a real local
+  path to give to `Read` if it wants to inspect contents).
+  """
+  @spec download_resource(String.t(), String.t(), String.t(), String.t()) ::
+          {:ok, Path.t()} | {:error, term()}
+  def download_resource(message_id, file_key, type, filename) do
+    GenServer.call(__MODULE__, {:download_resource, message_id, file_key, type, filename}, 30_000)
+  end
+
+  @doc "Upload an image. Returns `{:ok, image_key}` for use in send_image/2."
+  @spec upload_image(Path.t()) :: {:ok, String.t()} | {:error, term()}
+  def upload_image(path), do: GenServer.call(__MODULE__, {:upload_image, path}, 30_000)
+
+  @doc "Upload a file. Returns `{:ok, file_key}` for use in send_file/2."
+  @spec upload_file(Path.t(), String.t()) :: {:ok, String.t()} | {:error, term()}
+  def upload_file(path, name), do: GenServer.call(__MODULE__, {:upload_file, path, name}, 30_000)
+
+  @doc "Send an image message (image_key from upload_image/1)."
+  @spec send_image(String.t(), String.t()) :: :ok | {:error, term()}
+  def send_image(chat_id, image_key) do
+    GenServer.call(__MODULE__, {:send_image, chat_id, image_key}, 10_000)
+  end
+
+  @doc "Send a file message (file_key from upload_file/2)."
+  @spec send_file(String.t(), String.t()) :: :ok | {:error, term()}
+  def send_file(chat_id, file_key) do
+    GenServer.call(__MODULE__, {:send_file, chat_id, file_key}, 10_000)
+  end
+
   @doc "Returns `{:ok, status}` describing the client's credential state."
   def status do
     GenServer.call(__MODULE__, :status)
@@ -116,6 +152,121 @@ defmodule EsrPluginFeishu.Client do
     end
   end
 
+  # --- Phase 6 PR 14: download_resource ---------------------------------
+
+  def handle_call({:download_resource, _, _, _, _}, _from, %__MODULE__{app_id: nil} = state),
+    do: {:reply, {:error, :credentials_not_configured}, state}
+
+  def handle_call({:download_resource, message_id, file_key, type, filename}, _from, state) do
+    case ensure_token(state) do
+      {:ok, token, new_state} ->
+        url =
+          "#{@lark_base}/im/v1/messages/#{message_id}/resources/#{file_key}?type=#{type}"
+
+        case :httpc.request(
+               :get,
+               {String.to_charlist(url),
+                [{~c"Authorization", String.to_charlist("Bearer #{token}")}]},
+               [{:timeout, 30_000}],
+               body_format: :binary
+             ) do
+          {:ok, {{_, 200, _}, _, bytes}} ->
+            path = inbox_path(filename)
+            File.mkdir_p!(Path.dirname(path))
+            File.write!(path, bytes)
+            {:reply, {:ok, path}, new_state}
+
+          {:ok, {{_, status, _}, _, body}} ->
+            {:reply, {:error, {:http_status, status, to_string(body)}}, new_state}
+
+          {:error, reason} ->
+            {:reply, {:error, {:http_error, reason}}, new_state}
+        end
+
+      err ->
+        {:reply, err, state}
+    end
+  end
+
+  # --- Phase 6 PR 14: upload_image / upload_file -----------------------
+
+  def handle_call({:upload_image, _}, _from, %__MODULE__{app_id: nil} = state),
+    do: {:reply, {:error, :credentials_not_configured}, state}
+
+  def handle_call({:upload_image, path}, _from, state) do
+    case ensure_token(state) do
+      {:ok, token, new_state} ->
+        {:reply,
+         multipart_upload(
+           "#{@lark_base}/im/v1/images",
+           token,
+           [{"image_type", "message"}],
+           {"image", path}
+         )
+         |> parse_upload_response("image_key"), new_state}
+
+      err ->
+        {:reply, err, state}
+    end
+  end
+
+  def handle_call({:upload_file, _, _}, _from, %__MODULE__{app_id: nil} = state),
+    do: {:reply, {:error, :credentials_not_configured}, state}
+
+  def handle_call({:upload_file, path, name}, _from, state) do
+    case ensure_token(state) do
+      {:ok, token, new_state} ->
+        {:reply,
+         multipart_upload(
+           "#{@lark_base}/im/v1/files",
+           token,
+           [{"file_type", "stream"}, {"file_name", name}],
+           {"file", path}
+         )
+         |> parse_upload_response("file_key"), new_state}
+
+      err ->
+        {:reply, err, state}
+    end
+  end
+
+  # --- Phase 6 PR 14: send_image / send_file ---------------------------
+
+  def handle_call({:send_image, chat_id, image_key}, _from, state) do
+    send_typed_message(state, chat_id, "image", %{image_key: image_key})
+  end
+
+  def handle_call({:send_file, chat_id, file_key}, _from, state) do
+    send_typed_message(state, chat_id, "file", %{file_key: file_key})
+  end
+
+  defp send_typed_message(%__MODULE__{app_id: nil} = state, _, _, _),
+    do: {:reply, {:error, :credentials_not_configured}, state}
+
+  defp send_typed_message(state, chat_id, msg_type, content_map) do
+    case ensure_token(state) do
+      {:ok, token, new_state} ->
+        body = %{
+          receive_id: chat_id,
+          msg_type: msg_type,
+          content: Jason.encode!(content_map)
+        }
+
+        case http_post_json(
+               "#{@lark_base}/im/v1/messages?receive_id_type=chat_id",
+               body,
+               [{~c"Authorization", String.to_charlist("Bearer #{token}")}]
+             ) do
+          {:ok, %{"code" => 0}} -> {:reply, :ok, new_state}
+          {:ok, %{"code" => code, "msg" => msg}} -> {:reply, {:error, {:lark_error, code, msg}}, new_state}
+          err -> {:reply, err, new_state}
+        end
+
+      err ->
+        {:reply, err, state}
+    end
+  end
+
   def handle_call(:status, _from, state) do
     s = %{
       configured: state.app_id != nil,
@@ -157,6 +308,76 @@ defmodule EsrPluginFeishu.Client do
         err
     end
   end
+
+  # --- inbox helpers (Phase 6 PR 14) -----------------------------------
+
+  defp inbox_path(filename) do
+    Path.join([Esr.Home.profile_dir(), "inbox", "feishu", safe_name(filename)])
+  end
+
+  # Strip any path-separator chars Feishu might send and cap length.
+  defp safe_name(name) when is_binary(name) do
+    name
+    |> String.replace(["/", "\\", ".."], "_")
+    |> String.slice(0, 200)
+  end
+
+  defp safe_name(_), do: "unnamed"
+
+  # --- multipart upload (Lark expects multipart/form-data) ---------------
+
+  defp multipart_upload(url, token, extra_fields, {field_name, path}) do
+    boundary = "----esrPhase6PR14" <> Integer.to_string(System.unique_integer([:positive]))
+    file_bytes = File.read!(path)
+    filename = Path.basename(path)
+
+    body =
+      build_multipart_body(boundary, extra_fields, field_name, filename, file_bytes)
+
+    headers = [
+      {~c"Authorization", String.to_charlist("Bearer #{token}")}
+    ]
+
+    request = {
+      String.to_charlist(url),
+      headers,
+      String.to_charlist("multipart/form-data; boundary=#{boundary}"),
+      body
+    }
+
+    case :httpc.request(:post, request, [{:timeout, 30_000}], body_format: :binary) do
+      {:ok, {{_, 200, _}, _, resp}} ->
+        case Jason.decode(to_string(resp)) do
+          {:ok, %{"code" => 0, "data" => data}} -> {:ok, data}
+          {:ok, %{"code" => code, "msg" => msg}} -> {:error, {:lark_error, code, msg}}
+          err -> err
+        end
+
+      {:ok, {{_, status, _}, _, body}} ->
+        {:error, {:http_status, status, to_string(body)}}
+
+      {:error, reason} ->
+        {:error, {:http_error, reason}}
+    end
+  end
+
+  defp build_multipart_body(boundary, fields, file_field, filename, file_bytes) do
+    field_parts =
+      Enum.map(fields, fn {k, v} ->
+        ~s(--#{boundary}\r\nContent-Disposition: form-data; name="#{k}"\r\n\r\n#{v}\r\n)
+      end)
+      |> IO.iodata_to_binary()
+
+    file_part =
+      ~s(--#{boundary}\r\nContent-Disposition: form-data; name="#{file_field}"; filename="#{filename}"\r\nContent-Type: application/octet-stream\r\n\r\n) <>
+        file_bytes <>
+        "\r\n"
+
+    field_parts <> file_part <> "--#{boundary}--\r\n"
+  end
+
+  defp parse_upload_response({:ok, %{} = data}, key), do: {:ok, Map.get(data, key)}
+  defp parse_upload_response({:error, _} = err, _), do: err
 
   # --- :httpc helper -------------------------------------------------------
 
