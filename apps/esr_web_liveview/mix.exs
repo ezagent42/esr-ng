@@ -29,6 +29,8 @@ defmodule EsrWebLiveview.MixProject do
   defp deps do
     [
       {:esr_core, in_umbrella: true},
+      {:esr_domain_identity, in_umbrella: true},
+      {:esr_domain_workspace, in_umbrella: true},
       # NOTE: deliberately do NOT depend on :esr_web here. esr_web
       # owns routing and references this plugin's LiveView modules by
       # atom — having the plugin also depend on esr_web would create a
@@ -45,7 +47,7 @@ defmodule EsrWebLiveview.MixProject do
       # offline) sourced from `Esr.Behavior.Chat`. Same shape as the
       # cc-bridge coupling — Phase 3+ may abstract the LV's "what
       # session UI to show" via configuration rather than direct dep.
-      {:esr_plugin_chat, in_umbrella: true},
+      {:esr_domain_chat, in_umbrella: true},
       # Phase 4 PR 8: cc-pty Template Class — registers via
       # TemplateRegistry; needed at LV mount to render add-template
       # form fields and PTY status pages.

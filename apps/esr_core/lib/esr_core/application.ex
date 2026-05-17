@@ -32,16 +32,16 @@ defmodule EsrCore.Application do
       # ⑥ Audit batch writer — must come after Repo + PubSub.
       Esr.Audit.Writer,
 
-      # ⑦ Workspace DynamicSupervisor (Phase 4b) — holds spawned
-      # `workspace://<name>` Kinds. Phase 4c's Loader queries the
-      # `workspaces` table at app start and dispatches spawn_workspace
-      # per row.
-      {DynamicSupervisor, name: Esr.Workspace.Supervisor, strategy: :one_for_one},
-
-      # ⑧ Snapshot async writer (Phase 4-completion Spec 04) — handles
+      # ⑦ Snapshot async writer (Phase 4-completion Spec 04) — handles
       # `:periodic` strategy; `:on_change` / `:on_terminate` go through
       # `Esr.Kind.Snapshot.save_now/3` synchronously.
-      Esr.Snapshot.Writer
+      Esr.Snapshot.Writer,
+
+      # ⑧ Foundation singleton supervisor — Phase 6 PR 2. Hosts core
+      # singletons (RoutingAdmin and future cross-domain controllers).
+      # Workspace.Supervisor moved out to esr_domain_workspace as part
+      # of the three-layer split.
+      {DynamicSupervisor, name: Esr.Core.SingletonSupervisor, strategy: :one_for_one}
     ]
 
     result = Supervisor.start_link(children, strategy: :one_for_one, name: EsrCore.Supervisor)
@@ -49,14 +49,10 @@ defmodule EsrCore.Application do
     # Attach telemetry handlers after the writer is up. Idempotent on restart.
     :ok = Esr.Audit.attach()
 
-    # Phase 4b: register Workspace Behavior. Workspace is foundational
-    # enough to live in esr_core (cross-plugin Entity, like User), so its
-    # K-path wiring happens here rather than in a plugin Application.
-    :ok = register_workspace_behavior()
-
     # Phase 5 PR 4: register RoutingAdmin Behavior + spawn singleton
     # `routing-admin://default` so /admin/routing dispatches go through
-    # CapBAC check at step 5.5.
+    # CapBAC check at step 5.5. Workspace registration moved to
+    # esr_domain_workspace.Application in Phase 6 PR 2.
     :ok = register_routing_admin()
 
     # Post-Phase-5 (Allen 2026-05-17): start distributed Erlang as the
@@ -76,18 +72,6 @@ defmodule EsrCore.Application do
     _ -> false
   end
 
-  defp register_workspace_behavior do
-    alias Esr.BehaviorRegistry
-    alias Esr.Behavior.Workspace, as: WB
-    alias Esr.Entity.Workspace, as: WK
-
-    Enum.each(WB.actions(), fn action ->
-      :ok = BehaviorRegistry.register(WK, action, WB)
-    end)
-
-    :ok
-  end
-
   defp register_routing_admin do
     alias Esr.BehaviorRegistry
     alias Esr.Behavior.RoutingAdmin, as: RAB
@@ -97,8 +81,6 @@ defmodule EsrCore.Application do
       :ok = BehaviorRegistry.register(RAK, action, RAB)
     end)
 
-    # Spawn the singleton instance. Use Workspace.Supervisor since it's
-    # the existing DynamicSupervisor that hosts foundational Kinds.
     uri = RAK.default_uri()
 
     case Esr.KindRegistry.lookup(uri) do
@@ -107,7 +89,7 @@ defmodule EsrCore.Application do
 
       :error ->
         case DynamicSupervisor.start_child(
-               Esr.Workspace.Supervisor,
+               Esr.Core.SingletonSupervisor,
                {Esr.Kind.Server, {RAK, %{uri: uri}}}
              ) do
           {:ok, _pid} -> :ok

@@ -10,7 +10,7 @@ defmodule EsrWeb.CcBridgeAnnounceController do
   - If `agent_uri` is supplied (Phase 2 path — either
     `ESR_AGENT_URI` from the Python bridge's mcp.json env field, or
     the operator's shell env): spawns an `Esr.Entity.Agent` Kind at
-    that URI under `EsrPluginChat.AgentSupervisor`, binds it to
+    that URI under `EsrDomainChat.AgentSupervisor`, binds it to
     bridge_id on the Server, and joins it to `session://main`.
   - If `agent_uri` is absent (legacy / Phase 1 mode): bare bridge
     registration only; no Agent Kind, no Chat routing.
@@ -85,7 +85,7 @@ defmodule EsrWeb.CcBridgeAnnounceController do
   defp start_agent_kind(agent_uri) do
     spec = {Esr.Kind.Server, {Agent, %{uri: agent_uri}}}
 
-    case DynamicSupervisor.start_child(EsrPluginChat.AgentSupervisor, spec) do
+    case DynamicSupervisor.start_child(EsrDomainChat.AgentSupervisor, spec) do
       {:ok, pid} ->
         {:ok, pid}
 
@@ -121,7 +121,7 @@ defmodule EsrWeb.CcBridgeAnnounceController do
   defp terminate_agent(agent_uri) do
     case Esr.KindRegistry.lookup(agent_uri) do
       {:ok, agent_pid} ->
-        _ = DynamicSupervisor.terminate_child(EsrPluginChat.AgentSupervisor, agent_pid)
+        _ = DynamicSupervisor.terminate_child(EsrDomainChat.AgentSupervisor, agent_pid)
         :ok
 
       :error ->

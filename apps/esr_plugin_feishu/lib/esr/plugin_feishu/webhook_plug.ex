@@ -96,7 +96,7 @@ defmodule EsrPluginFeishu.WebhookPlug do
   defp lookup_session_for_chat(chat_id) do
     feishu_uri_str = "feishu://" <> chat_id
 
-    Esr.Routing.RuleStore.list(EsrPluginChat.Routing.MentionRouting)
+    Esr.Routing.RuleStore.list(EsrDomainChat.Routing.MentionRouting)
     |> Enum.find_value(:error, fn row ->
       cond do
         not (feishu_uri_str in row.receivers) ->

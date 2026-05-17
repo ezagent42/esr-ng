@@ -18,7 +18,7 @@ defmodule Esr.Routing.RuleStoreTest do
   end
 
   test "add → list round-trip with matcher JSON encoded" do
-    table = EsrPluginChat.Routing.MentionRouting
+    table = EsrDomainChat.Routing.MentionRouting
 
     {:ok, row} =
       RuleStore.add(
@@ -41,7 +41,7 @@ defmodule Esr.Routing.RuleStoreTest do
   test "list scoped by table name — other tables don't leak" do
     {:ok, _} =
       RuleStore.add(
-        EsrPluginChat.Routing.MentionRouting,
+        EsrDomainChat.Routing.MentionRouting,
         Matcher.always(),
         ["session://a"],
         nil
@@ -49,29 +49,29 @@ defmodule Esr.Routing.RuleStoreTest do
 
     {:ok, _} =
       RuleStore.add(
-        EsrPluginChat.Routing.SessionRouting,
+        EsrDomainChat.Routing.SessionRouting,
         Matcher.from("agent://x"),
         ["session://b"],
         nil
       )
 
-    assert length(admin_rules(EsrPluginChat.Routing.MentionRouting)) == 1
-    assert length(admin_rules(EsrPluginChat.Routing.SessionRouting)) == 1
+    assert length(admin_rules(EsrDomainChat.Routing.MentionRouting)) == 1
+    assert length(admin_rules(EsrDomainChat.Routing.SessionRouting)) == 1
   end
 
   test "delete removes by id" do
     {:ok, row} =
-      RuleStore.add(EsrPluginChat.Routing.MentionRouting, Matcher.always(), ["session://x"], nil)
+      RuleStore.add(EsrDomainChat.Routing.MentionRouting, Matcher.always(), ["session://x"], nil)
 
     assert :ok = RuleStore.delete(row.id)
     assert {:error, :not_found} = RuleStore.delete(row.id)
-    assert [] = admin_rules(EsrPluginChat.Routing.MentionRouting)
+    assert [] = admin_rules(EsrDomainChat.Routing.MentionRouting)
   end
 
   test "URI struct receiver gets serialized to string" do
     {:ok, row} =
       RuleStore.add(
-        EsrPluginChat.Routing.MentionRouting,
+        EsrDomainChat.Routing.MentionRouting,
         Matcher.always(),
         [URI.new!("session://x"), URI.new!("session://y")],
         URI.new!("user://admin")

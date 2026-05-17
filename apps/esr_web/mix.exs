@@ -58,6 +58,8 @@ defmodule EsrWeb.MixProject do
       {:telemetry_poller, "~> 1.0"},
       {:gettext, "~> 0.26"},
       {:esr_core, in_umbrella: true},
+      {:esr_domain_identity, in_umbrella: true},
+      {:esr_domain_workspace, in_umbrella: true},
       # Plugin registration: esr_web's router references plugin LiveViews
       # by module atom. Adding the plugin as a build-time dep ensures
       # compile order (plugin compiles first, modules resolve in router).

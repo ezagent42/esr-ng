@@ -102,7 +102,7 @@ defmodule Esr.Integration.SnapshotRestartTest do
 
       {:ok, pid} =
         DynamicSupervisor.start_child(
-          EsrPluginChat.AgentSupervisor,
+          EsrDomainChat.AgentSupervisor,
           {Esr.Kind.Server,
            {Esr.Entity.Agent, %{uri: uri, initial_caps: MapSet.new()}}}
         )
@@ -113,7 +113,7 @@ defmodule Esr.Integration.SnapshotRestartTest do
       assert nil == KindSnapshot.get(uri_str)
 
       # Graceful terminate via supervisor — triggers terminate/2 hook
-      :ok = DynamicSupervisor.terminate_child(EsrPluginChat.AgentSupervisor, pid)
+      :ok = DynamicSupervisor.terminate_child(EsrDomainChat.AgentSupervisor, pid)
 
       # Row should now exist
       wait_until(fn -> not is_nil(KindSnapshot.get(uri_str)) end, 100)

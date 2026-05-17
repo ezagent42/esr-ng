@@ -10,7 +10,7 @@ defmodule Esr.Routing.RuleStore do
 
   ```
   id            integer primary key
-  table_name    string  (e.g. "EsrPluginChat.Routing.MentionRouting")
+  table_name    string  (e.g. "EsrDomainChat.Routing.MentionRouting")
   matcher_data  text    (Jason-encoded matcher AST per Esr.Routing.Matcher.to_json/1)
   receivers     text    (Jason-encoded [String.t()] of receiver URIs)
   created_by    string  (URI of admin who added; nil for system-default)

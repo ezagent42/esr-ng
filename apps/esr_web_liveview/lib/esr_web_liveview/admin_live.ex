@@ -54,7 +54,7 @@ defmodule EsrWebLiveview.AdminLive do
       # Phase 3b: subscribe to ALL known sessions so floating/member updates
       # land for any session (not just current). Per-session message filtering
       # is done in handle_info for {:chat_message, session_uri, msg}.
-      for session_uri <- EsrPluginChat.list_sessions() do
+      for session_uri <- EsrDomainChat.list_sessions() do
         Phoenix.PubSub.subscribe(EsrCore.PubSub, session_events_topic(session_uri))
       end
     end
@@ -92,7 +92,7 @@ defmodule EsrWebLiveview.AdminLive do
       |> assign(:flash_error, nil)
       |> assign(:connected_bridges, connected_bridges)
       |> assign(:current_session_uri, current_session_uri)
-      |> assign(:sessions, EsrPluginChat.list_sessions())
+      |> assign(:sessions, EsrDomainChat.list_sessions())
       |> assign(:session_members, read_session_members(current_session_uri))
       |> assign(:agent_options, list_session_agent_uris(current_session_uri))
       |> assign(:floating_agents, list_floating_agents())
@@ -263,7 +263,7 @@ defmodule EsrWebLiveview.AdminLive do
 
   def handle_event("create_session", %{"new_session" => %{"short_name" => name}}, socket)
       when is_binary(name) and name != "" do
-    case EsrPluginChat.create_session(String.trim(name), Esr.Entity.User.admin_uri()) do
+    case EsrDomainChat.create_session(String.trim(name), Esr.Entity.User.admin_uri()) do
       {:ok, session_uri} ->
         if connected?(socket) do
           Phoenix.PubSub.subscribe(EsrCore.PubSub, session_events_topic(session_uri))
@@ -271,7 +271,7 @@ defmodule EsrWebLiveview.AdminLive do
 
         {:noreply,
          socket
-         |> assign(:sessions, EsrPluginChat.list_sessions())
+         |> assign(:sessions, EsrDomainChat.list_sessions())
          |> assign(:new_session_form, to_form(%{"short_name" => ""}, as: "new_session"))
          |> assign(:flash_error, nil)}
 
@@ -480,7 +480,7 @@ defmodule EsrWebLiveview.AdminLive do
     all_agents = list_agent_uris() |> MapSet.new()
 
     joined =
-      EsrPluginChat.list_sessions()
+      EsrDomainChat.list_sessions()
       |> Enum.flat_map(fn session_uri ->
         read_session_members(session_uri)
         |> Enum.map(& &1.uri)

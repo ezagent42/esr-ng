@@ -29,6 +29,8 @@ defmodule EsrPluginCcChannel.MixProject do
   defp deps do
     [
       {:esr_core, in_umbrella: true},
+      {:esr_domain_identity, in_umbrella: true},
+      {:esr_domain_workspace, in_umbrella: true},
       {:yaml_elixir, "~> 2.9"}
     ]
   end

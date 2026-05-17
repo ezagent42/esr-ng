@@ -29,7 +29,9 @@ defmodule EsrPluginCcPty.MixProject do
   defp deps do
     [
       {:esr_core, in_umbrella: true},
-      {:esr_plugin_chat, in_umbrella: true},
+      {:esr_domain_identity, in_umbrella: true},
+      {:esr_domain_workspace, in_umbrella: true},
+      {:esr_domain_chat, in_umbrella: true},
       # PtyServer calls McpConfigWriter in-process to generate mcp.json.
       {:esr_plugin_cc_bridge_v1_prototype, in_umbrella: true},
       {:erlexec, "~> 2.1"}

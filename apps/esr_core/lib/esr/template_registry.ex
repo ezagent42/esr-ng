@@ -7,7 +7,7 @@ defmodule Esr.TemplateRegistry do
 
   Plugin authors register their Template Classes in `Application.start/2`:
 
-      Esr.TemplateRegistry.register(EsrPluginChat.Template.GenericSession)
+      Esr.TemplateRegistry.register(EsrDomainChat.Template.GenericSession)
 
   When `Esr.Workspace.Loader` walks a Workspace's `session_templates`
   on boot, it looks up the Class via `template_name` from the template

@@ -59,7 +59,7 @@ defmodule Esr.Template.FeishuChatBindingTest do
     assert {:ok, _pid} = Esr.KindRegistry.lookup(feishu_uri)
 
     # Routing rule exists, scoped to session
-    rules = Esr.Routing.RuleStore.list(EsrPluginChat.Routing.MentionRouting)
+    rules = Esr.Routing.RuleStore.list(EsrDomainChat.Routing.MentionRouting)
 
     matched =
       Enum.any?(rules, fn row ->
@@ -78,7 +78,7 @@ defmodule Esr.Template.FeishuChatBindingTest do
              )
 
     # Still one rule, not two
-    rules_after = Esr.Routing.RuleStore.list(EsrPluginChat.Routing.MentionRouting)
+    rules_after = Esr.Routing.RuleStore.list(EsrDomainChat.Routing.MentionRouting)
     count = Enum.count(rules_after, &(URI.to_string(feishu_uri) in &1.receivers))
     assert count == 1, "expected 1 feishu rule after re-instantiate; got #{count}"
   end
