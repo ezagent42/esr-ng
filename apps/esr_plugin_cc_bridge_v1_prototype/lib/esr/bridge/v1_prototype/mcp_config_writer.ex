@@ -42,21 +42,33 @@ defmodule Esr.Bridge.V1Prototype.McpConfigWriter do
   preserved.
   """
   @spec write!() :: {:ok, String.t()}
-  def write! do
+  @spec write!(keyword()) :: {:ok, String.t()}
+  def write!(opts \\ []) do
     dir = Application.get_env(:esr_plugin_cc_bridge_v1_prototype, :mcp_config_dir, @default_dir)
     File.mkdir_p!(dir)
 
-    # Phase 2c: forward ESR_AGENT_URI from operator's shell into the
-    # Python bridge subprocess so it can include it in the announce
-    # payload. esrd then spawns Esr.Entity.Agent at that URI. If unset,
-    # bridge announces without agent_uri → legacy bare-bridge mode.
+    # Allen 2026-05-17: agent_uri should ride in mcp.json (deterministic
+    # — PtyServer knows it at spawn time) instead of relying on env var
+    # passthrough through erlexec → claude → Python bridge.
+    #
+    # Lookup order in env map:
+    # 1. caller-passed `:agent_uri` opt (PtyServer.spawn_claude_directly)
+    # 2. ESR_AGENT_URI env (legacy operator-shell path)
+    # 3. omit (bare-bridge mode)
     env = %{"ESRD_URL" => esrd_url()}
 
+    agent_uri =
+      Keyword.get(opts, :agent_uri) ||
+        case System.get_env("ESR_AGENT_URI") do
+          nil -> nil
+          "" -> nil
+          s -> s
+        end
+
     env =
-      case System.get_env("ESR_AGENT_URI") do
+      case agent_uri do
         nil -> env
-        "" -> env
-        agent_uri -> Map.put(env, "ESR_AGENT_URI", agent_uri)
+        s -> Map.put(env, "ESR_AGENT_URI", s)
       end
 
     config = %{
