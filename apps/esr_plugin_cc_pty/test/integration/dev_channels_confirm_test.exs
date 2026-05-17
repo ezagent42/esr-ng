@@ -87,14 +87,11 @@ defmodule Esr.PluginCcPty.DevChannelsConfirmTest do
     fixture_dir: fixture_dir,
     script_path: script_path
   } do
-    # Create a "fake scripts/cc-bridge-attach.sh" by symlinking our mock
-    # script there. PtyServer looks for `scripts/cc-bridge-attach.sh`
-    # inside the cwd it's given.
+    # PR A.2: PtyServer no longer spawns `bash scripts/cc-bridge-attach.sh`.
+    # It spawns `claude` directly. Test uses cmd_override to inject the
+    # mock script instead of needing a real claude binary.
     test_cwd = Path.join(fixture_dir, "test_cwd_#{System.unique_integer([:positive])}")
-    File.mkdir_p!(Path.join(test_cwd, "scripts"))
-    target = Path.join([test_cwd, "scripts", "cc-bridge-attach.sh"])
-    File.cp!(script_path, target)
-    File.chmod!(target, 0o755)
+    File.mkdir_p!(test_cwd)
 
     on_exit(fn -> File.rm_rf(test_cwd) end)
 
@@ -108,7 +105,8 @@ defmodule Esr.PluginCcPty.DevChannelsConfirmTest do
         agent_uri: URI.parse("agent://e2e-test"),
         cwd: test_cwd,
         # Force real-spawn even in test env
-        test_mode: false
+        test_mode: false,
+        cmd_override: "bash #{script_path}"
       })
 
     ref = Process.monitor(pid)

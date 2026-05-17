@@ -65,7 +65,9 @@ defmodule EsrPluginFeishu.OutboundSubscriber do
     else
       text = extract_text(msg.body)
       sender_label = sender_label(msg.sender)
-      formatted = "[#{sender_label}] #{text}"
+      # Allen 2026-05-17: include session_uri so same-name users in
+      # different sessions don't collide on the Feishu side.
+      formatted = "[#{URI.to_string(state.session_uri)} | #{sender_label}] #{text}"
 
       case EsrPluginFeishu.Client.send_text(state.chat_id, formatted) do
         :ok ->
