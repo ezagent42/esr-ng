@@ -51,6 +51,10 @@ defmodule Esr.PluginCcPty.PtyServer do
     :exec_pid,
     :os_pid,
     :test_mode,
+    # PR A.2 (Allen 2026-05-17): optional cmd override for tests that
+    # want to spawn a mock binary instead of real `claude`. Production
+    # spawns default `claude --permission-mode bypassPermissions ...`.
+    :cmd_override,
     pty_buffer: "",
     dev_channels_confirmed: false
   ]
@@ -162,13 +166,15 @@ defmodule Esr.PluginCcPty.PtyServer do
     agent_uri = Map.fetch!(args, :agent_uri)
     cwd = Map.get(args, :cwd, File.cwd!())
     test_mode = Map.get(args, :test_mode, Mix.env() == :test)
+    cmd_override = Map.get(args, :cmd_override)
 
     Process.flag(:trap_exit, true)
 
     state = %__MODULE__{
       agent_uri: agent_uri,
       cwd: cwd,
-      test_mode: test_mode
+      test_mode: test_mode,
+      cmd_override: cmd_override
     }
 
     {:ok, state, {:continue, :spawn_pty}}
@@ -177,7 +183,7 @@ defmodule Esr.PluginCcPty.PtyServer do
   @impl true
   def handle_continue(:spawn_pty, %__MODULE__{test_mode: true} = state) do
     Logger.info(
-      "PtyServer test_mode: would spawn bash cc-bridge-attach.sh for " <>
+      "PtyServer test_mode: would spawn claude for " <>
         "agent=#{URI.to_string(state.agent_uri)} cwd=#{state.cwd}"
     )
 
@@ -185,51 +191,60 @@ defmodule Esr.PluginCcPty.PtyServer do
   end
 
   def handle_continue(:spawn_pty, state) do
-    script = Path.join([state.cwd, "scripts", "cc-bridge-attach.sh"])
+    # PR A.2 (Allen 2026-05-17): inline the cc-bridge-attach.sh logic
+    # into PtyServer so the bash wrapper isn't a second startup path
+    # that can drift from the PTY-managed path.
+    case spawn_claude_directly(state) do
+      {:ok, exec_pid, os_pid} ->
+        Logger.info(
+          "PtyServer spawned claude os_pid=#{os_pid} for agent=#{URI.to_string(state.agent_uri)}"
+        )
 
-    if File.exists?(script) do
-      case spawn_via_exec(script, state) do
-        {:ok, exec_pid, os_pid} ->
-          Logger.info(
-            "PtyServer spawned os_pid=#{os_pid} for agent=#{URI.to_string(state.agent_uri)}"
-          )
+        # Per old esr's PR-24 lesson: claude's TUI queries TIOCGWINSZ
+        # to learn terminal size and BLOCKS rendering past initial
+        # control sequences until it gets a non-zero size. Send a
+        # default 120×40 winsize ~500ms after spawn (gives claude
+        # time to finish initial DA query).
+        # Per memory `feedback_verify_ffi_arg_order`: rows FIRST,
+        # cols second.
+        Process.send_after(self(), :send_default_winsize, 500)
 
-          # Per old esr's PR-24 lesson: claude's TUI queries TIOCGWINSZ
-          # to learn terminal size and BLOCKS rendering past initial
-          # control sequences until it gets a non-zero size. erlexec
-          # :pty doesn't set winsize by default — operator's
-          # connecting terminal would normally provide it on connect,
-          # but our headless spawn has no client. Send a default
-          # 120×40 winsize ~500ms after spawn (gives claude time to
-          # finish initial DA query).
-          #
-          # Per memory `feedback_verify_ffi_arg_order`: `:exec.winsz/3`
-          # signature is `(os_pid, rows, cols)` — rows FIRST, cols
-          # second. Old esr's PR-22 burned 3 PRs swapping these.
-          Process.send_after(self(), :send_default_winsize, 500)
+        {:noreply, %{state | exec_pid: exec_pid, os_pid: os_pid}}
 
-          {:noreply, %{state | exec_pid: exec_pid, os_pid: os_pid}}
-
-        {:error, reason} ->
-          Logger.error("PtyServer: spawn failed: #{inspect(reason)}")
-          {:stop, {:spawn_failed, reason}, state}
-      end
-    else
-      Logger.error("PtyServer: script not found at #{script}")
-      {:stop, {:script_not_found, script}, state}
+      {:error, reason} ->
+        Logger.error("PtyServer: spawn failed: #{inspect(reason)}")
+        {:stop, {:spawn_failed, reason}, state}
     end
   end
 
-  defp spawn_via_exec(script, state) do
+  # PR A.2: replaces `bash scripts/cc-bridge-attach.sh`. Generates
+  # mcp.json via the in-process McpConfigWriter, then runs
+  # `claude --permission-mode bypassPermissions
+  #         --dangerously-load-development-channels server:esr-bridge
+  #         --mcp-config <path>` under erlexec's PTY.
+  defp spawn_claude_directly(state) do
+    cmd_str =
+      case state.cmd_override do
+        nil ->
+          {:ok, mcp_path} = Esr.Bridge.V1Prototype.McpConfigWriter.write!()
+
+          "claude --permission-mode bypassPermissions " <>
+            "--dangerously-load-development-channels server:esr-bridge " <>
+            "--mcp-config #{mcp_path}"
+
+        cmd when is_binary(cmd) ->
+          cmd
+      end
+
     env = build_env(state)
 
-    case :exec.run(~c"bash " ++ String.to_charlist(script), [
+    case :exec.run(String.to_charlist(cmd_str), [
            :pty,
            :monitor,
            # `:stdin` keeps the child's stdin pipe open so :exec.send/2
-           # can write to it (e.g. dev-channels auto-confirm "1\r").
-           # Without this, child sees EOF on stdin → `read` fails →
-           # claude can't see operator input.
+           # can write to it (dev-channels auto-confirm "1\r"). Without
+           # this, child sees EOF on stdin → `read` fails → claude can't
+           # see operator input.
            :stdin,
            {:env, env},
            {:cd, String.to_charlist(state.cwd)},
@@ -242,7 +257,22 @@ defmodule Esr.PluginCcPty.PtyServer do
   end
 
   defp build_env(state) do
-    [{~c"ESR_AGENT_URI", String.to_charlist(URI.to_string(state.agent_uri))}]
+    # Pass operator's existing env through (proxy / API key / etc) so
+    # operator-set vars from their shell where `mix phx.server` runs
+    # reach claude. The two we own are ESR_AGENT_URI (informational)
+    # and ESRD_URL (so the spawned MCP bridge knows where to announce).
+    base = :os.getenv() |> Enum.map(fn s ->
+      case :string.split(s, ~c"=") do
+        [k, v] -> {k, v}
+        _ -> {s, ~c""}
+      end
+    end)
+
+    overrides = [
+      {~c"ESR_AGENT_URI", String.to_charlist(URI.to_string(state.agent_uri))}
+    ]
+
+    overrides ++ base
   end
 
   # --- erlexec messages -----------------------------------------------
