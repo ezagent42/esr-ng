@@ -226,7 +226,15 @@ defmodule Esr.PluginCcPty.PtyServer do
     cmd_str =
       case state.cmd_override do
         nil ->
-          {:ok, mcp_path} = Esr.Bridge.V1Prototype.McpConfigWriter.write!()
+          # Allen 2026-05-17 fix: pass agent_uri into mcp.json so the
+          # Python bridge reads it deterministically instead of relying
+          # on env-var passthrough through erlexec → claude → bridge
+          # (which was the broken plumbing causing cc-demo not to
+          # announce as agent://cc-demo).
+          {:ok, mcp_path} =
+            Esr.Bridge.V1Prototype.McpConfigWriter.write!(
+              agent_uri: URI.to_string(state.agent_uri)
+            )
 
           "claude --permission-mode bypassPermissions " <>
             "--dangerously-load-development-channels server:esr-bridge " <>
