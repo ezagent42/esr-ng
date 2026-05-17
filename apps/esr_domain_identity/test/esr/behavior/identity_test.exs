@@ -59,7 +59,7 @@ defmodule Esr.Behavior.IdentityTest do
 
   describe "Behavior contract" do
     test "actions/0" do
-      assert Identity.actions() == [:list_caps, :has_cap?]
+      assert Identity.actions() == [:list_caps, :has_cap?, :grant_cap, :revoke_cap]
     end
 
     test "state_slice/0" do

@@ -1,0 +1,221 @@
+defmodule EsrPluginEzagent.UserCapsLive do
+  @moduledoc """
+  Phase 6 PR 6 — admin UI for granting/revoking caps on any User Kind
+  (including users provisioned from Feishu adapter).
+
+  Mount at `/admin/users/:uri/caps`. URI is URL-encoded.
+
+  Operations dispatch via `Invocation` → CapBAC step 5.5 enforces
+  admin caps on the calling LV session.
+
+  ## Feishu user note
+
+  Feishu webhook → ESR maps the inbound Feishu user_id to a User Kind
+  URI (e.g. `user://feishu:ou_xxx`). Once that User exists in the
+  KindRegistry, this LV grants caps to it the same way as any local
+  user — the "Feishu cap-grant UI" the SPEC calls out is exactly this
+  page, with the URI shaped accordingly.
+  """
+
+  use Phoenix.LiveView
+  use EsrDomainUi.Components
+  import Phoenix.Component
+
+  alias Esr.{Capability, Invocation, KindRegistry}
+
+  @impl true
+  def mount(%{"uri" => encoded}, session, socket) do
+    user_uri = encoded |> URI.decode_www_form() |> URI.new!()
+    caller_uri = caller_from_session(session)
+
+    {:ok,
+     socket
+     |> assign(:user_uri, user_uri)
+     |> assign(:caller_uri, caller_uri)
+     |> assign(:caller_caps, Esr.Entity.User.admin_caps())
+     |> assign(:flash_error, nil)
+     |> assign(:flash_info, nil)
+     |> assign(:grant_form, to_form(%{"kind" => "", "behavior" => "any", "instance" => "any"}, as: "grant"))
+     |> load_caps()}
+  end
+
+  defp caller_from_session(session) do
+    case Map.get(session || %{}, "current_user_uri") do
+      nil -> Esr.Entity.User.admin_uri()
+      str -> URI.parse(str)
+    end
+  end
+
+  defp load_caps(socket) do
+    case KindRegistry.lookup(socket.assigns.user_uri) do
+      :error ->
+        assign(socket, :caps, :user_not_live)
+
+      {:ok, _pid} ->
+        # Dispatch list_caps and capture the result.
+        target = URI.new!("#{URI.to_string(socket.assigns.user_uri)}/behavior/identity/list_caps")
+
+        case Invocation.dispatch(%Invocation{
+               target: target,
+               mode: :call,
+               args: %{},
+               ctx: %{
+                 caller: socket.assigns.caller_uri,
+                 caps: socket.assigns.caller_caps,
+                 reply: :sync
+               }
+             }) do
+          {:ok, %{caps: caps}} -> assign(socket, :caps, caps)
+          {:error, reason} -> assign(socket, :caps, {:error, reason})
+        end
+    end
+  rescue
+    err -> assign(socket, :caps, {:error, err})
+  end
+
+  @impl true
+  def handle_event("grant", %{"grant" => params}, socket) do
+    kind_str = Map.get(params, "kind", "") |> String.trim()
+
+    if kind_str == "" do
+      {:noreply, assign(socket, :flash_error, "Kind required (e.g. echo, agent, :any)")}
+    else
+      cap = build_cap(params, socket.assigns.caller_uri)
+      do_grant_or_revoke(socket, :grant_cap, cap, "Granted cap to #{URI.to_string(socket.assigns.user_uri)}")
+    end
+  end
+
+  def handle_event("revoke", %{"index" => idx_str}, socket) do
+    idx = String.to_integer(idx_str)
+
+    case Enum.at(socket.assigns.caps, idx) do
+      nil ->
+        {:noreply, assign(socket, :flash_error, "cap not found at index #{idx}")}
+
+      cap ->
+        do_grant_or_revoke(socket, :revoke_cap, cap, "Revoked cap")
+    end
+  end
+
+  defp do_grant_or_revoke(socket, action, cap, msg) do
+    target =
+      URI.new!("#{URI.to_string(socket.assigns.user_uri)}/behavior/identity/#{action}")
+
+    case Invocation.dispatch(%Invocation{
+           target: target,
+           mode: :call,
+           args: %{cap: cap},
+           ctx: %{
+             caller: socket.assigns.caller_uri,
+             caps: socket.assigns.caller_caps,
+             reply: :sync
+           }
+         }) do
+      {:ok, _} ->
+        {:noreply,
+         socket
+         |> assign(:flash_info, msg)
+         |> assign(:flash_error, nil)
+         |> load_caps()}
+
+      {:error, reason} ->
+        {:noreply, assign(socket, :flash_error, "#{action} failed: #{inspect(reason)}")}
+    end
+  end
+
+  defp build_cap(params, granted_by) do
+    %Capability{
+      kind: to_atom_or_any(Map.get(params, "kind", "any")),
+      behavior: to_atom_or_any(Map.get(params, "behavior", "any")),
+      instance: to_uri_or_any(Map.get(params, "instance", "any")),
+      granted_by: granted_by,
+      granted_at: DateTime.utc_now()
+    }
+  end
+
+  defp to_atom_or_any("any"), do: :any
+  defp to_atom_or_any(""), do: :any
+  defp to_atom_or_any(s) when is_binary(s), do: String.to_atom(s)
+
+  defp to_uri_or_any("any"), do: :any
+  defp to_uri_or_any(""), do: :any
+  defp to_uri_or_any(s) when is_binary(s), do: URI.parse(s)
+
+  @impl true
+  def render(assigns) do
+    ~H"""
+    <div class="max-w-4xl mx-auto px-6 py-8 font-sans text-zinc-900">
+      <.page_header title={"Caps for " <> URI.to_string(@user_uri)}>
+        <:subtitle>
+          Live cap mutation via Identity Behavior. Admin caps required (CapBAC at dispatch step 5.5).
+          <a href="/admin/users" class="text-zinc-600 underline hover:text-zinc-900 ml-1">← /admin/users</a>
+        </:subtitle>
+      </.page_header>
+
+      <p :if={@flash_info} class="text-emerald-700 text-sm mb-3">{@flash_info}</p>
+      <p :if={@flash_error} class="text-red-700 text-sm mb-3">{@flash_error}</p>
+
+      <.card class="mb-6">
+        <:header>Grant new cap</:header>
+        <.form for={@grant_form} phx-submit="grant" class="grid grid-cols-3 gap-2 items-end">
+          <label class="text-xs">
+            kind
+            <input type="text" name="grant[kind]" placeholder="echo or :any"
+              class="block w-full px-2 py-1 text-sm border border-zinc-300 rounded-md" />
+          </label>
+          <label class="text-xs">
+            behavior
+            <input type="text" name="grant[behavior]" value="any"
+              class="block w-full px-2 py-1 text-sm border border-zinc-300 rounded-md" />
+          </label>
+          <label class="text-xs">
+            instance
+            <input type="text" name="grant[instance]" value="any"
+              class="block w-full px-2 py-1 text-sm border border-zinc-300 rounded-md" />
+          </label>
+          <div class="col-span-3 flex justify-end">
+            <.button type="submit" variant="primary" size="sm">Grant</.button>
+          </div>
+        </.form>
+      </.card>
+
+      <.card>
+        <:header>Current caps</:header>
+        <%= case @caps do %>
+          <% :user_not_live -> %>
+            <p class="text-red-700 text-sm">User Kind not registered (not live in BEAM).</p>
+          <% {:error, reason} -> %>
+            <p class="text-red-700 text-sm">Error reading caps: {inspect(reason)}</p>
+          <% caps when is_list(caps) and caps == [] -> %>
+            <p class="text-zinc-500 italic text-sm">No caps. Grant one above.</p>
+          <% caps when is_list(caps) -> %>
+            <table class="w-full text-sm">
+              <thead class="bg-zinc-50 border-b border-zinc-200">
+                <tr class="text-left text-xs uppercase tracking-wide text-zinc-500">
+                  <th class="px-2 py-2">kind</th>
+                  <th class="py-2">behavior</th>
+                  <th class="py-2">instance</th>
+                  <th class="py-2">granted_by</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr :for={{cap, i} <- Enum.with_index(caps)} class="border-b border-zinc-100 last:border-0">
+                  <td class="px-2 py-2 font-mono text-xs">{inspect(cap.kind)}</td>
+                  <td class="py-2 font-mono text-xs">{inspect(cap.behavior)}</td>
+                  <td class="py-2 font-mono text-xs">{inspect(cap.instance)}</td>
+                  <td class="py-2 font-mono text-xs">{cap.granted_by && URI.to_string(cap.granted_by)}</td>
+                  <td class="py-2 text-right pr-2">
+                    <.button variant="danger" size="sm" phx-click="revoke" phx-value-index={i}>
+                      revoke
+                    </.button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+        <% end %>
+      </.card>
+    </div>
+    """
+  end
+end

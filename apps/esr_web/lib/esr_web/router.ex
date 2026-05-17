@@ -48,6 +48,8 @@ defmodule EsrWeb.Router do
 
     # Phase 5 PR 2: Users LV.
     live "/admin/users", UsersLive
+    # Phase 6 PR 6: per-user cap-grant UI.
+    live "/admin/users/:uri/caps", UserCapsLive
 
     # Phase 5 PR 3: Snapshots observability.
     live "/admin/snapshots", SnapshotsLive
