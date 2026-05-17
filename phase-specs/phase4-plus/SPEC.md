@@ -1,4 +1,6 @@
-# Phase 5 — Operator/Admin Tools Maturity + Observability
+# Phase 4-plus — Operator/Admin Tools Maturity + Observability
+
+**⚠️ Naming history**: this was originally drafted and shipped under the label "Phase 5" (PRs #27-#32, branch prefix `phase-5/*`). Allen's 2026-05-17 review caught the divergence: this scope (operator-tool maturity + snapshot observability + per-rule cap-check) is **not** the original `IMPLEMENTATION_ROADMAP.md §8` Phase 5, which is `Feishu adapter + CC channel production rewrite + Pty-Web`. The label was reassigned to **Phase 4-plus** (Phase 4 completion-plus) and `phase-specs/phase5/` was renamed to `phase-specs/phase4-plus/`. The roadmap's true Phase 5 (Feishu/CC v2/Pty-Web) remains the next phase. Merged PR titles ("Phase 5 PR N: ...") are preserved as git history but should be read as `Phase 4-plus PR N` going forward.
 
 **Status:** **completed 2026-05-17** (autonomous one-shot; 5/5 PRs merged: #27, #28, #29, #30, #31 + closeout `ScrollOnUpdate` prepend fix). All invariant tests green; demo recorded.
 

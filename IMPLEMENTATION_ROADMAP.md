@@ -320,6 +320,8 @@ Deliverable 项:
 
 ## 8. Phase 5 — Feishu adapter + CC channel(production)+ Pty-Web
 
+> **📌 Naming note (2026-05-17)**: PRs #27-#32 were shipped under the label "Phase 5" but their scope (operator/admin LV tools maturity + snapshot observability + per-rule routing cap-check) **is not** what this section describes. That work was reassigned to **Phase 4-plus** and lives at `phase-specs/phase4-plus/`. The original roadmap Phase 5 below (Feishu adapter + CC channel production rewrite + Pty-Web) remains the **next** real Phase 5 and has not started yet. Branch prefix and PR titles in git history will keep saying "Phase 5" — read those as `Phase 4-plus` retroactively.
+
 **1. 目标**：Feishu 群里 @ 一下 → ESR 路由 → CC session 收到 → 回复回 Feishu；在 LiveView 里看完整链路；Pty-Web（TUI 显示）接入。
 
 **2. 测试员体验**：真实 Feishu 群里 @ 一个 agent → ESR 路由 → CC session 收到 → reply 回 Feishu；LiveView 里同时看到完整路由链；跨机器:CC 在笔记本、ESR 在云上、Feishu 群照样通；Pty-Web 浏览器里看到 TUI。**production feishu-cc demo;LiveView 和 Feishu 双端都能用。**
