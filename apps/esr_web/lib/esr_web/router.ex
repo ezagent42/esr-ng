@@ -58,6 +58,10 @@ defmodule EsrWeb.Router do
 
     # Real Phase 5 PR 4: Pty-Web (xterm.js in browser).
     live "/admin/agents/:uri/terminal", PtyTerminalLive
+
+    # Phase 6 PR 10: auto-derived list/detail for any Kind.
+    live "/admin/auto/:kind", AutoDeriveLive
+    live "/admin/auto/:kind/:uri", AutoDeriveLive
   end
 
   # Liveness probe — plain JSON, no ESR dispatch path involved.
