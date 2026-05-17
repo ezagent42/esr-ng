@@ -93,6 +93,17 @@ defmodule EsrWeb.Router do
   # north star ("beyond webhook route registration").
   forward "/api/feishu/webhook", EsrPluginFeishu.WebhookPlug
 
+  # Phase 6 PR 9: canonical auto-derived JSON API. Single controller
+  # dispatches every `{kind, action}` registered in BehaviorRegistry.
+  # GET /api/v1 = introspection (route catalog + interfaces).
+  # POST /api/v1/:kind/:action = invoke.
+  scope "/api/v1", EsrWeb do
+    pipe_through :api
+
+    get "/", ApiV1Controller, :index
+    post "/:kind/:action", ApiV1Controller, :invoke
+  end
+
   # SSE route — separate scope because its accepts header differs.
   scope "/api", EsrWeb do
     pipe_through :sse
