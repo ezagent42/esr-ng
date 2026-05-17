@@ -48,6 +48,17 @@ defmodule EsrPluginFeishu.Application do
   end
 
   defp seed_initial_bindings do
+    # Hotfix: skip in test env so the test suite doesn't leak real
+    # network calls to Feishu (boot-seeded subscribers forwarded test
+    # messages to real chats — Allen observed this 2026-05-17).
+    if Mix.env() == :test do
+      :ok
+    else
+      do_seed_initial_bindings()
+    end
+  end
+
+  defp do_seed_initial_bindings do
     file = Path.join([Esr.Home.path(:plugins), "feishu", "initial_bindings.yaml"])
 
     case File.read(file) do
