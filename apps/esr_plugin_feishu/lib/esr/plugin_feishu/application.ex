@@ -1,38 +1,48 @@
 defmodule EsrPluginFeishu.Application do
   @moduledoc """
-  Phase 5 PR 6 — Feishu adapter plugin.
+  Phase 5 PR 6 + Plan B (Allen 2026-05-17) — Feishu adapter plugin.
 
-  ## Plugin north-star validator
+  ## Plan B refactor: Feishu is a Receiver Kind
 
-  Per SPEC v2: if this plugin lands with zero changes to esr_core +
-  esr_web_liveview (beyond the explicit webhook route in esr_web's
-  router.ex), Phase 5 actually delivered the plugin isolation
-  north-star (memory `feedback_north_star_plugin_isolation`).
+  Outbound is no longer a side-channel PubSub subscriber. `feishu://oc_xxx`
+  is a real Kind (`Esr.Entity.FeishuChat`); its `:receive` action is
+  implemented by `EsrPluginFeishu.Behavior.FeishuReceive`, which calls
+  the lark API. Resolver fans messages out to it like any other
+  Receiver Kind via `Esr.Invocation.dispatch` → CapBAC + audit fire
+  on the same path. This is the ARCH-aligned shape per §5.4.4.
 
   ## Boot
 
-  1. Start SubscriberSupervisor (DynamicSupervisor for outbound bindings)
+  1. Start FeishuChatSupervisor (DynamicSupervisor for spawned
+     `feishu://oc_xxx` Kind.Server children)
   2. Start Client GenServer (Lark token cache + send_text endpoint)
   3. Register Esr.Template.FeishuChatBinding Class
-  4. Re-run Esr.Workspace.Loader.load_all/0 (Decision #112 boot-ordering)
-  5. Seed any bindings from
-     `$ESR_HOME/<profile>/plugins/feishu/initial_bindings.yaml` (written
-     by `mix esr.home.import_from_esrd_dev`)
+  4. Register feishu:// scheme → SpawnRegistry
+  5. Register (FeishuChat, :receive) → FeishuReceive in BehaviorRegistry
+  6. Re-run Esr.Workspace.Loader.load_all/0 (Decision #112 boot-ordering)
+  7. Seed any bindings from
+     `$ESR_HOME/<profile>/plugins/feishu/initial_bindings.yaml`
   """
 
   use Application
   require Logger
 
+  alias Esr.BehaviorRegistry
+  alias Esr.Entity.FeishuChat, as: FK
+  alias EsrPluginFeishu.Behavior.FeishuReceive
+
   @impl true
   def start(_type, _args) do
     children = [
-      {DynamicSupervisor, name: EsrPluginFeishu.SubscriberSupervisor, strategy: :one_for_one},
+      {DynamicSupervisor, name: EsrPluginFeishu.FeishuChatSupervisor, strategy: :one_for_one},
       EsrPluginFeishu.Client
     ]
 
     case Supervisor.start_link(children, strategy: :one_for_one, name: __MODULE__) do
       {:ok, sup_pid} ->
         :ok = register_template_class()
+        :ok = register_spawn_fn()
+        :ok = register_behaviors()
         _ = Esr.Workspace.Loader.load_all()
         :ok = seed_initial_bindings()
         {:ok, sup_pid}
@@ -44,6 +54,26 @@ defmodule EsrPluginFeishu.Application do
 
   defp register_template_class do
     :ok = Esr.TemplateRegistry.register(Esr.Template.FeishuChatBinding)
+    :ok
+  end
+
+  defp register_spawn_fn do
+    :ok =
+      Esr.SpawnRegistry.register("feishu", fn uri ->
+        DynamicSupervisor.start_child(
+          EsrPluginFeishu.FeishuChatSupervisor,
+          {Esr.Kind.Server, {FK, %{uri: uri}}}
+        )
+      end)
+
+    :ok
+  end
+
+  defp register_behaviors do
+    Enum.each(FeishuReceive.actions(), fn action ->
+      :ok = BehaviorRegistry.register(FK, action, FeishuReceive)
+    end)
+
     :ok
   end
 
@@ -80,10 +110,6 @@ defmodule EsrPluginFeishu.Application do
     Enum.each(bindings, fn binding ->
       chat_id = Map.get(binding, "chat_id")
       old_session_id = Map.get(binding, "old_session_id")
-
-      # The old esrd sessions have UUID ids; for esr-ng we map them to
-      # session://main as a sensible default. Operator can re-bind via
-      # the LV form to point at any session.
       target_session = "session://main"
 
       if is_binary(chat_id) and chat_id != "" do

@@ -1,39 +1,32 @@
 defmodule Esr.Template.FeishuChatBinding do
   @moduledoc """
-  Phase 5 PR 6 — Feishu chat ↔ session binding Template Class.
+  Phase 5 Plan B — Feishu chat ↔ session binding Template Class.
 
-  Per SPEC_REVIEW Drift 1: bindings are Template Class instances, not
-  Workspace.config fields. Operator adds a binding via WorkspaceDetailLive
-  add-template form (dogfoods PR 2 form_fields).
+  ARCH-aligned shape (per Allen 2026-05-17 directive). On instantiate:
 
-  ## Template data
+  1. Spawn the `feishu://oc_xxx` Receiver Kind under
+     `EsrPluginFeishu.FeishuChatSupervisor` via SpawnRegistry
+  2. Add a routing rule to MentionRouting:
+     `in_session(session_uri) → [feishu://oc_xxx]`
+     scoped by `in_session` matcher so it ONLY fires for messages
+     originating in this session (not all sessions globally)
 
-      %{
-        "class" => "feishu.chat_binding",
-        "session_uri" => "session://main",
-        "chat_id" => "oc_abc123..."
-      }
+  Resolver naturally routes session messages to the Feishu Kind via
+  the standard dispatch path; `EsrPluginFeishu.Behavior.FeishuReceive`
+  invocation handles the lark API call. No PubSub side-channel.
 
-  ## instantiate/3
-
-  Subscribes an OutboundSubscriber GenServer to the session's PubSub
-  topic — every `{:chat_message, session_uri, msg}` event triggers
-  `EsrPluginFeishu.Client.send_text(chat_id, msg.body.text)`.
-
-  Inbound (Feishu → ESR) is handled by `EsrPluginFeishu.WebhookPlug` —
-  registered in `esr_web/router.ex` (the only LV/web touch this plugin
-  makes, since Feishu's webhook needs a publicly-routable HTTP endpoint).
-
-  ## Idempotency
-
-  Re-instantiating with the same `(session_uri, chat_id)` returns
-  `{:ok, [binding_uri]}` and the existing subscriber stays alive.
+  Re-instantiate is idempotent: SpawnRegistry returns `{:ok, existing}`
+  for live Kinds; RuleStore allows duplicate rows but we de-dupe by
+  checking RuleStore for an equivalent rule first.
   """
 
   @behaviour Esr.Kind.Template
   @behaviour Esr.UI.Form
 
   require Logger
+
+  alias Esr.Routing.{Matcher, RuleStore}
+  alias EsrPluginChat.Routing.MentionRouting
 
   @impl Esr.Kind.Template
   def template_name, do: "feishu.chat_binding"
@@ -58,19 +51,60 @@ defmodule Esr.Template.FeishuChatBinding do
   @impl Esr.Kind.Template
   def instantiate(_tmpl_name, %{"session_uri" => session_uri_str, "chat_id" => chat_id}, _ws_uri) do
     session_uri = URI.parse(session_uri_str)
-    binding_uri = URI.parse("feishu-binding://#{chat_id}")
+    feishu_uri = Esr.Entity.FeishuChat.uri_for(chat_id)
 
-    case EsrPluginFeishu.OutboundSubscriber.start(session_uri, chat_id) do
-      {:ok, _pid} ->
-        Logger.info("feishu.chat_binding: #{session_uri_str} ↔ #{chat_id}")
-        {:ok, [binding_uri]}
+    with {:ok, _pid} <- spawn_feishu_kind(feishu_uri),
+         :ok <- ensure_routing_rule(session_uri, feishu_uri) do
+      Logger.info(
+        "feishu.chat_binding: ARCH-aligned binding live — #{session_uri_str} → #{URI.to_string(feishu_uri)}"
+      )
 
-      {:error, {:already_started, _pid}} ->
-        {:ok, [binding_uri]}
-
-      err ->
-        err
+      {:ok, [feishu_uri]}
     end
+  end
+
+  defp spawn_feishu_kind(feishu_uri) do
+    case Esr.KindRegistry.lookup(feishu_uri) do
+      {:ok, pid} -> {:ok, pid}
+      :error -> Esr.SpawnRegistry.spawn(feishu_uri)
+    end
+  end
+
+  defp ensure_routing_rule(session_uri, feishu_uri) do
+    matcher = Matcher.in_session(session_uri)
+    receiver_str = URI.to_string(feishu_uri)
+
+    if rule_already_present?(matcher, receiver_str) do
+      :ok
+    else
+      case RuleStore.add(
+             MentionRouting,
+             matcher,
+             [receiver_str],
+             nil,
+             source: RuleStore.admin_source()
+           ) do
+        {:ok, _row} ->
+          :ok = RuleStore.load_into_registry(MentionRouting)
+          :ok
+
+        {:error, reason} ->
+          Logger.warning(
+            "feishu.chat_binding: failed to add routing rule #{inspect(reason)}; " <>
+              "continuing — operator can add via /admin/routing"
+          )
+
+          :ok
+      end
+    end
+  end
+
+  defp rule_already_present?(matcher, receiver_str) do
+    matcher_json = Matcher.to_json(matcher)
+
+    Enum.any?(RuleStore.list(MentionRouting), fn row ->
+      row.matcher_data == matcher_json and receiver_str in row.receivers
+    end)
   end
 
   # --- Esr.UI.Form --------------------------------------------------------
