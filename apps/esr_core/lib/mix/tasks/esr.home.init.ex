@@ -89,7 +89,7 @@ defmodule Mix.Tasks.Esr.Home.Init do
     end
   end
 
-  defp refuse_if_inside_repo!(path, true), do: :ok
+  defp refuse_if_inside_repo!(_path, true), do: :ok
 
   defp refuse_if_inside_repo!(path, _) do
     case System.cmd("git", ["-C", path |> Path.dirname() |> ensure_dir(), "rev-parse", "--show-toplevel"],
@@ -140,7 +140,7 @@ defmodule Mix.Tasks.Esr.Home.Init do
       [
         {"credentials/feishu.yaml", "REQUIRED before esr_plugin_feishu can start"},
         {"credentials/cc-channels.yaml", "managed by mix esr.cc_channel.register"},
-        {"db/", "Phoenix Repo target (move from repo-root planned for post-Phase-5)"},
+        {"db/", "Phoenix Repo target (dev). One-time: mix esr.home.adopt_db moves repo-root esr_core_dev.db here"},
         {"snapshots/", "Phase 4 Kind state snapshots"},
         {"logs/", "server logs"},
         {"plugins/", "per-plugin non-secret tunables"}
