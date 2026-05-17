@@ -1,8 +1,10 @@
 import Config
 
 # Configure your database
+# database: is set in config/runtime.exs from Esr.Home.path(:db) so the
+# dev DB lives in $ESR_HOME/<profile>/db/, not in the repo working tree.
+# Phase 6 PR 1 — see `mix esr.home.adopt_db` for one-time migration.
 config :esr_core, EsrCore.Repo,
-  database: Path.expand("../esr_core_dev.db", __DIR__),
   pool_size: 5,
   stacktrace: true,
   show_sensitive_data_on_connection_error: true

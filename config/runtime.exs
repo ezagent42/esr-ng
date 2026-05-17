@@ -5,6 +5,18 @@ import Config
 # system starts, so it is typically used to load production configuration
 # and secrets from environment variables or elsewhere. Do not define
 # any compile-time configuration in here, as it won't be applied.
+
+# Dev DB path comes from ESR_HOME so the working tree stays clean
+# (Phase 6 PR 1). Test keeps its own ephemeral DB in repo root via
+# config/test.exs (Sandbox pool, gitignored). Prod still requires
+# DATABASE_PATH env.
+if config_env() == :dev do
+  File.mkdir_p!(Esr.Home.path(:db))
+
+  config :esr_core, EsrCore.Repo,
+    database: Path.join(Esr.Home.path(:db), "esr_core.db")
+end
+
 # The block below contains prod specific runtime configuration.
 if config_env() == :prod do
   database_path =
