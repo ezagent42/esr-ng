@@ -5,6 +5,11 @@
 @source "../css";
 @source "../js";
 @source "../../lib/esr_web";
+/* Phase 6 PR 3/10: scan plugin LVs + the domain UI component library
+   so their Tailwind classes (shadcn-style cards / badges / etc.) get
+   compiled into the output CSS. */
+@source "../../../esr_plugin_ezagent/lib";
+@source "../../../esr_domain_ui/lib";
 
 /* A Tailwind plugin that makes "hero-#{ICON}" classes available.
    The heroicons installation itself is managed by your mix.exs */

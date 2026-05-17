@@ -37,10 +37,13 @@ defmodule EsrDomainUi.AutoDerive do
   @spec list_instances(atom()) :: [instance_summary()]
   def list_instances(kind_atom) when is_atom(kind_atom) do
     Registry.select(Esr.KindRegistry, [{{:"$1", :"$2", :_}, [], [{{:"$1", :"$2"}}]}])
-    |> Enum.map(fn {uri, pid} -> summarize(uri, pid) end)
+    |> Enum.map(fn {uri_raw, pid} -> summarize(parse_uri(uri_raw), pid) end)
     |> Enum.filter(&match_kind?(&1, kind_atom))
     |> Enum.sort_by(&URI.to_string(&1.uri))
   end
+
+  defp parse_uri(%URI{} = u), do: u
+  defp parse_uri(s) when is_binary(s), do: URI.parse(s)
 
   @doc """
   Fetch detail for a single live instance.
@@ -70,33 +73,23 @@ defmodule EsrDomainUi.AutoDerive do
   # --- Internals -----------------------------------------------------
 
   defp summarize(uri, pid) do
-    %{uri: uri, pid: pid, slice_keys: slice_keys_safe(pid), kind_module: kind_module_safe(uri)}
+    {kind_module, slice_keys} =
+      case safe_state(pid) do
+        {:ok, state} ->
+          {Map.get(state, :kind), state |> Map.get(:state, %{}) |> Map.keys()}
+
+        _ ->
+          {nil, []}
+      end
+
+    %{uri: uri, pid: pid, slice_keys: slice_keys, kind_module: kind_module}
   end
 
-  defp slice_keys_safe(pid) do
-    case safe_state(pid) do
-      {:ok, %{slices: slices}} -> Map.keys(slices)
-      _ -> []
-    end
+  defp match_kind?(%{kind_module: nil}, _kind_atom), do: false
+
+  defp match_kind?(%{kind_module: km}, kind_atom) do
+    safe_type_name(km) == kind_atom
   end
-
-  defp kind_module_safe(uri) do
-    # KindRegistry stores the URI but not the module — we recover the
-    # module from the state slice. For listing we may not have it; UIs
-    # tolerate nil.
-    nil
-  end
-
-  defp match_kind?(%{kind_module: nil} = inst, kind_atom) do
-    case safe_state_for(inst.pid) do
-      {:ok, %{kind_module: km}} -> safe_type_name(km) == kind_atom
-      _ -> false
-    end
-  end
-
-  defp match_kind?(_other, _kind_atom), do: false
-
-  defp safe_state_for(pid), do: safe_state(pid)
 
   defp safe_state(pid) do
     try do
@@ -107,7 +100,7 @@ defmodule EsrDomainUi.AutoDerive do
   end
 
   defp build_detail(uri, pid, state) do
-    kind_module = Map.get(state, :kind_module)
+    kind_module = Map.get(state, :kind)
 
     behaviors =
       if kind_module && function_exported?(kind_module, :behaviors, 0) do
@@ -125,7 +118,7 @@ defmodule EsrDomainUi.AutoDerive do
       uri: uri,
       pid: pid,
       kind_module: inspect(kind_module),
-      slices: Map.get(state, :slices, %{}),
+      slices: Map.get(state, :state, %{}),
       behaviors: behaviors
     }
   end

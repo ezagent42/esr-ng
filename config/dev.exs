@@ -1,10 +1,18 @@
 import Config
 
 # Configure your database
-# database: is set in config/runtime.exs from Esr.Home.path(:db) so the
-# dev DB lives in $ESR_HOME/<profile>/db/, not in the repo working tree.
+#
+# Default path matches Esr.Home defaults (~/.esr-ng/default/db/esr_core.db)
+# so plain `mix <task>` invocations work without runtime.exs evaluation
+# (which is :prod / release-only for non-phx-server starts).
+#
+# `mix phx.server` + releases also re-evaluate config/runtime.exs which
+# overrides this path with the live `Esr.Home.path(:db)` — picking up
+# `ESR_HOME` / `ESR_PROFILE` env vars.
+#
 # Phase 6 PR 1 — see `mix esr.home.adopt_db` for one-time migration.
 config :esr_core, EsrCore.Repo,
+  database: Path.expand("~/.esr-ng/default/db/esr_core.db"),
   pool_size: 5,
   stacktrace: true,
   show_sensitive_data_on_connection_error: true
