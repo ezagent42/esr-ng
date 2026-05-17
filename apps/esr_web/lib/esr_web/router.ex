@@ -64,6 +64,9 @@ defmodule EsrWeb.Router do
     # Phase 6 PR 10: auto-derived list/detail for any Kind.
     live "/admin/auto/:kind", AutoDeriveLive
     live "/admin/auto/:kind/:uri", AutoDeriveLive
+
+    # Phase 6 PR 15: Feishu open_id ↔ local user bindings admin UI.
+    live "/admin/feishu/bindings", FeishuBindingsLive
   end
 
   # Liveness probe — plain JSON, no ESR dispatch path involved.

@@ -35,8 +35,12 @@ defmodule EsrPluginFeishu.Application do
   def start(_type, _args) do
     children = [
       {DynamicSupervisor, name: EsrPluginFeishu.FeishuChatSupervisor, strategy: :one_for_one},
-      EsrPluginFeishu.Client
+      EsrPluginFeishu.Client,
+      # Phase 6 PR 15: WS long-connect to Feishu. Skipped at test boot
+      # (Mix.env() == :test) and when ESR_FEISHU_WS=0 (operator opt-out).
+      maybe_ws_client_spec()
     ]
+    |> Enum.reject(&is_nil/1)
 
     case Supervisor.start_link(children, strategy: :one_for_one, name: __MODULE__) do
       {:ok, sup_pid} ->
@@ -49,6 +53,14 @@ defmodule EsrPluginFeishu.Application do
 
       other ->
         other
+    end
+  end
+
+  defp maybe_ws_client_spec do
+    if Mix.env() == :test do
+      nil
+    else
+      EsrPluginFeishu.WsClient
     end
   end
 

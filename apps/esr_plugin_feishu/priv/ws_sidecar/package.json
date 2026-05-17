@@ -1,0 +1,9 @@
+{
+  "name": "esr-feishu-ws-sidecar",
+  "version": "0.1.0",
+  "private": true,
+  "main": "main.js",
+  "dependencies": {
+    "@larksuiteoapi/node-sdk": "^1.49.0"
+  }
+}
