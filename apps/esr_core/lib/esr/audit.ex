@@ -42,7 +42,11 @@ defmodule Esr.Audit do
     # Phase 4-completion Spec 04: per-Kind state persistence events.
     [:esr, :persistence, :restored],
     [:esr, :persistence, :written],
-    [:esr, :persistence, :failed]
+    [:esr, :persistence, :failed],
+    # Phase 4-plus follow-up (2026-05-17): CC-side hook reports.
+    # Audit table records the event so operators have a queryable
+    # history even after the in-memory LV panel rolls over.
+    [:esr, :cc_bridge, :event]
   ]
 
   @doc """
@@ -190,6 +194,23 @@ defmodule Esr.Audit do
         else
           nil
         end,
+      inserted_at: DateTime.utc_now()
+    }
+  end
+
+  # Phase 4-plus follow-up: CC bridge hook reports persist as audit
+  # rows so an operator can grep history beyond the LV in-memory buffer.
+  defp build_row([:esr, :cc_bridge, :event], _measurements, meta) do
+    %{
+      trace_id: nil,
+      caller: "cc-bridge://#{Map.get(meta, :bridge_id, "unknown")}",
+      target: "cc-bridge://#{Map.get(meta, :bridge_id, "unknown")}/event",
+      action: "cc.#{Map.get(meta, :type, "event")}",
+      args: nil,
+      result: nil,
+      duration_us: 0,
+      authz: Map.get(meta, :level, "info"),
+      exception: Map.get(meta, :text),
       inserted_at: DateTime.utc_now()
     }
   end

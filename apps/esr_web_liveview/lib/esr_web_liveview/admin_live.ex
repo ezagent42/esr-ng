@@ -49,6 +49,8 @@ defmodule EsrWebLiveview.AdminLive do
     if connected?(socket) do
       Phoenix.PubSub.subscribe(EsrCore.PubSub, Esr.Audit.stream_topic())
       Phoenix.PubSub.subscribe(EsrCore.PubSub, bridge_topic_safely())
+      # Phase 4-plus follow-up: CC hook errors push here (no agent dep).
+      Phoenix.PubSub.subscribe(EsrCore.PubSub, Esr.CCEvents.topic())
       # Phase 3b: subscribe to ALL known sessions so floating/member updates
       # land for any session (not just current). Per-session message filtering
       # is done in handle_info for {:chat_message, session_uri, msg}.
@@ -99,6 +101,7 @@ defmodule EsrWebLiveview.AdminLive do
       )
       |> assign(:compose_form, to_form(%{"text" => "", "agent_uri" => ""}, as: "chat"))
       |> assign(:new_session_form, to_form(%{"short_name" => ""}, as: "new_session"))
+      |> assign(:cc_events, [])
 
     {:ok, socket}
   end
@@ -109,6 +112,12 @@ defmodule EsrWebLiveview.AdminLive do
   def handle_info({:audit_event, event}, socket) do
     row = event_to_row(event)
     {:noreply, stream_insert(socket, :invocations, row, at: 0)}
+  end
+
+  # Phase 4-plus follow-up: CC hook errors. Maintain a small in-memory
+  # ring (last 20) — full history is in the audit table via telemetry.
+  def handle_info({:cc_event, event}, socket) do
+    {:noreply, assign(socket, :cc_events, [event | socket.assigns.cc_events] |> Enum.take(20))}
   end
 
   def handle_info({:cc_connected, _bridge_id, _entry}, socket) do
@@ -396,6 +405,7 @@ defmodule EsrWebLiveview.AdminLive do
         connected_bridges={@connected_bridges}
         form={@form}
         invocations_stream={@streams.invocations}
+        cc_events={@cc_events}
       />
     </div>
     """
