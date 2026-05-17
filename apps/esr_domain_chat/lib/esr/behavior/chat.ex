@@ -144,33 +144,47 @@ defmodule Esr.Behavior.Chat do
         {:ok, slice}
 
       Esr.Entity.Agent ->
-        # 2c-step 1 (+ Phase 3 P3-D8 source session in meta): look up
-        # the bridge bound to this Agent's URI and push the body text
-        # to claude via the SSE topic. Phase 3: include `session` in
-        # meta so claude knows which session to fill in reply
-        # `session_uris` field. ctx.caller is the Session that
-        # dispatched this :receive (set in Chat.dispatch_receive).
-        case Esr.Bridge.V1Prototype.Server.bridge_for_agent(ctx.self_uri) do
-          {:ok, bridge_id} ->
-            source_session =
-              case Map.get(ctx, :caller) do
-                %URI{} = u -> URI.to_string(u)
-                s when is_binary(s) -> s
-                _ -> ""
-              end
+        # Phase 6 PR 4: prefer v2 CC channel (Phoenix.Channel WS) when
+        # the Agent has a v2 bridge bound. Fall back to v1_prototype
+        # (HTTP+SSE) during the cutover window — both transports work
+        # in parallel until Phase 7 deletes v1.
+        source_session =
+          case Map.get(ctx, :caller) do
+            %URI{} = u -> URI.to_string(u)
+            s when is_binary(s) -> s
+            _ -> ""
+          end
 
-            Esr.Bridge.V1Prototype.Server.push_to_claude(
-              bridge_id,
-              body_text(msg.body),
-              %{
-                "sender" => URI.to_string(msg.sender),
-                "message_uri" => msg.uri,
-                "session" => source_session
-              }
-            )
+        payload = %{
+          "content" => body_text(msg.body),
+          "meta" => %{
+            "sender" => URI.to_string(msg.sender),
+            "message_uri" => msg.uri,
+            "session" => source_session
+          }
+        }
+
+        case EsrPluginCcChannel.BridgeRegistry.lookup(ctx.self_uri) do
+          {:ok, channel_pid} ->
+            send(channel_pid, {:to_claude, payload})
 
           :error ->
-            :ok
+            # v2 not bound — try v1_prototype.
+            case Esr.Bridge.V1Prototype.Server.bridge_for_agent(ctx.self_uri) do
+              {:ok, bridge_id} ->
+                Esr.Bridge.V1Prototype.Server.push_to_claude(
+                  bridge_id,
+                  body_text(msg.body),
+                  %{
+                    "sender" => URI.to_string(msg.sender),
+                    "message_uri" => msg.uri,
+                    "session" => source_session
+                  }
+                )
+
+              :error ->
+                :ok
+            end
         end
 
         {:ok, slice}
