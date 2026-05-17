@@ -67,11 +67,7 @@ defmodule Esr.Routing.Resolver do
   @spec resolve(Message.t(), URI.t(), [URI.t()]) :: [URI.t()]
   def resolve(%Message{} = message, %URI{} = current_session_uri, members)
       when is_list(members) do
-    Application.get_env(:esr_core, :routing_tables, @default_routing_tables)
-    |> Enum.flat_map(&query_table(&1, message))
-    |> Enum.flat_map(&expand_receiver(&1, message, current_session_uri, members))
-    |> Enum.uniq_by(&URI.to_string/1)
-    |> Enum.reject(&(URI.to_string(&1) == URI.to_string(current_session_uri)))
+    resolve(message, current_session_uri, members, [])
   end
 
   # Backward-compat shim: old 2-arg form, members default to []. Phase 4
@@ -79,10 +75,36 @@ defmodule Esr.Routing.Resolver do
   # transitional callers + tests that don't need member fan-out.
   @spec resolve(Message.t(), URI.t()) :: [URI.t()]
   def resolve(%Message{} = message, %URI{} = current_session_uri) do
-    resolve(message, current_session_uri, [])
+    resolve(message, current_session_uri, [], [])
   end
 
-  defp query_table(table_name, message) do
+  @doc """
+  Phase 6 PR 8: 4-arg form with workspace-scope context.
+
+  `opts`:
+    * `:workspace_uri` — current Session's owning workspace URI (or nil
+      for sessions not bound to a workspace). Rules with a non-nil
+      `workspace_uri` only fire if it matches the context; rules with
+      `nil` workspace_uri apply globally.
+
+  Use this from `EsrDomainChat.Behavior.Chat.invoke(:send)` when the
+  Session knows its workspace binding. Old 3-arg call sites continue
+  to work — workspace scoping passes through as nil = global-only
+  rules apply.
+  """
+  @spec resolve(Message.t(), URI.t(), [URI.t()], keyword()) :: [URI.t()]
+  def resolve(%Message{} = message, %URI{} = current_session_uri, members, opts)
+      when is_list(members) and is_list(opts) do
+    workspace_uri = Keyword.get(opts, :workspace_uri) |> uri_to_string()
+
+    Application.get_env(:esr_core, :routing_tables, @default_routing_tables)
+    |> Enum.flat_map(&query_table(&1, message, workspace_uri))
+    |> Enum.flat_map(&expand_receiver(&1, message, current_session_uri, members))
+    |> Enum.uniq_by(&URI.to_string/1)
+    |> Enum.reject(&(URI.to_string(&1) == URI.to_string(current_session_uri)))
+  end
+
+  defp query_table(table_name, message, workspace_uri_str) do
     case safe_list_all(table_name) do
       [] ->
         []
@@ -96,6 +118,9 @@ defmodule Esr.Routing.Resolver do
         end)
         |> Enum.filter(fn {_matcher, value} ->
           applies_to_sender?(value, sender_str)
+        end)
+        |> Enum.filter(fn {_matcher, value} ->
+          applies_to_workspace?(value, workspace_uri_str)
         end)
         |> Enum.flat_map(fn {_matcher, value} ->
           receivers_of(value)
@@ -118,6 +143,19 @@ defmodule Esr.Routing.Resolver do
        when is_list(users),
        do: sender_str in users
 
+  defp applies_to_sender?(_value, _sender), do: true
+
+  # Phase 6 PR 8 — workspace scope filter.
+  # nil context = no workspace binding → only nil-scoped rules apply.
+  # non-nil context = rule applies if its workspace_uri is nil (global)
+  # OR matches the context exactly.
+  defp applies_to_workspace?(value, _ctx) when is_list(value), do: true
+  defp applies_to_workspace?(%{workspace_uri: nil}, _ctx), do: true
+  defp applies_to_workspace?(%{workspace_uri: same}, same), do: true
+  defp applies_to_workspace?(%{workspace_uri: _}, _other), do: false
+  defp applies_to_workspace?(_value, _ctx), do: true
+
+  defp uri_to_string(nil), do: nil
   defp uri_to_string(%URI{} = u), do: URI.to_string(u)
   defp uri_to_string(s) when is_binary(s), do: s
 
