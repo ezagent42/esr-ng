@@ -34,12 +34,14 @@ defmodule EsrDomainChat.MixProject do
       # order also enforces start order: identity → workspace → chat.
       {:esr_domain_identity, in_umbrella: true},
       {:esr_domain_workspace, in_umbrella: true},
-      # Layer violation, intentional + scoped: Chat.invoke(:receive) on
-      # Agent pushes to the v1_prototype bridge. PR 4 (6a) deletes
-      # v1_prototype and replaces with esr_plugin_cc_channel — at which
-      # point this dep disappears.
-      # layer-violation-exempt: deleted-in-pr-4
-      {:esr_plugin_cc_bridge_v1_prototype, in_umbrella: true}
+      # Phase 6 PR 4: Chat.invoke(:receive) for Agent prefers the v2
+      # CC channel BridgeRegistry; falls back to v1_prototype while
+      # both transports coexist. Both layer-violation-exempt — v1 to
+      # be deleted in Phase 7, v2 stays as the official bridge.
+      # layer-violation-exempt: cc-bridge-cutover-window
+      {:esr_plugin_cc_bridge_v1_prototype, in_umbrella: true},
+      # layer-violation-exempt: cc-bridge-cutover-window
+      {:esr_plugin_cc_channel, in_umbrella: true}
     ]
   end
 end

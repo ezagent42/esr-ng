@@ -15,6 +15,13 @@ defmodule EsrWeb.Endpoint do
     websocket: [connect_info: [session: @session_options]],
     longpoll: [connect_info: [session: @session_options]]
 
+  # Phase 6 PR 4: production CC channel WS. Replaces v1_prototype's
+  # HTTP /api/cc-bridge/announce + SSE /api/cc-bridge/events with one
+  # full-duplex WS. Token auth via TokenStore at connect.
+  socket "/cc_socket", EsrPluginCcChannel.Socket,
+    websocket: [check_origin: false],
+    longpoll: false
+
   # Serve at "/" the static files from "priv/static" directory.
   #
   # When code reloading is disabled (e.g., in production),

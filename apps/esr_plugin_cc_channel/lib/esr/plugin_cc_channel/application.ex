@@ -15,21 +15,29 @@ defmodule EsrPluginCcChannel.Application do
     to `$ESR_HOME/<profile>/credentials/cc-channels.yaml`
   - Token lookup helper for incoming bridge auth
 
-  ## What's NOT in v1 (deferred to PR 5b)
+  ## Phase 6 PR 4 (this commit)
 
-  The Phase 1 `esr_plugin_cc_bridge_v1_prototype` continues to be the
-  actual wire transport (HTTP announce + SSE). Production WS rewrite
-  + Phoenix.Channel handshake replaces it in a follow-up. This is
-  intentional scope-cut: the architectural shape (Template-driven
-  registration + token-based identity) lands NOW so future plugins
-  can dogfood it; the wire swap is mechanical and can land separately
-  without breaking operator workflow.
+  Adds the production WS wire transport: `EsrPluginCcChannel.Socket`
+  + `EsrPluginCcChannel.Channel` mounted at `/cc_socket` in
+  `EsrWeb.Endpoint`. Token auth via existing TokenStore.
+  `EsrPluginCcChannel.BridgeRegistry` is the in-memory
+  `agent_uri → channel_pid` table used by the chat plugin's Agent
+  receive path.
+
+  v1_prototype (`esr_plugin_cc_bridge_v1_prototype`) is deprecated
+  but still wired so existing Python bridges continue to work during
+  the cutover window. Phase 7 deletes v1 after the Python bridge
+  migrates to the WS client.
   """
 
   use Application
 
+  alias EsrPluginCcChannel.BridgeRegistry
+
   @impl true
   def start(_type, _args) do
+    :ok = BridgeRegistry.init()
+
     children = []
 
     case Supervisor.start_link(children, strategy: :one_for_one, name: __MODULE__) do

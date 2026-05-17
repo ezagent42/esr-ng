@@ -71,6 +71,10 @@ defmodule EsrWeb.MixProject do
       # EsrPluginFeishu.WebhookPlug — needed at compile time so the
       # router macro resolves the module atom.
       {:esr_plugin_feishu, in_umbrella: true},
+      # Phase 6 PR 4: CC channel v2 WS Socket is mounted in
+      # EsrWeb.Endpoint. The plugin compiles first so the Socket
+      # module is loadable when the endpoint boots.
+      {:esr_plugin_cc_channel, in_umbrella: true},
       {:jason, "~> 1.2"},
       {:bandit, "~> 1.5"}
     ]
