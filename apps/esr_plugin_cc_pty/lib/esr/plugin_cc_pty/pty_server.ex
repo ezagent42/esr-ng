@@ -1,10 +1,13 @@
 defmodule Esr.PluginCcPty.PtyServer do
   @moduledoc """
-  PTY-managed child process running `bash cc-bridge-attach.sh`.
+  PTY-managed child process running `claude` directly.
 
   Phase 4-completion PR 8: ESR's first plugin-managed child process.
   Uses `:exec.run/2` (erlexec) for PTY allocation (claude TUI needs
-  a real tty).
+  a real tty). Post-Phase-5 (Allen 2026-05-17): inlined the previous
+  `bash cc-bridge-attach.sh` wrapper into `spawn_claude_directly/1`,
+  and routes `agent_uri` through mcp.json (not env-var passthrough)
+  so the Python bridge always announces with the correct agent_uri.
 
   ## Auto-confirm dev-channels dialog (ported from old esr)
 
@@ -51,9 +54,9 @@ defmodule Esr.PluginCcPty.PtyServer do
     :exec_pid,
     :os_pid,
     :test_mode,
-    # PR A.2 (Allen 2026-05-17): optional cmd override for tests that
-    # want to spawn a mock binary instead of real `claude`. Production
-    # spawns default `claude --permission-mode bypassPermissions ...`.
+    # Optional cmd override — tests pass a mock script here instead of
+    # needing a real claude binary. Production defaults to the inline
+    # `claude --permission-mode bypassPermissions ...` invocation.
     :cmd_override,
     pty_buffer: "",
     dev_channels_confirmed: false
@@ -191,9 +194,6 @@ defmodule Esr.PluginCcPty.PtyServer do
   end
 
   def handle_continue(:spawn_pty, state) do
-    # PR A.2 (Allen 2026-05-17): inline the cc-bridge-attach.sh logic
-    # into PtyServer so the bash wrapper isn't a second startup path
-    # that can drift from the PTY-managed path.
     case spawn_claude_directly(state) do
       {:ok, exec_pid, os_pid} ->
         Logger.info(
@@ -217,20 +217,15 @@ defmodule Esr.PluginCcPty.PtyServer do
     end
   end
 
-  # PR A.2: replaces `bash scripts/cc-bridge-attach.sh`. Generates
-  # mcp.json via the in-process McpConfigWriter, then runs
-  # `claude --permission-mode bypassPermissions
-  #         --dangerously-load-development-channels server:esr-bridge
-  #         --mcp-config <path>` under erlexec's PTY.
+  # Generates mcp.json via the in-process McpConfigWriter (with the
+  # agent_uri baked in so the Python bridge announces deterministically),
+  # then runs `claude --permission-mode bypassPermissions
+  # --dangerously-load-development-channels server:esr-bridge
+  # --mcp-config <path>` under erlexec's PTY.
   defp spawn_claude_directly(state) do
     cmd_str =
       case state.cmd_override do
         nil ->
-          # Allen 2026-05-17 fix: pass agent_uri into mcp.json so the
-          # Python bridge reads it deterministically instead of relying
-          # on env-var passthrough through erlexec → claude → bridge
-          # (which was the broken plumbing causing cc-demo not to
-          # announce as agent://cc-demo).
           {:ok, mcp_path} =
             Esr.Bridge.V1Prototype.McpConfigWriter.write!(
               agent_uri: URI.to_string(state.agent_uri)

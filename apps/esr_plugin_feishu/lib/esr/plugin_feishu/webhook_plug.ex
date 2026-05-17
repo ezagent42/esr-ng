@@ -87,28 +87,31 @@ defmodule EsrPluginFeishu.WebhookPlug do
 
   defp extract_text(_), do: ""
 
-  # Walks live OutboundSubscribers to find which session is bound to
-  # this chat_id. (Cheap for v1; reverse-index Registry possible later.)
+  # Reverse lookup chat_id → session_uri via routing_rules table.
+  # Plan B (2026-05-17) made Feishu binding a routing rule:
+  # `in_session(session_uri) → [feishu://<chat_id>]`. Inbound webhook
+  # needs the inverse direction: given chat_id, find the session.
+  # We scan MentionRouting rules for any whose receivers contain the
+  # feishu URI, and pull session_uri out of the in_session matcher.
   defp lookup_session_for_chat(chat_id) do
-    sup = Process.whereis(EsrPluginFeishu.SubscriberSupervisor)
+    feishu_uri_str = "feishu://" <> chat_id
 
-    if sup do
-      DynamicSupervisor.which_children(sup)
-      |> Enum.find_value(:error, fn
-        {_, child_pid, :worker, _} when is_pid(child_pid) ->
-          try do
-            state = :sys.get_state(child_pid, 500)
-            if state.chat_id == chat_id, do: {:ok, state.session_uri}, else: nil
-          catch
-            _, _ -> nil
-          end
-
-        _ ->
+    Esr.Routing.RuleStore.list(EsrPluginChat.Routing.MentionRouting)
+    |> Enum.find_value(:error, fn row ->
+      cond do
+        not (feishu_uri_str in row.receivers) ->
           nil
-      end)
-    else
-      :error
-    end
+
+        true ->
+          case row.matcher_data do
+            %{"type" => "in_session", "arg" => session_uri_str} ->
+              {:ok, URI.parse(session_uri_str)}
+
+            _ ->
+              nil
+          end
+      end
+    end)
   end
 
   defp sender_to_uri(%{"sender_id" => %{"open_id" => oid}}) when is_binary(oid),

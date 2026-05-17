@@ -1,27 +1,26 @@
 defmodule EsrCLI.Exec do
   @moduledoc """
-  Server-side CLI executor — Allen 2026-05-17 pivot.
+  Server-side CLI executor — Allen 2026-05-17 pivots.
 
-  This is the function that `EsrWeb.CliController.exec/2` calls when
-  it receives a POST `/api/cli/exec` with `{argv: [...]}`. It runs
-  in the SAME BEAM as LV, so dispatch hits the same KindRegistry,
-  same ETS tables, same Repo connections. No separate VM.
+  Called via distributed Erlang RPC from `Mix.Tasks.Esr` on the CLI
+  side: `:rpc.call(esr_runtime@127.0.0.1, EsrCLI.Exec, :exec, [argv])`.
+  Runs in the SAME BEAM as LV — same KindRegistry, same ETS tables,
+  same Repo connections. No HTTP indirection, no separate VM.
 
-  `mix esr` becomes a dumb HTTP shell:
-
-      mix esr  --(argv)→  POST /api/cli/exec  →  EsrCLI.Exec.exec/1  →
-                                                 ↓
-                                          [parse + Coerce + Invocation
-                                           + dispatch all in running BEAM]
-                                                 ↓
-                          {output, exit_code}  ←
+      mix esr --(argv)→  :rpc.call → EsrCLI.Exec.exec/1
+                                       ↓
+                                [parse + Coerce + Invocation +
+                                 dispatch — all in running BEAM]
+                                       ↓
+                       %{output, exit_code} (Elixir map, native term)
+                                       ↓
       print + exit
 
   ## Return
 
-  `%{output: String.t(), exit_code: 0..2}` — `output` is the
+  `%{output: String.t(), exit_code: 0..5}` — `output` is the
   rendered formatter result (text or JSON, depending on --json flag);
-  `exit_code` mirrors what Mix.Tasks.Esr previously returned.
+  `exit_code` follows EsrCLI.Formatter conventions.
   """
 
   alias EsrCLI.{Dispatch, Formatter, TreeBuilder}
@@ -71,7 +70,7 @@ defmodule EsrCLI.Exec do
       end
 
     json? = Map.get(parsed.flags, :json, false)
-    {output, exit_code} = Formatter.render_to_string(result, json?)
+    {output, exit_code} = Formatter.render(result, json?)
     %{output: output, exit_code: exit_code}
   end
 
