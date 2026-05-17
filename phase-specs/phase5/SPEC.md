@@ -1,10 +1,16 @@
 # Phase 5 — Feishu adapter + CC channel production + Pty-Web + PTY config UI
 
-**Status:** **DRAFT** 2026-05-17 (Allen pending review). **Do not implement yet.**
+**Status:** **DRAFT v2** 2026-05-17 (folded `SPEC_REVIEW.md` drift findings; PR order swapped to 5d-first / Feishu-last). **Do not implement yet.**
+
+**Companion docs:**
+- `SPEC_REVIEW.md` — architectural alignment review (8 drift findings + corrections)
+- `ESR_HOME.md` — runtime persistence layout for credentials/db/snapshots/logs
 
 **Source:** `IMPLEMENTATION_ROADMAP.md §8` + Allen's 2026-05-17 directives:
 - "feishu adapter 应该和现在的 LV 进行结合，例如在一个 session 中有一个绑定 feishu chat id 的功能" → Feishu must integrate with LV via per-session chat_id binding, not be a standalone surface
 - "当前我们可以启动 pty 来执行 shell 脚本，但 LV 上还没有可以配置的地方" → cc-pty Template exists but there's no operator-friendly LV config; JSON-paste is awkward
+- "5d 提前，feishu plugin 理论上应该作为最后一步，用于验证 phase 5 的改进是否有效" → 5d first as meta-enabler, Feishu last as validator
+- "Plugin loader 的操作是否是通过对基础 core 概念(session/entity/resource)进行操作，而非 ad-hoc 的针对具体的 cc agent 等 kind 进行操作" → all Phase 5 plugin Kinds use Template Classes, no ad-hoc Kind handling in core/LV
 - Reference to memory `feedback_phase_planning_reads_main_docs`: this SPEC was drafted *after* reading `IMPLEMENTATION_ROADMAP.md §8` first
 
 ## North star
@@ -110,18 +116,20 @@ After Phase 5, an operator can:
 
 ---
 
-## PR plan (~6 PRs, sequenced)
+## PR plan (~6 PRs, **v2 order — see SPEC_REVIEW.md §Recommended PR sequencing**)
 
-| PR | Sub-phase | Theme | Est. LOC |
-|---|---|---|---|
-| 1 | 5d | Template form schema (`form_fields/0` callback) + WorkspaceDetailLive dynamic form | ~250 |
-| 2 | 5d | `/admin/agents/:agent_uri` LV (PTY status + restart) | ~300 |
-| 3 | 5c | Pty-Web LV with xterm.js + input invocation path + cap-gate | ~400 |
-| 4 | 5a | Session ↔ Feishu chat_id binding (Workspace.config field + Session behaviour action + LV badge/modal) | ~300 |
-| 5 | 5a | Feishu adapter plugin (Elixir adapter + Python bot port from old esr) + webhook in/out | ~600 (mostly Python port) |
-| 6 | 5b | New `esr_plugin_cc_channel` (parallel to v1_prototype) + LV "CC Channels" view | ~500 |
+| PR | Theme | Sub | Why this slot | Est. LOC |
+|---|---|---|---|---|
+| 1 | ESR_HOME + `mix esr.home.{init,import_from_esrd_dev}` | prereq | Credentials home; 5a can't ship without it | ~200 |
+| 2 | `Esr.UI.Form` behaviour + dynamic WorkspaceDetailLive add-template form | 5d | **Meta-enabler**; PRs 3-6 dogfood it | ~250 |
+| 3 | `/admin/agents/:uri` PTY status LV (restart / inspect) | 5d | Operational visibility for 5c | ~300 |
+| 4 | Pty-Web xterm.js + `Esr.Behavior.Pty.input` dispatch path + invariant test (input → audit rows) | 5c | First non-trivial consumer of dynamic form; first test that PTY input goes through dispatch | ~400 |
+| 5 | `esr_plugin_cc_channel`: `cc.channel_instance` Template Class + ChannelServer Kind + parallel-to-v1 deploy | 5b | First plugin to use new architectural shape end-to-end | ~500 |
+| 6 | `esr_plugin_feishu`: `feishu.chat_binding` Template Class + WebhookPlug + Python bot port | 5a | **Final validator**: if 5a lands without LV/core/router changes (beyond webhook route), Phase 5 succeeded the plugin north star | ~600 |
 
-Total ~2,350 LOC. Each PR has an invariant test gate.
+Total ~2,250 LOC. Each PR has an invariant test gate (see `SPEC_REVIEW.md §Drift-risk inventory` for the 7 mitigations).
+
+**North star test (per Allen):** Feishu plugin shipping in PR 6 with zero changes to `esr_web_liveview` (beyond consuming the `Esr.UI.Form` callbacks PR 2 introduced) and zero changes to `esr_core` = Phase 5 actually delivered the plugin north star. If PR 6 needs to touch LV or core for plugin-specific reasons, the architectural promise of PRs 2-3 was wrong — pause and re-design.
 
 ## Non-goals (deferred to Phase 6+)
 
