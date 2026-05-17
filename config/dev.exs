@@ -2,17 +2,24 @@ import Config
 
 # Configure your database
 #
-# Default path matches Esr.Home defaults (~/.esr-ng/default/db/esr_core.db)
-# so plain `mix <task>` invocations work without runtime.exs evaluation
-# (which is :prod / release-only for non-phx-server starts).
+# Path follows the same env-var logic as `Esr.Home` (which lives in
+# esr_core/lib and isn't loadable at config-time, so we inline the
+# logic here): `$ESR_HOME / $ESR_PROFILE / db / esr_core.db`,
+# defaulting to `~/.esr-ng / default / db / esr_core.db`.
 #
-# `mix phx.server` + releases also re-evaluate config/runtime.exs which
-# overrides this path with the live `Esr.Home.path(:db)` — picking up
-# `ESR_HOME` / `ESR_PROFILE` env vars.
+# Two evaluation points:
+#   compile-time (this file) — pinned at the moment `mix compile` runs;
+#     used by plain mix tasks (esr.user.set_password etc.) that don't
+#     evaluate runtime.exs.
+#   runtime — config/runtime.exs re-evaluates the same path so
+#     `ESR_HOME=/other mix phx.server` picks up the override.
 #
 # Phase 6 PR 1 — see `mix esr.home.adopt_db` for one-time migration.
+esr_home_dev = System.get_env("ESR_HOME", "~/.esr-ng") |> Path.expand()
+esr_profile_dev = System.get_env("ESR_PROFILE", "default")
+
 config :esr_core, EsrCore.Repo,
-  database: Path.expand("~/.esr-ng/default/db/esr_core.db"),
+  database: Path.join([esr_home_dev, esr_profile_dev, "db", "esr_core.db"]),
   pool_size: 5,
   stacktrace: true,
   show_sensitive_data_on_connection_error: true
