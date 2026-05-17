@@ -7,10 +7,11 @@ defmodule EsrWeb.CcBridgeAnnounceController do
   Body: `{"bridge_id": "...", "agent_uri": "agent://...", "claude_info": {...}, "tools": [...]}`
 
   - Records the bridge as connected via `Esr.Bridge.V1Prototype.Server.register/2`
-  - If `agent_uri` is supplied (Phase 2 path — `ESR_AGENT_URI` env in
-    `cc-bridge-attach.sh`): spawns an `Esr.Entity.Agent` Kind at that
-    URI under `EsrPluginChat.AgentSupervisor`, binds it to bridge_id
-    on the Server, and joins it to `session://main`.
+  - If `agent_uri` is supplied (Phase 2 path — either
+    `ESR_AGENT_URI` from the Python bridge's mcp.json env field, or
+    the operator's shell env): spawns an `Esr.Entity.Agent` Kind at
+    that URI under `EsrPluginChat.AgentSupervisor`, binds it to
+    bridge_id on the Server, and joins it to `session://main`.
   - If `agent_uri` is absent (legacy / Phase 1 mode): bare bridge
     registration only; no Agent Kind, no Chat routing.
 

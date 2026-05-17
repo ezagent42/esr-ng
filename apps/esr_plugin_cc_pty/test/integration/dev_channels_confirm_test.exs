@@ -87,9 +87,9 @@ defmodule Esr.PluginCcPty.DevChannelsConfirmTest do
     fixture_dir: fixture_dir,
     script_path: script_path
   } do
-    # PR A.2: PtyServer no longer spawns `bash scripts/cc-bridge-attach.sh`.
-    # It spawns `claude` directly. Test uses cmd_override to inject the
-    # mock script instead of needing a real claude binary.
+    # PtyServer spawns `claude` directly via :exec.run. Test uses
+    # cmd_override to inject the mock script instead of needing a real
+    # claude binary.
     test_cwd = Path.join(fixture_dir, "test_cwd_#{System.unique_integer([:positive])}")
     File.mkdir_p!(test_cwd)
 

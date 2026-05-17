@@ -30,8 +30,7 @@ defmodule EsrPluginCcPty.MixProject do
     [
       {:esr_core, in_umbrella: true},
       {:esr_plugin_chat, in_umbrella: true},
-      # PR A.2 (2026-05-17): PtyServer now calls McpConfigWriter
-      # in-process instead of via the deleted cc-bridge-attach.sh.
+      # PtyServer calls McpConfigWriter in-process to generate mcp.json.
       {:esr_plugin_cc_bridge_v1_prototype, in_umbrella: true},
       {:erlexec, "~> 2.1"}
     ]

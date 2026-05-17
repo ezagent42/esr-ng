@@ -26,10 +26,10 @@ defmodule Esr.Entity.Agent do
 
   ## URI shape
 
-  Bridges supply `agent_uri` via `ESR_AGENT_URI` env (per
-  cc-bridge-attach.sh contract — zero hardcoded URI in code). Phase 2
-  demo URI is `agent://cc-builder` but anything matching `agent://*`
-  works at the routing layer.
+  Bridges supply `agent_uri` either via the mcp.json `env` field
+  (preferred — PtyServer writes it deterministically) or via
+  `ESR_AGENT_URI` operator-shell env (legacy fallback). Anything
+  matching `agent://*` works at the routing layer.
   """
 
   @behaviour Esr.Kind

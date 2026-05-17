@@ -3,9 +3,9 @@ defmodule EsrPluginCcPty.Application do
   CC PTY plugin Application.
 
   Phase 4-completion PR 8 simplified per Allen's call: this plugin
-  **wraps `bash scripts/cc-bridge-attach.sh` via PTY** (erlexec). No
-  native Elixir MCP server work — Phase 1 v1_prototype MCP bridge
-  continues being used inside the spawned shell.
+  spawns `claude` directly via PTY (erlexec). No native Elixir MCP
+  server work — Phase 1 v1_prototype MCP bridge continues being used
+  inside the spawned shell.
 
   ## Boot
 

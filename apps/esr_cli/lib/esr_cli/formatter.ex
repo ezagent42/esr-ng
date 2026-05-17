@@ -72,10 +72,4 @@ defmodule EsrCLI.Formatter do
   defp render_value(v) when is_binary(v), do: v
   defp render_value(v), do: inspect(v)
 
-  @doc """
-  Back-compat alias for callers that want `{output, exit_code}` — same
-  as `render/2` now that render itself returns the tuple. Kept so old
-  test patterns don't break.
-  """
-  def render_to_string(result, json?), do: render(result, json?)
 end

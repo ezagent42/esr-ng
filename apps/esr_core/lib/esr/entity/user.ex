@@ -53,20 +53,6 @@ defmodule Esr.Entity.User do
     ])
   end
 
-  @doc """
-  True iff the caps set contains the admin triple-:any cap.
-  Used by CLI HTTP serde to encode admin caps as the "*" shorthand
-  rather than enumerating the struct.
-  """
-  @spec admin_caps?(MapSet.t() | term()) :: boolean()
-  def admin_caps?(caps) do
-    is_struct(caps, MapSet) and
-      Enum.any?(caps, fn
-        %Esr.Capability{kind: :any, behavior: :any, instance: :any} -> true
-        _ -> false
-      end)
-  end
-
   # --- Esr.Kind callbacks -----------------------------------------------
   @behaviour Esr.Kind
 
