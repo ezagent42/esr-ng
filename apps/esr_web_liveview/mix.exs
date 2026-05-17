@@ -52,7 +52,11 @@ defmodule EsrWebLiveview.MixProject do
       {:esr_plugin_cc_pty, in_umbrella: true},
       # Phase 5 PR 5: cc-channel registration plugin — Template Class
       # for CC instance registration (token-based bridge auth).
-      {:esr_plugin_cc_channel, in_umbrella: true}
+      {:esr_plugin_cc_channel, in_umbrella: true},
+      # Phase 5 PR 6: Feishu adapter — Template Class for
+      # session ↔ chat_id binding + outbound subscriber + webhook plug.
+      # Direct dep ensures Application.start fires + WebhookPlug compiles.
+      {:esr_plugin_feishu, in_umbrella: true}
     ]
   end
 end
