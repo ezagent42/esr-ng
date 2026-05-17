@@ -43,6 +43,10 @@ defmodule Esr.Routing.RuleStore do
     # Phase 4-completion PR 9: source distinguishes system_default from admin
     field :source, :string, default: "admin"
     field :enabled, :boolean, default: true
+    # Phase 6 PR 5: per-rule sender filter. Stored as JSON-encoded list
+    # of URI strings; loaded into `applies_to_users` field via helper.
+    # Empty list = applies to every sender.
+    field :applies_to_users_json, :string, source: :applies_to_users, default: "[]"
   end
 
   @type t :: %__MODULE__{
@@ -53,7 +57,8 @@ defmodule Esr.Routing.RuleStore do
           created_by: String.t() | nil,
           created_at: DateTime.t() | nil,
           source: String.t(),
-          enabled: boolean()
+          enabled: boolean(),
+          applies_to_users_json: String.t()
         }
 
   @system_default "system_default"
@@ -78,6 +83,7 @@ defmodule Esr.Routing.RuleStore do
       when is_atom(table_name_atom) do
     receivers_str = Enum.map(receivers, &uri_to_string/1)
     source = Keyword.get(opts, :source, @admin)
+    applies_to_users = Keyword.get(opts, :applies_to_users, []) |> Enum.map(&uri_to_string/1)
 
     rule = %__MODULE__{
       table_name: Atom.to_string(table_name_atom),
@@ -86,10 +92,25 @@ defmodule Esr.Routing.RuleStore do
       created_by: uri_to_string_or_nil(created_by),
       created_at: DateTime.utc_now(),
       source: source,
-      enabled: true
+      enabled: true,
+      applies_to_users_json: Jason.encode!(applies_to_users)
     }
 
     Repo.insert(rule)
+  end
+
+  @doc """
+  Decode the JSON-stored applies_to_users field back into a list of
+  URI strings. Empty list means "applies to every sender".
+  """
+  @spec applies_to_users(t()) :: [String.t()]
+  def applies_to_users(%__MODULE__{applies_to_users_json: nil}), do: []
+
+  def applies_to_users(%__MODULE__{applies_to_users_json: json}) when is_binary(json) do
+    case Jason.decode(json) do
+      {:ok, list} when is_list(list) -> list
+      _ -> []
+    end
   end
 
   @doc "List all rules for a given table (as Ecto schema rows)."
@@ -121,7 +142,17 @@ defmodule Esr.Routing.RuleStore do
     |> Enum.each(fn row ->
       case Esr.Routing.Matcher.from_json(row.matcher_data) do
         {:ok, matcher_tuple} ->
-          Esr.RoutingRegistry.put(table_name_atom, matcher_tuple, row.receivers)
+          # Phase 6 PR 5: wrap receivers in a map with the applies_to_users
+          # filter. Resolver pattern-matches on the map shape. Legacy ETS
+          # entries written directly via RoutingRegistry.put (tests, old
+          # call sites) stay as plain lists — Resolver falls back to "no
+          # user filter" for those.
+          value = %{
+            receivers: row.receivers,
+            applies_to_users: applies_to_users(row)
+          }
+
+          Esr.RoutingRegistry.put(table_name_atom, matcher_tuple, value)
 
         {:error, reason} ->
           require Logger

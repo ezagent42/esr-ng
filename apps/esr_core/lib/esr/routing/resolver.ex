@@ -88,15 +88,38 @@ defmodule Esr.Routing.Resolver do
         []
 
       rows ->
+        sender_str = uri_to_string(message.sender)
+
         rows
-        |> Enum.filter(fn {matcher_tuple, _receivers} ->
+        |> Enum.filter(fn {matcher_tuple, _value} ->
           Matcher.match?(matcher_tuple, message)
         end)
-        |> Enum.flat_map(fn {_matcher, receivers} ->
-          List.wrap(receivers)
+        |> Enum.filter(fn {_matcher, value} ->
+          applies_to_sender?(value, sender_str)
+        end)
+        |> Enum.flat_map(fn {_matcher, value} ->
+          receivers_of(value)
         end)
     end
   end
+
+  # Phase 6 PR 5: rule value shape is either a plain list (legacy:
+  # `[receiver_str, ...]`) or a map with `:receivers` + `:applies_to_users`.
+  # Plain list path is for ETS entries written directly via
+  # `RoutingRegistry.put` (tests, hand-coded callers) — they have no
+  # user filter so always apply.
+  defp receivers_of(receivers) when is_list(receivers), do: receivers
+  defp receivers_of(%{receivers: receivers}), do: receivers
+
+  defp applies_to_sender?(value, _sender) when is_list(value), do: true
+  defp applies_to_sender?(%{applies_to_users: []}, _sender), do: true
+
+  defp applies_to_sender?(%{applies_to_users: users}, sender_str)
+       when is_list(users),
+       do: sender_str in users
+
+  defp uri_to_string(%URI{} = u), do: URI.to_string(u)
+  defp uri_to_string(s) when is_binary(s), do: s
 
   defp safe_list_all(table_name) do
     try do
