@@ -59,7 +59,21 @@ defmodule EsrCore.Application do
     # CapBAC check at step 5.5.
     :ok = register_routing_admin()
 
+    # Post-Phase-5 (Allen 2026-05-17): start distributed Erlang as the
+    # named runtime node so `mix esr` (CLI) can reach us via :rpc.call.
+    # Cookie + node name from Esr.Runtime. Skip in test env to avoid
+    # interfering with ExUnit's own process tree.
+    if not is_test?() do
+      :ok = Esr.Runtime.configure_for_runtime!()
+    end
+
     result
+  end
+
+  defp is_test? do
+    Code.ensure_loaded?(Mix) and Mix.env() == :test
+  rescue
+    _ -> false
   end
 
   defp register_workspace_behavior do

@@ -1,15 +1,12 @@
 defmodule Mix.Tasks.Esr do
-  @shortdoc "Thin CLI shell over running ESR server (POSTs argv to /api/cli/exec)"
+  @shortdoc "CLI shell — connects via distributed Erlang to the running ESR runtime"
   @moduledoc """
-  Post-Phase-5 pivot (Allen 2026-05-17): this task is a **thin shell
-  over the running server**. It does NOT boot ESR locally; instead it
-  POSTs `{argv: [...]}` to `<server>/api/cli/exec`, prints the response,
-  exits with the server-reported exit code.
-
-  This restores CLI ↔ LV runtime isomorphism: both CLI invocations
-  and LV form-submits execute inside the same BEAM that runs phx.server,
-  hit the same KindRegistry, write to the same Repo, fire the same
-  audit telemetry.
+  Post-Phase-5 second pivot (Allen 2026-05-17): `mix esr` is a thin
+  shell that connects to the running ESR runtime via distributed
+  Erlang RPC. The actual `EsrCLI.Exec.exec/1` runs INSIDE the
+  runtime BEAM — same process tree as LV, same KindRegistry,
+  same Repo, same audit telemetry. Restores CLI ↔ LV runtime
+  isomorphism without any HTTP serde indirection.
 
   ## Usage
 
@@ -19,33 +16,40 @@ defmodule Mix.Tasks.Esr do
 
   ## Environment
 
-      ESR_SERVER_URL    base URL of running server (default http://localhost:4000)
+      ESR_RUNTIME_NODE   Node name to reach (default esr_runtime@127.0.0.1)
+      ESR_HOME           Where the runtime cookie file lives
+                         (default ~/.esr-ng)
 
-  ## What if the server isn't running?
+  ## Single-machine assumption
 
-  Prints a clear error + exit 5. Start phx.server then re-run.
+  Per Allen's directive: CLI only ever talks to a LOCAL runtime. For
+  remote operations, runtime-to-runtime federation (Roadmap §6+) handles
+  the cross-machine case; CLI itself stays single-machine.
+
+  If the runtime isn't running, prints a clear error.
   """
 
   use Mix.Task
 
   @impl Mix.Task
   def run(argv) do
-    Application.ensure_all_started(:inets)
-    Application.ensure_all_started(:ssl)
+    case Esr.Runtime.connect_as_cli() do
+      {:ok, runtime_node} ->
+        case :rpc.call(runtime_node, EsrCLI.Exec, :exec, [argv], 30_000) do
+          %{output: output, exit_code: code} ->
+            IO.write(output)
+            exit_with(code)
 
-    server_url = System.get_env("ESR_SERVER_URL") || "http://localhost:4000"
+          {:badrpc, reason} ->
+            IO.puts(:stderr, "error: rpc failed: #{inspect(reason)}")
+            exit_with(1)
+        end
 
-    case post_exec(server_url, argv) do
-      {:ok, %{"output" => output, "exit_code" => code}} ->
-        IO.write(output)
-        exit_with(code)
-
-      {:error, :server_not_running} ->
+      {:error, :runtime_not_reachable} ->
         IO.puts(:stderr,
-          "error: ESR server not running at #{server_url}\n" <>
-            "       start it with: cd " <>
-            File.cwd!() <> " && mix phx.server\n" <>
-            "       or set ESR_SERVER_URL to point at the running instance"
+          "error: ESR runtime not reachable at #{Esr.Runtime.runtime_node()}\n" <>
+            "       start it with `mix phx.server` (single-machine assumption)\n" <>
+            "       or set ESR_RUNTIME_NODE to point at a running instance"
         )
 
         exit_with(5)
@@ -53,31 +57,6 @@ defmodule Mix.Tasks.Esr do
       {:error, reason} ->
         IO.puts(:stderr, "error: #{inspect(reason)}")
         exit_with(1)
-    end
-  end
-
-  defp post_exec(server_url, argv) do
-    body = Jason.encode!(%{argv: argv})
-
-    request =
-      {String.to_charlist(server_url <> "/api/cli/exec"),
-       [{~c"Content-Type", ~c"application/json"}], ~c"application/json", body}
-
-    case :httpc.request(:post, request,
-           [{:timeout, 30_000}, {:connect_timeout, 2_000}],
-           []
-         ) do
-      {:ok, {{_, 200, _}, _, resp}} ->
-        Jason.decode(to_string(resp))
-
-      {:ok, {{_, status, _}, _, resp}} ->
-        {:error, {:http_status, status, to_string(resp)}}
-
-      {:error, {:failed_connect, _}} ->
-        {:error, :server_not_running}
-
-      {:error, reason} ->
-        {:error, {:http_error, reason}}
     end
   end
 

@@ -69,9 +69,6 @@ defmodule EsrWeb.MixProject do
       # EsrPluginFeishu.WebhookPlug — needed at compile time so the
       # router macro resolves the module atom.
       {:esr_plugin_feishu, in_umbrella: true},
-      # Post-Phase-5 (2026-05-17): CliController.exec calls
-      # EsrCLI.Exec.exec/1 to run CLI argv inside the running server.
-      {:esr_cli, in_umbrella: true},
       {:jason, "~> 1.2"},
       {:bandit, "~> 1.5"}
     ]
