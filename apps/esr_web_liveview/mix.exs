@@ -45,7 +45,14 @@ defmodule EsrWebLiveview.MixProject do
       # offline) sourced from `Esr.Behavior.Chat`. Same shape as the
       # cc-bridge coupling — Phase 3+ may abstract the LV's "what
       # session UI to show" via configuration rather than direct dep.
-      {:esr_plugin_chat, in_umbrella: true}
+      {:esr_plugin_chat, in_umbrella: true},
+      # Phase 4 PR 8: cc-pty Template Class — registers via
+      # TemplateRegistry; needed at LV mount to render add-template
+      # form fields and PTY status pages.
+      {:esr_plugin_cc_pty, in_umbrella: true},
+      # Phase 5 PR 5: cc-channel registration plugin — Template Class
+      # for CC instance registration (token-based bridge auth).
+      {:esr_plugin_cc_channel, in_umbrella: true}
     ]
   end
 end
