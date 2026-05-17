@@ -82,7 +82,6 @@ defmodule EsrPluginFeishu.WebhookAttachmentsTest do
   end
 
   defp build(msg) do
-    # Test-only public helper around the private build_message_body.
-    EsrPluginFeishu.WebhookPlug.__build_message_body_for_test__(msg)
+    EsrPluginFeishu.EventDecoder.build_body(msg)
   end
 end

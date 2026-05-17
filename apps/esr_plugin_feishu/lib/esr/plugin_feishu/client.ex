@@ -74,6 +74,18 @@ defmodule EsrPluginFeishu.Client do
     GenServer.call(__MODULE__, {:send_file, chat_id, file_key}, 10_000)
   end
 
+  @doc """
+  Phase 6 PR 15: react an emoji to a Feishu message. Used as
+  acknowledgement so the human sender sees ESR received the message.
+
+  `emoji_type` is a Feishu reaction name like "OK", "DONE",
+  "HEART", etc. See https://open.feishu.cn/document/.../emojis
+  """
+  @spec react(String.t(), String.t()) :: :ok | {:error, term()}
+  def react(message_id, emoji_type \\ "OK") when is_binary(message_id) do
+    GenServer.call(__MODULE__, {:react, message_id, emoji_type}, 10_000)
+  end
+
   @doc "Returns `{:ok, status}` describing the client's credential state."
   def status do
     GenServer.call(__MODULE__, :status)
@@ -254,6 +266,31 @@ defmodule EsrPluginFeishu.Client do
 
         case http_post_json(
                "#{@lark_base}/im/v1/messages?receive_id_type=chat_id",
+               body,
+               [{~c"Authorization", String.to_charlist("Bearer #{token}")}]
+             ) do
+          {:ok, %{"code" => 0}} -> {:reply, :ok, new_state}
+          {:ok, %{"code" => code, "msg" => msg}} -> {:reply, {:error, {:lark_error, code, msg}}, new_state}
+          err -> {:reply, err, new_state}
+        end
+
+      err ->
+        {:reply, err, state}
+    end
+  end
+
+  # --- Phase 6 PR 15: emoji react ack ---------------------------------
+
+  def handle_call({:react, _, _}, _from, %__MODULE__{app_id: nil} = state),
+    do: {:reply, {:error, :credentials_not_configured}, state}
+
+  def handle_call({:react, message_id, emoji_type}, _from, state) do
+    case ensure_token(state) do
+      {:ok, token, new_state} ->
+        body = %{reaction_type: %{emoji_type: emoji_type}}
+
+        case http_post_json(
+               "#{@lark_base}/im/v1/messages/#{message_id}/reactions",
                body,
                [{~c"Authorization", String.to_charlist("Bearer #{token}")}]
              ) do
