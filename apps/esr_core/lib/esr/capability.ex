@@ -15,10 +15,14 @@ defmodule Esr.Capability do
   @enforce_keys [:kind, :behavior, :instance, :granted_by, :granted_at]
   defstruct [:kind, :behavior, :instance, :granted_by, :granted_at]
 
+  @type scope_tuple ::
+          {:within_session, URI.t()}
+          | {:spawned_by, URI.t()}
+
   @type t :: %__MODULE__{
           kind: atom() | :any,
           behavior: module() | :any,
-          instance: URI.t() | :any,
+          instance: URI.t() | :any | scope_tuple(),
           granted_by: URI.t(),
           granted_at: DateTime.t()
         }
@@ -29,6 +33,37 @@ defmodule Esr.Capability do
   Matches kind (Kind type atom, e.g. `:echo`), behavior (module, e.g.
   `Esr.Behavior.Echo`), and instance (the target URI). `:any` matches
   everything in that position.
+
+  ## Scope-bounded instance shapes (Phase 7 PR 42 / D7-3)
+
+  The `instance` field may also be one of two tuple shapes that
+  express bounded delegation:
+
+  - `{:within_session, %URI{} = session_uri}` — matches when the
+    needed cap's instance URI is `session_uri` itself or a sub-URI
+    of it (prefix match on `URI.to_string/1`). Used by the
+    orchestrator's scope-bounded delegation cap so it can act
+    within its own session without becoming a full admin.
+
+  - `{:spawned_by, %URI{} = principal_uri}` — matches when the
+    needed cap's instance URI is in the lineage spawned by
+    `principal_uri`. **PR 42 ships a structurally compliant
+    placeholder that returns false** — actual lineage tracking
+    arrives with PR 40 (`Esr.Entity.Agent.spawn/4` populates an
+    `Agent.spawned_by` slice field) + a registry lookup wired
+    here. Until PR 40, holding a `{:spawned_by, _}` cap matches
+    nothing — denial defaults are correct.
+
+  Both shapes preserve the existing CapBAC contract: the cap is
+  more specific, not more permissive. Any cap with a scope tuple
+  is bounded by the scope; `:any` remains the only true wildcard.
+
+  ## Why the placeholder for `{:spawned_by, _}`
+
+  Splitting the contract change (this PR) from the lineage
+  registry (PR 40) keeps each PR small and reviewable. The
+  contract is observable + tested NOW; the registry implementation
+  + its tests land in PR 40 without re-touching `matches?/2`.
   """
   @spec matches?(t(), %{
           required(:kind) => atom(),
@@ -38,12 +73,43 @@ defmodule Esr.Capability do
   def matches?(%__MODULE__{} = cap, %{kind: k, behavior: b, instance: i}) do
     field_match?(cap.kind, k) and
       field_match?(cap.behavior, b) and
-      field_match?(cap.instance, i)
+      instance_match?(cap.instance, i)
   end
 
+  # Kind + behavior fields use plain `:any` or exact equality.
   defp field_match?(:any, _), do: true
   defp field_match?(same, same), do: true
   defp field_match?(_, _), do: false
+
+  # Instance field additionally honors the two scope tuples (D7-3).
+  defp instance_match?(:any, _), do: true
+
+  defp instance_match?({:within_session, %URI{} = session_uri}, %URI{} = needed_instance) do
+    needed_str = URI.to_string(needed_instance)
+    session_str = URI.to_string(session_uri)
+
+    # Match if needed URI is the session URI itself, or a sub-URI of
+    # it (e.g. `session://main/behavior/chat/send` is within
+    # `session://main`). String prefix is sufficient given URI
+    # canonical form; we add a `/` boundary check to avoid false
+    # positives like `session://main2` matching `{:within_session,
+    # session://main}`.
+    needed_str == session_str or
+      String.starts_with?(needed_str, session_str <> "/")
+  end
+
+  defp instance_match?({:spawned_by, %URI{} = _principal_uri}, %URI{} = _needed_instance) do
+    # PR 42 placeholder: returns false until PR 40 ships the
+    # Agent.spawned_by slice field + lineage lookup registry.
+    # Denying-by-default is the correct conservative behavior — a
+    # principal holding a `{:spawned_by, X}` cap will simply find
+    # all dispatches denied until the lineage data is available.
+    # See moduledoc for the contract split rationale.
+    false
+  end
+
+  defp instance_match?(same, same), do: true
+  defp instance_match?(_, _), do: false
 
   @doc """
   Remove a capability from a MapSet of caps.
