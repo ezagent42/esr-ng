@@ -29,8 +29,27 @@ const APP_SECRET = process.env.FEISHU_APP_SECRET;
 const DOMAIN = process.env.FEISHU_DOMAIN || lark.Domain.Feishu;
 
 function emit(obj) {
-    process.stdout.write(JSON.stringify(obj) + '\n');
+    try {
+        process.stdout.write(JSON.stringify(obj) + '\n');
+    } catch (err) {
+        // EPIPE: ESR side closed the pipe (e.g. code reload restarted
+        // the WsClient GenServer). Exit cleanly so the Elixir
+        // supervisor respawns us with a fresh Port.
+        if (err && err.code === 'EPIPE') {
+            process.exit(0);
+        }
+        throw err;
+    }
 }
+
+// SDK logger writes to stdout directly; if Elixir pipe is gone,
+// those writes throw async. Catch at the process level too.
+process.on('uncaughtException', (err) => {
+    if (err && err.code === 'EPIPE') {
+        process.exit(0);
+    }
+    throw err;
+});
 
 function fatal(msg) {
     emit({ type: 'error', message: msg });

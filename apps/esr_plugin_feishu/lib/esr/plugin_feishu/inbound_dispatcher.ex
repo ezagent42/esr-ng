@@ -45,7 +45,11 @@ defmodule EsrPluginFeishu.InboundDispatcher do
           "Feishu inbound: open_id=#{open_id} unbound — pending. Run `mix esr.feishu.bind #{open_id} user://<name>` to attach."
         )
 
-        react_safe(message_id, "EYES")
+        # Allen 2026-05-17: lark react API rejected EYES with code
+        # 231001 "reaction type is invalid" — lark only accepts a
+        # curated emoji set. THUMBSDOWN is on the supported list and
+        # is visually distinct from the OK success react below.
+        react_safe(message_id, "THUMBSDOWN")
         :ok
 
       {:ok, caller_uri, caps} ->
@@ -99,7 +103,14 @@ defmodule EsrPluginFeishu.InboundDispatcher do
     # rather than just metadata. Best-effort — download failure keeps
     # the attachment with type+name only.
     body = Map.update(body, :attachments, [], fn list -> Enum.map(list, &maybe_download/1) end)
-    msg = Esr.Message.new(caller_uri, body)
+
+    # Phase 6 PR 16: extract @mentions from text (B2 route per Allen
+    # 2026-05-17). Resolved live agent URIs go into Message.mentions
+    # so the existing MentionRouting matcher routes the message ONLY
+    # to the mentioned agent rather than fanning out to all members.
+    mentions = EsrPluginFeishu.MentionParser.extract_agent_mentions(body[:text] || "")
+
+    msg = Esr.Message.new(caller_uri, body, mentions: mentions)
 
     target = URI.parse("#{URI.to_string(session_uri)}/behavior/chat/send")
 
@@ -122,15 +133,22 @@ defmodule EsrPluginFeishu.InboundDispatcher do
   # event types without one.
   defp react_safe(nil, _), do: :ok
 
+  # Allen 2026-05-17: react latency was ~seconds because chat/send
+  # fan-out fired sync HTTP calls (feishu echo) before this line.
+  # Push react into a Task so the user sees ack immediately while
+  # ESR is still finishing the fan-out work.
   defp react_safe(message_id, emoji) do
-    case Client.react(message_id, emoji) do
-      :ok ->
-        :ok
+    Task.start(fn ->
+      case Client.react(message_id, emoji) do
+        :ok ->
+          :ok
 
-      {:error, reason} ->
-        Logger.debug("Feishu react #{emoji} on #{message_id} failed: #{inspect(reason)}")
-        :ok
-    end
+        {:error, reason} ->
+          Logger.debug("Feishu react #{emoji} on #{message_id} failed: #{inspect(reason)}")
+      end
+    end)
+
+    :ok
   end
 
   # --- attachment download (moved from WebhookPlug PR 14) ---------------

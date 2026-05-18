@@ -162,6 +162,8 @@ defmodule EsrPluginFeishu.WsClient do
   end
 
   defp load_credentials do
+    cred_path = Path.join(Esr.Home.path(:credentials), "feishu.yaml")
+
     case Esr.Home.read_credentials("feishu") do
       {:ok, %{"app_id" => app_id, "app_secret" => app_secret} = creds}
       when is_binary(app_id) and is_binary(app_secret) ->
@@ -175,6 +177,7 @@ defmodule EsrPluginFeishu.WsClient do
         {:error, :credentials_not_found}
 
       err ->
+        Logger.warning("WsClient load_credentials: #{cred_path} → #{inspect(err)}")
         {:error, err}
     end
   end
