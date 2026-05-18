@@ -262,8 +262,17 @@ defmodule Esr.PluginCcPty.PtyServer do
               agent_uri: URI.to_string(state.agent_uri)
             )
 
+          # Phase 6 PR 23: operator's ~/.claude/settings.json may have
+          # `remoteControlAtStartup: true` (cc-openclaw + others enable
+          # it). That redirects interactive I/O to claude.ai cloud
+          # session — local PTY becomes a passive observer, keystrokes
+          # go nowhere, channel notifications never render. Override
+          # to false via --settings.
+          settings_path = pty_settings_path()
+
           "claude --permission-mode bypassPermissions " <>
             "--dangerously-load-development-channels server:esr-bridge " <>
+            "--settings #{settings_path} " <>
             "--mcp-config #{mcp_path}"
 
         cmd when is_binary(cmd) ->
@@ -288,6 +297,11 @@ defmodule Esr.PluginCcPty.PtyServer do
       {:ok, exec_pid, os_pid} -> {:ok, exec_pid, os_pid}
       err -> err
     end
+  end
+
+  defp pty_settings_path do
+    :code.priv_dir(:esr_plugin_cc_pty)
+    |> Path.join("claude-pty-settings.json")
   end
 
   defp build_env(state) do
