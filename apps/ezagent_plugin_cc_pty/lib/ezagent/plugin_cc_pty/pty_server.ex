@@ -248,17 +248,24 @@ defmodule Ezagent.PluginCcPty.PtyServer do
     end
   end
 
-  # Generates mcp.json via the in-process McpConfigWriter (with the
-  # agent_uri baked in so the Python bridge announces deterministically),
-  # then runs `claude --permission-mode bypassPermissions
+  # Generates mcp.json via the in-process v2 McpConfigWriter (with the
+  # agent_uri + connect token baked in so the Python WS bridge
+  # authenticates deterministically against /cc_socket), then runs
+  # `claude --permission-mode bypassPermissions
   # --dangerously-load-development-channels server:esr-bridge
   # --mcp-config <path>` under erlexec's PTY.
+  #
+  # Phase 7 PR 32b (rebrand-3): cut over from v1 prototype writer
+  # (HTTP/SSE) to v2 writer (Phoenix Channel WebSocket). v1 plugin
+  # is still in the tree as a defensive fallback until PR 32c
+  # deletes it, but PtyServer no longer calls into v1 from this
+  # commit forward.
   defp spawn_claude_directly(state) do
     cmd_str =
       case state.cmd_override do
         nil ->
           {:ok, mcp_path} =
-            Ezagent.Bridge.V1Prototype.McpConfigWriter.write!(
+            EzagentPluginCcChannel.McpConfigWriter.write!(
               agent_uri: URI.to_string(state.agent_uri)
             )
 

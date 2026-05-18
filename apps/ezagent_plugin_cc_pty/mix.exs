@@ -32,8 +32,10 @@ defmodule EzagentPluginCcPty.MixProject do
       {:ezagent_domain_identity, in_umbrella: true},
       {:ezagent_domain_workspace, in_umbrella: true},
       {:ezagent_domain_chat, in_umbrella: true},
-      # PtyServer calls McpConfigWriter in-process to generate mcp.json.
-      {:ezagent_plugin_cc_bridge_v1_prototype, in_umbrella: true},
+      # PtyServer calls v2 McpConfigWriter in-process to generate
+      # mcp.json (Phase 7 PR 32b cutover). v1 plugin dep removed in
+      # this PR; PR 32c deletes the v1 app entirely.
+      {:ezagent_plugin_cc_channel, in_umbrella: true},
       {:erlexec, "~> 2.1"}
     ]
   end
