@@ -24,26 +24,28 @@ defmodule EzagentPluginLiveview.UserCapsLive do
   alias Ezagent.{Capability, Invocation, KindRegistry}
 
   @impl true
-  def mount(%{"uri" => encoded}, session, socket) do
+  def mount(%{"uri" => encoded}, _session, socket) do
     user_uri = encoded |> URI.decode_www_form() |> URI.new!()
-    caller_uri = caller_from_session(session)
+    # PR #123 hardening: on_mount sets current_user_uri; caller is
+    # the logged-in user, not a hardcoded admin fallback.
+    caller_uri = socket.assigns.current_user_uri
+
+    caller_caps =
+      if URI.to_string(caller_uri) == URI.to_string(Ezagent.Entity.User.admin_uri()) do
+        Ezagent.Entity.User.admin_caps()
+      else
+        Ezagent.Identity.list_caps_for(caller_uri)
+      end
 
     {:ok,
      socket
      |> assign(:user_uri, user_uri)
      |> assign(:caller_uri, caller_uri)
-     |> assign(:caller_caps, Ezagent.Entity.User.admin_caps())
+     |> assign(:caller_caps, caller_caps)
      |> assign(:flash_error, nil)
      |> assign(:flash_info, nil)
      |> assign(:grant_form, to_form(%{"kind" => "", "behavior" => "any", "instance" => "any"}, as: "grant"))
      |> load_caps()}
-  end
-
-  defp caller_from_session(session) do
-    case Map.get(session || %{}, "current_user_uri") do
-      nil -> Ezagent.Entity.User.admin_uri()
-      str -> URI.parse(str)
-    end
   end
 
   defp load_caps(socket) do

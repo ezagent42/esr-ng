@@ -59,14 +59,11 @@ defmodule EzagentPluginLiveview.AdminLive do
       end
     end
 
-    # Phase 4-completion Spec 05: derive caller from session cookie set
-    # by SessionController. Falls back to admin if no session (e.g. test
-    # paths that bypass login).
-    caller_uri =
-      case Map.get(session || %{}, "current_user_uri") do
-        nil -> Ezagent.Entity.User.admin_uri()
-        uri_str -> URI.parse(uri_str)
-      end
+    # PR #123 hardening: live_session :require_user on_mount hook
+    # (EzagentWeb.LiveAuth) guarantees socket.assigns.current_user_uri
+    # is set by the time mount/3 runs. The previous nil → admin_uri
+    # fallback was the public-exposure attack surface — gone.
+    caller_uri = socket.assigns.current_user_uri
 
     caller_caps =
       if URI.to_string(caller_uri) == URI.to_string(Ezagent.Entity.User.admin_uri()) do
