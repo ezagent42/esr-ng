@@ -202,6 +202,15 @@ defmodule Ezagent.Orchestrator.Tools do
 
   Returns `{:ok, new_template_uri}` where the URI is
   `template://session/<parent_name>@<new_hash>`.
+
+  ## Deleted parent (PR 48)
+
+  If the parent SessionTemplate hash has been deleted from the
+  registry since this session was instantiated, returns
+  `{:error, :parent_template_deleted}`. The running session continues
+  on its working-copy (orchestrator stays alive); the orchestrator
+  must `save_template_as/2` under a new name to persist its refinements
+  going forward. Per SPEC §7-3 "in-flight template-deletion semantics".
   """
   @spec update_template(keyword()) :: {:ok, URI.t()} | {:error, term()}
   def update_template(opts \\ []) do
@@ -209,11 +218,27 @@ defmodule Ezagent.Orchestrator.Tools do
          {:ok, workspace_uri} <- require_opt(opts, :workspace_uri),
          {:ok, caller_uri} <- require_opt(opts, :caller),
          {:ok, %URI{} = parent_uri} <- require_opt(opts, :parent_template_uri),
+         :ok <- check_parent_alive(parent_uri),
          {:ok, parent_name} <- extract_template_name(parent_uri),
          {:ok, slice} <- build_working_copy(session_uri, workspace_uri, caller_uri, parent_uri) do
       version_hash = SessionTemplate.compute_version_hash(slice)
       new_uri = SessionTemplate.build_uri(parent_name, version_hash)
       {:ok, new_uri}
+    end
+  end
+
+  # Phase 7 PR 48 — parent-template-deletion check. Returns :ok if the
+  # parent SessionTemplate hash is still registered in KindRegistry,
+  # {:error, :parent_template_deleted} if it's gone.
+  #
+  # `save_template_as/2` deliberately does NOT call this — saving as
+  # a NEW name should always work even if the original parent is
+  # deleted (the new template just records the dead parent as its
+  # lineage anchor, marking the heritage without depending on it).
+  defp check_parent_alive(%URI{} = parent_uri) do
+    case Ezagent.KindRegistry.lookup(parent_uri) do
+      {:ok, _pid} -> :ok
+      :error -> {:error, :parent_template_deleted}
     end
   end
 
