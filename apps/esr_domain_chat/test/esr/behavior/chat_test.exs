@@ -187,8 +187,8 @@ defmodule Esr.Behavior.ChatTest do
   end
 
   describe "invoke(:receive, ...) — Agent branch" do
-    test "no-op in 2b (bridge wiring is 2c)" do
-      agent_uri = URI.new!("agent://cc-builder")
+    test "returns {:ok, slice} unchanged (Agent has no chat slice state)" do
+      agent_uri = URI.new!("agent://cc-builder-#{System.unique_integer([:positive])}")
       sender = URI.new!("user://admin")
       msg = Message.new(sender, %{text: "hi agent", attachments: []})
 
@@ -196,6 +196,108 @@ defmodule Esr.Behavior.ChatTest do
       ctx = %{self_uri: agent_uri, kind_module: Esr.Entity.Agent, caller: sender}
 
       assert {:ok, ^slice} = Chat.invoke(:receive, slice, %{message: msg}, ctx)
+    end
+
+    # PR 26 (2026-05-18): the channels-reference protocol declares
+    # `meta: Record<string, string>` — every value MUST be a string,
+    # otherwise claude TUI silently drops the entire notification.
+    # PR 14 violated this by stamping a list under `meta.attachments`,
+    # which broke the inbound path for ~3 weeks before discovery.
+
+    test "to_claude payload meta values are all strings (no list/map smuggling)" do
+      agent_uri = URI.new!("agent://cc-meta-string-#{System.unique_integer([:positive])}")
+      sender = URI.new!("user://admin")
+      session_uri = URI.new!("session://meta-#{System.unique_integer([:positive])}")
+
+      msg = Message.new(sender, %{text: "plain text", attachments: []})
+
+      :ok = EsrPluginCcChannel.BridgeRegistry.bind(agent_uri, self())
+      on_exit(fn -> EsrPluginCcChannel.BridgeRegistry.unbind(agent_uri) end)
+
+      ctx = %{self_uri: agent_uri, kind_module: Esr.Entity.Agent, caller: session_uri}
+
+      Chat.invoke(:receive, %{}, %{message: msg}, ctx)
+
+      assert_receive {:to_claude, %{"content" => content, "meta" => meta}}, 500
+
+      assert is_binary(content)
+      assert content == "plain text"
+
+      for {k, v} <- meta do
+        assert is_binary(k), "meta key not string: #{inspect(k)}"
+        assert is_binary(v),
+               "meta value for key #{inspect(k)} is not string: #{inspect(v)}"
+      end
+
+      assert Map.has_key?(meta, "sender")
+      assert Map.has_key?(meta, "message_uri")
+      assert Map.has_key?(meta, "session")
+      refute Map.has_key?(meta, "file_path")
+    end
+
+    test "attachment → meta.file_path is the first attachment's local_path string" do
+      agent_uri = URI.new!("agent://cc-meta-att-#{System.unique_integer([:positive])}")
+      sender = URI.new!("user://admin")
+      session_uri = URI.new!("session://meta-att-#{System.unique_integer([:positive])}")
+
+      msg =
+        Message.new(sender, %{
+          text: "see file",
+          attachments: [
+            %{type: "file", name: "a.txt", local_path: "/tmp/a.txt"},
+            %{type: "image", name: "b.png", local_path: "/tmp/b.png"}
+          ]
+        })
+
+      :ok = EsrPluginCcChannel.BridgeRegistry.bind(agent_uri, self())
+      on_exit(fn -> EsrPluginCcChannel.BridgeRegistry.unbind(agent_uri) end)
+
+      ctx = %{self_uri: agent_uri, kind_module: Esr.Entity.Agent, caller: session_uri}
+
+      Chat.invoke(:receive, %{}, %{message: msg}, ctx)
+
+      assert_receive {:to_claude, %{"content" => content, "meta" => meta}}, 500
+
+      assert content =~ "see file"
+      assert content =~ "name=a.txt"
+      assert content =~ "name=b.png"
+
+      # Mirrors cc-openclaw channel_server convention: one file per
+      # notification; first attachment wins meta.file_path.
+      assert meta["file_path"] == "/tmp/a.txt"
+
+      for {_k, v} <- meta, do: assert(is_binary(v))
+    end
+
+    test "attachment with string-keyed body (post-DB roundtrip) still produces file_path" do
+      # MessageStore stores body as JSON → Ecto load returns string keys.
+      # body_attachments + first_attachment_path must tolerate either shape.
+      agent_uri = URI.new!("agent://cc-meta-stringkey-#{System.unique_integer([:positive])}")
+      sender = URI.new!("user://admin")
+      session_uri = URI.new!("session://meta-stringkey-#{System.unique_integer([:positive])}")
+
+      string_keyed_body = %{
+        "text" => "from db",
+        "attachments" => [%{"type" => "file", "name" => "x", "local_path" => "/tmp/x.txt"}]
+      }
+
+      msg = %Message{
+        Message.new(sender, %{text: "stub", attachments: []})
+        | body: string_keyed_body
+      }
+
+      :ok = EsrPluginCcChannel.BridgeRegistry.bind(agent_uri, self())
+      on_exit(fn -> EsrPluginCcChannel.BridgeRegistry.unbind(agent_uri) end)
+
+      ctx = %{self_uri: agent_uri, kind_module: Esr.Entity.Agent, caller: session_uri}
+
+      Chat.invoke(:receive, %{}, %{message: msg}, ctx)
+
+      assert_receive {:to_claude, %{"content" => content, "meta" => meta}}, 500
+
+      assert content =~ "from db"
+      assert meta["file_path"] == "/tmp/x.txt"
+      for {_k, v} <- meta, do: assert(is_binary(v))
     end
   end
 

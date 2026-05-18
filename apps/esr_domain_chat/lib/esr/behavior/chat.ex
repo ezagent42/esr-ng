@@ -158,8 +158,12 @@ defmodule Esr.Behavior.Chat do
         # Phase 6 PR 14: pass attachments through to claude so it sees
         # what the operator sent, even when the bridge can't render
         # binary content. Format as a text breadcrumb attached after
-        # the body text; the structured `meta.attachments` array
-        # carries the same info for clients that can parse it.
+        # the body text. PR 26 (Allen 2026-05-18): per channels-reference
+        # spec `meta: Record<string, string>`, every meta VALUE must be
+        # a string — a list value (the old `attachments` key) caused
+        # claude TUI to silently drop the entire notification. Keep
+        # attachment info in `content` only; structured form is not
+        # representable in the channel meta schema.
         attachments = body_attachments(msg.body)
         attachment_hint = attachment_hint_text(attachments)
         text_with_hint =
@@ -170,15 +174,19 @@ defmodule Esr.Behavior.Chat do
             {t, hint} -> t <> "\n" <> hint
           end
 
-        payload = %{
-          "content" => text_with_hint,
-          "meta" => %{
-            "sender" => URI.to_string(msg.sender),
-            "message_uri" => msg.uri,
-            "session" => source_session,
-            "attachments" => Enum.map(attachments, &serialize_attachment/1)
-          }
+        base_meta = %{
+          "sender" => URI.to_string(msg.sender),
+          "message_uri" => msg.uri,
+          "session" => source_session
         }
+
+        meta =
+          case first_attachment_path(attachments) do
+            nil -> base_meta
+            path -> Map.put(base_meta, "file_path", path)
+          end
+
+        payload = %{"content" => text_with_hint, "meta" => meta}
 
         case EsrPluginCcChannel.BridgeRegistry.lookup(ctx.self_uri) do
           {:ok, channel_pid} ->
@@ -569,15 +577,19 @@ defmodule Esr.Behavior.Chat do
   defp body_attachments(%{"attachments" => list}) when is_list(list), do: list
   defp body_attachments(_), do: []
 
-  defp serialize_attachment(%{} = att) do
-    Map.new(att, fn
-      {k, v} when is_atom(k) -> {Atom.to_string(k), serialize_value(v)}
-      {k, v} -> {k, serialize_value(v)}
-    end)
+  # Mirror cc-openclaw channel_server convention: at most one `file_path`
+  # string in meta per notification; multi-attachment context lives in the
+  # text hint already concatenated to `content`.
+  defp first_attachment_path([]), do: nil
+
+  defp first_attachment_path([att | _]) do
+    case att[:local_path] || att["local_path"] do
+      p when is_binary(p) and p != "" -> p
+      _ -> nil
+    end
   end
 
-  defp serialize_value(v) when is_atom(v) and v not in [nil, true, false], do: Atom.to_string(v)
-  defp serialize_value(v), do: v
+  defp first_attachment_path(_), do: nil
 
   defp attachment_hint_text([]), do: ""
 
