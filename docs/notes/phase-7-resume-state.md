@@ -17,11 +17,30 @@ If a fresh Claude Code session is picking up Phase 7 implementation, read this f
 |---|---|---|---|
 | Pre-7 docs | 30/#84 | ✅ merged | SPEC + VERIFICATION + PLAN + DECISIONS |
 | 7-1-a workspace enforcement | 31/#85 | ✅ merged | New Esr.WorkspaceRegistry (5th ETS Registry); chat.ex:116 plumbs workspace_uri |
-| 7-1-b CC v1→v2 cutover | 32 | ⏳ pending | **LARGE — only 7-1 item left.** Blast radius listed in SPEC §7-1; delete entire esr_plugin_cc_bridge_v1_prototype app + migrate all references in cc_pty, ezagent, chat.ex, agent.ex, controllers, 3 test files. **Risk to Allen's live cc-demo** — Python bridge needs HTTP/SSE → WebSocket port. Recommend fresh session + careful pre-audit + verify v2 e2e BEFORE delete |
+| 7-1-b CC v1→v2 cutover | 32 | ⏳ pending | **LARGE — DEFERRED.** Blast radius listed in SPEC §7-1; delete entire esr_plugin_cc_bridge_v1_prototype app + migrate all references in cc_pty, ezagent, chat.ex, agent.ex, controllers, 3 test files. **Risk to Allen's live cc-demo** — Python bridge needs HTTP/SSE → WebSocket port. Recommend fresh session + careful pre-audit + verify v2 e2e BEFORE delete |
 | 7-1-c `mix esr.bootstrap` | 33/#87 | ✅ merged | One-command install; smoke-tested ESR_HOME=/tmp/...&ESR_PROFILE=smoke; idempotent |
 | 7-1-d CLI ↔ LV cap parity | 34/#90 | ✅ merged | Phase 6 PR 7 already shipped CLI token machinery; PR 34 added the V3.4 invariant test (4/4 pass; structurally pins both surfaces to Esr.Identity.list_caps_for) |
 | 7-1-e ws sidecar EOF reap | 35/#88 | ✅ merged | main.js stdin EOF handler + process.exit; 2 tests (static + :slow integration that spawns real Port and asserts pid dead within 3s) |
 | 7-1-f `mix esr.plugin.install` | 36/#89 | ✅ merged | Runtime hot-load via :application.load/:application.start; D7-8 contract (no uninstall); Mix.env() pitfall noted; 3/3 structural tests pass |
+| 7-2-a AgentTemplate Kind + template:// scheme | 37/#92 | ✅ merged | Kind contract + template:// scheme spawn fn dispatching by host (agent/session); 4/4 tests pass |
+| 7-2-b SessionTemplate Kind + SHA-256 versioning | 38/#98 | ✅ merged | Kind contract + git-style content-addressable hash + build_uri helper; 9/9 tests pass |
+| 7-2-c template caps (read/write/instantiate) | 39 | ⏳ pending | Mostly doc-only PR — cap kinds are open atoms; need codified semantics in SPEC + LV cap-grant form |
+| 7-2-d Agent.spawn/4 + slice workspace_uri + spawned_by | 40 | ⏳ pending | Add `spawn(template_uri, instance_name, workspace_uri, granted_by)` + Agent slice fields + migration + populate from PR 47 Generator |
+| 7-2-e Generator (Session.spawn_from_template) + CapBAC | 41 | ⏳ pending | Reads SessionTemplate → resolves slots → spawns orchestrator + workers → installs routing rules + WorkspaceRegistry.bind → new `template:instantiate` cap gate |
+| 7-3-a Capability.matches?/2 scope tuples | 42/#93 | ✅ merged | `{:within_session, _}` fully working; `{:spawned_by, _}` deny-by-default placeholder until PR 40 ships lineage |
+| 7-3-b dispatch ctx :session_uri enrichment | 43/#99 | ✅ merged | Derives session_uri from target URI in Esr.Kind.Runtime.handle_dispatch; additive, no regression |
+| 7-3-c Session persistence flip + working-copy slice | 44/#100 | ⚠️ partial (docs only) | Explored flip from :ephemeral to {:snapshot, :on_change} — 30+ test failures cascade. Documented intent + deferred actual flip to PR 46 (orchestrator tools land with test-helper updates) |
+| 7-3-d cc-orchestrator AgentTemplate seed | 45/#101 | ✅ merged | Idempotent boot-time SpawnRegistry.spawn(template://agent/cc-orchestrator); slice fields populated by admin |
+| 7-3-e 7 orchestration MCP tools | 46 | ⏳ pending | LARGE — `add_agent_slot` / `remove_agent_slot` / `update_agent_template` / `write_matcher` / `update_template` / `save_template_as` / `list_templates`; depends on PR 40 + 41 + 44 |
+| 7-3-f Generator scoped-cap grant call site | 47 | ⏳ pending | Couples with PR 41 — Generator dispatches identity/grant_cap with `{:within_session, S}` + `{:spawned_by, orchestrator_uri}` to bound orchestrator |
+| 7-3-g in-flight template-deletion semantics | 48 | ⏳ pending | `update_template` on deleted parent returns `{:error, :parent_template_deleted}`; `save_template_as` still works |
+| 7-3-h orchestrator e2e demo | 49 | ⏳ pending | agent-browser screenshots of (1) live orchestration session, (2) saved template via CLI, (3) re-instantiated session |
+| 7-4-a `esr-developer` skill | 50/#96 | ✅ merged | ~600 lines covering 10 invariants + 8 anti-patterns + 6 how-to + 5 debug + project conventions + pointer index + conflict resolution |
+| 7-4-b 4 onboarding docs | 51/#97 | ✅ merged | first-30-days + adding-a-plugin + adding-kind-behavior-template + common-failures runbook; ~4500 words |
+| 7-4-c additional invariant tests | 52 | ⏳ pending | template_immutable_hash_test, template_fork_lineage_test, plugin_hot_install_test, etc. — gates land with the PRs that introduce the features |
+| 7-4-d Decision Log #135-#144 + GLOSSARY 16 terms + ROADMAP §9b | 53/#94 | ✅ merged | All D7-* promoted to Decision Log; GLOSSARY + ROADMAP final state shipped |
+| 7-4-e ESR v1 release note + forensic | 54/#95 | ✅ merged | docs/notes/phase-7-handoff.md declares ESR v1; 3 trade-offs not to cargo-cult + cross-PR invariants + deferred items |
+| Resume note updates | 86/#86, 91/#91, this | ✅ merged | Periodic state sync for next session |
 | 7-2 templates (5 PRs) | 37-41 | ⏳ pending | AgentTemplate + SessionTemplate Kinds; template caps; Agent.spawn/4; Generator |
 | 7-3 orchestrator (8 PRs) | 42-49 | ⏳ pending | Capability.matches?/2 extension; ctx :session_uri; cc-orchestrator template; 7 MCP tools; persistence flip; fork/merge; e2e demo |
 | 7-4 handoff (5 PRs) | 50-54 | ⏳ pending | ESR skill; 4 docs; ≥8 invariant tests; Decision Log #135-#144; forensic note + v1 release |
