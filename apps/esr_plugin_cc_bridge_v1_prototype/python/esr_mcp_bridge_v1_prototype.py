@@ -327,7 +327,24 @@ def handle(msg: dict):
 
 def main():
     setup_logging()
-    LOG.info("bridge starting esrd=%s", ESRD_URL)
+    LOG.info("bridge starting esrd=%s agent=%s", ESRD_URL, AGENT_URI or "(unset)")
+
+    # Phase 6 PR 19 (Allen 2026-05-18): if AGENT_URI is set, announce
+    # IMMEDIATELY without waiting for claude to send `initialize`.
+    # Claude in recent versions doesn't eagerly init MCP servers from
+    # --mcp-config — it waits until a tool is actually needed. That
+    # never happens for inbound flow (claude needs the bridge to push
+    # an event first, which requires the bridge to be bound, which
+    # requires announce — chicken/egg). Eager announce breaks the cycle.
+    # Also subscribes SSE so the bridge can receive to_claude events
+    # immediately.
+    if AGENT_URI:
+        threading.Thread(
+            target=post_announce,
+            args=({"name": "esr-bridge-eager", "version": "0.1.0"},),
+            daemon=True,
+        ).start()
+        threading.Thread(target=sse_subscribe_loop, daemon=True).start()
 
     try:
         for raw in sys.stdin:
