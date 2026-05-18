@@ -136,4 +136,35 @@ defmodule Ezagent.Orchestrator.ToolsTest do
       end
     end
   end
+  describe "PR 48 — in-flight template deletion semantics" do
+    test "update_template returns :parent_template_deleted when parent hash is gone" do
+      parent_uri = URI.parse("template://session/never-registered@deadbeefdeadbeef")
+
+      assert {:error, :parent_template_deleted} =
+               Tools.update_template(
+                 session_uri: URI.parse("session://pr48-test"),
+                 workspace_uri: URI.parse("workspace://pr48-test"),
+                 caller: URI.parse("agent://pr48-orchestrator"),
+                 parent_template_uri: parent_uri
+               )
+    end
+
+    test "save_template_as does NOT call check_parent_alive (design lock)" do
+      # PR 48 design lock: save_template_as deliberately does NOT
+      # check parent aliveness — saving as a NEW name should always
+      # work even if the original parent is deleted (the new template
+      # records the dead parent as lineage, marking heritage without
+      # depending on it). Structural assertion: the code path for
+      # save_template_as never invokes check_parent_alive.
+      source = File.read!("lib/ezagent/orchestrator/tools.ex")
+
+      [save_block | _] =
+        Regex.scan(~r/def save_template_as.*?\n  end/s, source)
+        |> Enum.map(&hd/1)
+
+      refute String.contains?(save_block, "check_parent_alive"),
+             "save_template_as MUST NOT call check_parent_alive — PR 48 " <>
+               "design lock says save-as is always allowed even when parent is deleted"
+    end
+  end
 end

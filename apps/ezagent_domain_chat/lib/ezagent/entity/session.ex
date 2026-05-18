@@ -114,7 +114,8 @@ defmodule Ezagent.Entity.Session do
          {:ok, workspace_uri} <- default_workspace_for_session(session_uri),
          :ok <- Ezagent.WorkspaceRegistry.bind(session_uri, workspace_uri),
          {:ok, orchestrator_uri} <-
-           spawn_orchestrator(session_uri, workspace_uri, owner_uri) do
+           spawn_orchestrator(session_uri, workspace_uri, owner_uri),
+         :ok <- grant_scoped_caps(orchestrator_uri, session_uri, owner_uri) do
       {:ok, %{session_uri: session_uri, orchestrator_uri: orchestrator_uri}}
     else
       err -> err
@@ -155,5 +156,62 @@ defmodule Ezagent.Entity.Session do
     instance_name = "orchestrator-#{session_uri.host}"
 
     Ezagent.Entity.Agent.spawn(template_uri, instance_name, workspace_uri, owner_uri)
+  end
+
+  # Phase 7 PR 47 — scope-bounded delegation per SPEC D7-3.
+  #
+  # After the orchestrator agent spawns, grant it two scope-tuple caps
+  # so its authority is bounded to its session + to agents it spawns:
+  #
+  # 1. `{kind: :session, behavior: :any, instance: {:within_session, S}}`
+  #    — orchestrator can dispatch on any URI inside its session S, but
+  #    nothing outside S
+  # 2. `{kind: :agent, behavior: :any, instance: {:spawned_by, orch}}`
+  #    — orchestrator can dispatch on agents it spawned (via Agent.spawn/4
+  #    recording lineage in Ezagent.AgentLineage), but not on agents
+  #    spawned by other orchestrators or operators
+  #
+  # Both granted by the human owner who triggered Generator. Decision
+  # #137 marker: this is the v1 scope-bounded-delegation baseline.
+  defp grant_scoped_caps(orchestrator_uri, session_uri, owner_uri) do
+    caps = [
+      %Ezagent.Capability{
+        kind: :session,
+        behavior: :any,
+        instance: {:within_session, session_uri},
+        granted_by: owner_uri,
+        granted_at: DateTime.utc_now()
+      },
+      %Ezagent.Capability{
+        kind: :agent,
+        behavior: :any,
+        instance: {:spawned_by, orchestrator_uri},
+        granted_by: owner_uri,
+        granted_at: DateTime.utc_now()
+      }
+    ]
+
+    target = URI.new!("#{URI.to_string(orchestrator_uri)}/behavior/identity/grant_cap")
+
+    ctx = %{
+      caller: owner_uri,
+      caps: Ezagent.Entity.User.admin_caps(),
+      reply: :ignore
+    }
+
+    results =
+      Enum.map(caps, fn cap ->
+        Ezagent.Invocation.dispatch(%Ezagent.Invocation{
+          target: target,
+          mode: :call,
+          args: %{cap: cap},
+          ctx: ctx
+        })
+      end)
+
+    case Enum.reject(results, &match?({:ok, _}, &1)) do
+      [] -> :ok
+      [err | _] -> {:error, {:scoped_cap_grant_failed, err}}
+    end
   end
 end
