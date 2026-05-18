@@ -9,27 +9,31 @@ defmodule Esr.PluginCcPty.PtyServer do
   and routes `agent_uri` through mcp.json (not env-var passthrough)
   so the Python bridge always announces with the correct agent_uri.
 
-  ## Auto-confirm dev-channels dialog (ported from old esr)
+  ## Generic auto-prompt scanner (Phase 6 PR 19)
 
-  `claude --dangerously-load-development-channels server:esr-bridge`
-  prompts the operator with an interactive dialog ("Loading development
-  channels..." / "I am using this for local development"). When ESR
-  spawns claude headlessly there's no human at the terminal — we must
-  auto-confirm.
+  Allen 2026-05-18 (after dev-channels confirm worked but MCP init
+  still didn't fire): "监控 pty stream 侦测到关键字后再 send key".
+  Generalized the one-shot dev-channels confirm into a data-driven
+  list of `{name, match, send, fired?}` rules. Each PTY stdout/stderr
+  chunk accumulates into a stripped buffer; the scanner walks every
+  still-unfired rule and fires those whose pattern matches.
 
-  Pattern (per Allen's directive, matching old esr's
-  `feishu_chat_proxy.maybe_confirm_dev_channels/1`):
-  1. Accumulate stdout in `:pty_buffer`
-  2. ANSI-strip via `Esr.AnsiStrip.strip/1` (codes interleave between
-     words; substring-match on raw bytes won't work)
-  3. Detect BOTH `"Loading development channels"` AND `"I am using
-     this for local development"` in stripped text
-  4. On first match: `:exec.send(os_pid, "1\\r")` and flip
-     `:dev_channels_confirmed` to true so we don't re-fire
+  Adding a new auto-input becomes one entry in
+  `default_auto_prompts/0` — no scanner code change. Tests + callers
+  can also inject extra prompts via `:auto_prompts` arg at spawn.
 
-  Other paths (CLI flag / ENV var / --print mode) were validated as
-  unreliable in old esr — option B (prompt detection) is the only
-  one that works (per Allen 2026-05-16).
+  Match shapes:
+  - `String.t()` — substring contains
+  - `[String.t()]` — ALL substrings must be present (AND)
+  - `Regex.t()` — regex match
+
+  Built-in prompts:
+  - `:dev_channels_dialog` — `--dangerously-load-development-channels`
+    security confirm. Sends `"1\r"`.
+
+  Phase 6 PR 19 also added eager bridge-announce in the Python MCP
+  bridge so the Agent Kind registers even when claude doesn't lazily
+  initialize the MCP server.
 
   ## Crash policy
 
@@ -59,7 +63,14 @@ defmodule Esr.PluginCcPty.PtyServer do
     # `claude --permission-mode bypassPermissions ...` invocation.
     :cmd_override,
     pty_buffer: "",
-    dev_channels_confirmed: false
+    # Phase 6 PR 19 (Allen 2026-05-18): generalize auto-confirm into a
+    # data-driven list of prompt patterns. Each entry:
+    #   %{name: atom, match: String.t() | [String.t()] | Regex.t(),
+    #     send: iodata, fired?: boolean}
+    # match: string = substring; list of strings = ALL must match
+    # (AND); Regex = pattern match. send: bytes to write to PTY stdin.
+    # fired? = true after one match → never re-fires (idempotent).
+    auto_prompts: []
   ]
 
   def start_link(args) when is_map(args) do
@@ -90,7 +101,12 @@ defmodule Esr.PluginCcPty.PtyServer do
       exec_pid: state.exec_pid,
       test_mode: state.test_mode,
       running: state.exec_pid != nil or state.test_mode,
-      dev_channels_confirmed: state.dev_channels_confirmed,
+      # Phase 6 PR 19: expose the auto-prompt state so operator LV
+      # can see which prompts fired vs which are still waiting.
+      auto_prompts:
+        Enum.map(state.auto_prompts, fn p ->
+          %{name: p.name, fired?: p.fired?}
+        end),
       recent_output: recent_lines,
       buffer_bytes: byte_size(state.pty_buffer)
     }
@@ -177,10 +193,25 @@ defmodule Esr.PluginCcPty.PtyServer do
       agent_uri: agent_uri,
       cwd: cwd,
       test_mode: test_mode,
-      cmd_override: cmd_override
+      cmd_override: cmd_override,
+      auto_prompts: default_auto_prompts() ++ Map.get(args, :auto_prompts, [])
     }
 
     {:ok, state, {:continue, :spawn_pty}}
+  end
+
+  # Phase 6 PR 19 — well-known prompts the spawned `claude` may pause
+  # on. Each prompt fires once; the data-driven structure means new
+  # prompts get added here without touching the dispatch loop.
+  defp default_auto_prompts do
+    [
+      %{
+        name: :dev_channels_dialog,
+        match: ["Loading development channels", "I am using this for local development"],
+        send: "1\r",
+        fired?: false
+      }
+    ]
   end
 
   @impl true
@@ -334,7 +365,7 @@ defmodule Esr.PluginCcPty.PtyServer do
     new_buffer = state.pty_buffer <> chunk
     state = %{state | pty_buffer: new_buffer}
 
-    state = maybe_confirm_dev_channels(state)
+    state = scan_auto_prompts(state)
 
     {:noreply, state}
   end
@@ -358,56 +389,80 @@ defmodule Esr.PluginCcPty.PtyServer do
 
   def handle_info(_msg, state), do: {:noreply, state}
 
-  # --- dev-channels auto-confirm (ported from old esr) -----------------
+  # --- generic auto-prompt scanner (Phase 6 PR 19) ---------------------
 
-  # Once-only auto-confirm of claude's `--dangerously-load-development-
-  # channels` dialog. We match against the buffer's stripped content
-  # (ANSI codes mangle "Loading development channels" into segments
-  # like "Loading[1Cdevelopment[1Cchannels" — strip first, match
-  # after).
-  #
-  # The first match writes "1\r" to the PTY's stdin via erlexec —
-  # "1" selects the "I am using this for local development" option,
-  # "\r" submits.
-  defp maybe_confirm_dev_channels(%__MODULE__{dev_channels_confirmed: true} = state),
-    do: state
+  # Allen 2026-05-18: "监控 pty stream 侦测到关键字后再 send key".
+  # Walk each (still-unfired) auto_prompt against the ANSI-stripped
+  # buffer; fire any matches and mark them fired. List is stable so
+  # adding a new prompt is one entry in default_auto_prompts/0.
+  defp scan_auto_prompts(%__MODULE__{exec_pid: nil} = state), do: state
 
-  defp maybe_confirm_dev_channels(%__MODULE__{exec_pid: nil} = state), do: state
+  defp scan_auto_prompts(%__MODULE__{auto_prompts: []} = state),
+    do: trim_buffer_only(state)
 
-  defp maybe_confirm_dev_channels(%__MODULE__{pty_buffer: buf, exec_pid: exec_pid} = state) do
+  defp scan_auto_prompts(%__MODULE__{auto_prompts: prompts, pty_buffer: buf} = state) do
     stripped = AnsiStrip.strip(buf)
 
-    if String.contains?(stripped, "Loading development channels") and
-         String.contains?(stripped, "I am using this for local development") do
-      Logger.info(
-        "PtyServer: auto-confirming dev-channels dialog for #{URI.to_string(state.agent_uri)}"
-      )
+    {new_prompts, fired_any?} =
+      Enum.map_reduce(prompts, false, fn p, any? ->
+        cond do
+          p.fired? ->
+            {p, any?}
 
-      try do
-        :exec.send(exec_pid, "1\r")
-      catch
-        kind, why ->
-          Logger.warning(
-            "PtyServer: dev-channels confirm send failed (#{inspect(kind)}, #{inspect(why)})"
-          )
+          matches?(p.match, stripped) ->
+            fire_prompt(p, state)
+            {%{p | fired?: true}, true}
+
+          true ->
+            {p, any?}
+        end
+      end)
+
+    state = %{state | auto_prompts: new_prompts}
+
+    if fired_any? do
+      # Reset buffer after any match — avoids re-detect on the same
+      # bytes if another prompt has overlapping text.
+      %{state | pty_buffer: ""}
+    else
+      trim_buffer_only(state)
+    end
+  end
+
+  defp matches?(needle, stripped) when is_binary(needle),
+    do: String.contains?(stripped, needle)
+
+  defp matches?(needles, stripped) when is_list(needles),
+    do: Enum.all?(needles, &String.contains?(stripped, &1))
+
+  defp matches?(%Regex{} = re, stripped), do: Regex.match?(re, stripped)
+
+  defp fire_prompt(prompt, state) do
+    Logger.info(
+      "PtyServer: auto-prompt #{prompt.name} matched for #{URI.to_string(state.agent_uri)} — sending #{inspect(prompt.send)}"
+    )
+
+    try do
+      :exec.send(state.exec_pid, prompt.send)
+    catch
+      kind, why ->
+        Logger.warning(
+          "PtyServer: auto-prompt #{prompt.name} send failed (#{inspect(kind)}, #{inspect(why)})"
+        )
+    end
+  end
+
+  # Keep the prompt-detection buffer bounded so it doesn't grow
+  # unbounded over long-running sessions.
+  defp trim_buffer_only(%__MODULE__{pty_buffer: buf} = state) do
+    buf2 =
+      if byte_size(buf) > 64 * 1024 do
+        binary_part(buf, byte_size(buf) - 16 * 1024, 16 * 1024)
+      else
+        buf
       end
 
-      # Clear buffer after confirm so it doesn't grow unbounded — also
-      # prevents accidental re-detection (belt-and-suspenders with
-      # :dev_channels_confirmed flag).
-      %{state | dev_channels_confirmed: true, pty_buffer: ""}
-    else
-      # Trim buffer if it grows past 64KB — we only need the most recent
-      # output for prompt detection.
-      buf2 =
-        if byte_size(buf) > 64 * 1024 do
-          binary_part(buf, byte_size(buf) - 16 * 1024, 16 * 1024)
-        else
-          buf
-        end
-
-      %{state | pty_buffer: buf2}
-    end
+    %{state | pty_buffer: buf2}
   end
 
   @impl true

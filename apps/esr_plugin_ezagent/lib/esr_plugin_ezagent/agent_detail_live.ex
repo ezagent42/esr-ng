@@ -122,7 +122,16 @@ defmodule EsrPluginEzagent.AgentDetailLive do
                 <tr><td style="padding: 3px 0; color: #57606a;">cwd</td><td style="font-family: monospace; font-size: 11px;">{s.cwd}</td></tr>
                 <tr><td style="padding: 3px 0; color: #57606a;">running</td><td style={if s.running, do: "color: #1f883d; font-weight: 600;", else: "color: #cf222e;"}>{if s.running, do: "yes", else: "no"}</td></tr>
                 <tr><td style="padding: 3px 0; color: #57606a;">test_mode</td><td>{s.test_mode}</td></tr>
-                <tr><td style="padding: 3px 0; color: #57606a;">dev_channels_confirmed</td><td>{s.dev_channels_confirmed}</td></tr>
+                <tr>
+                  <td style="padding: 3px 0; color: #57606a;">auto_prompts</td>
+                  <td>
+                    <%= for p <- s.auto_prompts || [] do %>
+                      <span style={if p.fired?, do: "color: #1f883d; margin-right: 8px;", else: "color: #57606a; margin-right: 8px;"}>
+                        {p.name}: {if p.fired?, do: "fired", else: "waiting"}
+                      </span>
+                    <% end %>
+                  </td>
+                </tr>
                 <tr><td style="padding: 3px 0; color: #57606a;">buffer_bytes</td><td>{s.buffer_bytes}</td></tr>
               </tbody>
             </table>
