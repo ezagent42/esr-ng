@@ -5,24 +5,36 @@ defmodule Ezagent.Entity.Agent do
 
   Per Decision #61: an Agent is a peer of admin User in the Session —
   it can send messages (when its bridge surfaces a reply) and receive
-  messages (forwarded by Session). The Agent Kind itself owns the
-  bridge mapping and routes the cross-process traffic — see
-  `Ezagent.Bridge.V1Prototype.Server` for the wire side.
+  messages (forwarded by Session). The bridge wire is provided by
+  `EzagentPluginCcChannel` (Phoenix.Channel WebSocket); the Agent
+  Kind itself stays transport-agnostic.
 
   ## Spawn lifecycle
 
-  Phase 2 does NOT spawn any Agent at boot. Agent Kinds materialize
-  when a bridge announces itself:
+  Two paths spawn an Agent Kind:
 
-      Bridge announce (HTTP POST /announce)
-        → Ezagent.CcBridgeAnnounceController.announce/2
+  1. **Cold spawn** from a workspace's `cc.pty` Template Class →
+     `EzagentPluginCcPty.Template.instantiate/3` starts a PtyServer
+     which writes the v2 mcp.json; claude reads it and spawns the
+     Python WS bridge.
+
+  2. **Channel-join spawn** when the WS bridge joins
+     `cc:bridge:<agent_uri>` — `EzagentPluginCcChannel.Channel.join/3`
+     calls `Ezagent.SpawnRegistry.spawn(agent_uri)` to ensure the
+     Agent Kind exists in `KindRegistry` before binding the channel
+     pid to it (PR 32a).
+
+  Both paths land at:
+
+      Ezagent.SpawnRegistry.spawn(agent_uri)
         → DynamicSupervisor.start_child(EzagentDomainChat.AgentSupervisor,
             {Ezagent.Kind.Server, {Ezagent.Entity.Agent, %{uri: agent_uri}}})
 
   This is the realization of memory `feedback_north_star_plugin_isolation`:
-  the Agent module knows nothing about bridges; the controller knows
-  nothing about Chat. The DynamicSupervisor + Ezagent.Kind.Server are the
-  only contact points, and they're both `ezagent_core` machinery.
+  the Agent module knows nothing about bridges; the bridge plugin
+  knows nothing about Chat internals. The DynamicSupervisor +
+  Ezagent.Kind.Server are the only contact points, and they're both
+  `ezagent_core` machinery.
 
   ## URI shape
 
