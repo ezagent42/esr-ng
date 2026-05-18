@@ -158,6 +158,16 @@ defmodule Esr.Workspace.Loader do
   defp invoke_template(class_module, tmpl_name, tmpl_data, workspace_uri) do
     case class_module.instantiate(tmpl_name, tmpl_data, workspace_uri) do
       {:ok, uris} when is_list(uris) ->
+        # Phase 7 PR 31 (IMPL-7-1): bind every session URI the
+        # Template Class spawned to this workspace, so production
+        # dispatch via Esr.Behavior.Chat.invoke(:send) can resolve
+        # workspace_uri for the Resolver call (chat.ex:116).
+        # Non-session URIs are bound too — harmless, and avoids
+        # special-casing scheme detection in this fan-out path.
+        Enum.each(uris, fn uri ->
+          Esr.WorkspaceRegistry.bind(uri, workspace_uri)
+        end)
+
         {tmpl_name, {:ok, uris}}
 
       {:error, reason} = err ->

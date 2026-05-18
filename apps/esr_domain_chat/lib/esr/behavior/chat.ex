@@ -112,8 +112,29 @@ defmodule Esr.Behavior.Chat do
         # in-session-member fan-out is now expressed as a system_default
         # rule with `receivers: ["$session_members"]` that Resolver
         # expands using the passed members list.
+        #
+        # Phase 7 PR 31 (IMPL-7-1): plumb workspace_uri into Resolver so
+        # workspace-scoped routing rules actually filter. Pre-PR-31 this
+        # call used 3-arg resolve/3 which forwarded with `opts = []`,
+        # making rules with `workspace_uri != nil` never fire — exactly
+        # the V4.4 / V3.2 gap. `WorkspaceRegistry.lookup` returns :error
+        # for unbound (legacy) sessions; we pass `workspace_uri: nil`
+        # in that case, preserving pre-PR-31 global semantics.
         in_session_members = Map.keys(slice.members)
-        recipients = Esr.Routing.Resolver.resolve(msg, session_uri, in_session_members)
+
+        workspace_uri =
+          case Esr.WorkspaceRegistry.lookup(session_uri) do
+            {:ok, uri} -> uri
+            :error -> nil
+          end
+
+        recipients =
+          Esr.Routing.Resolver.resolve(
+            msg,
+            session_uri,
+            in_session_members,
+            workspace_uri: workspace_uri
+          )
 
         for recipient <- recipients do
           if recipient.scheme == "session" do

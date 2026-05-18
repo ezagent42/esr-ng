@@ -36,7 +36,11 @@ defmodule EsrCore.EtsOwner do
     {Esr.BehaviorRegistry, :set},
     {Esr.RoutingRegistry, :set},
     {Esr.SpawnRegistry, :set},
-    {Esr.TemplateRegistry, :set}
+    {Esr.TemplateRegistry, :set},
+    # Phase 7 PR 31 (IMPL-7-1): session→workspace back-edge for
+    # Esr.Behavior.Chat.invoke(:send) to plumb workspace_uri into
+    # Resolver. See WorkspaceRegistry moduledoc.
+    {Esr.WorkspaceRegistry, :set}
   ]
 
   def start_link(_opts) do
