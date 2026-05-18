@@ -372,21 +372,40 @@ Deliverable 项:
 
 **2. 测试员体验 / demo**：(待 brainstorm)
 
-**3. Deliverables 草稿(待 brainstorm 锁定)**：
-- **6a CC channel v1 → v2 wire swap** — Phase 5 5b 的未完成部分;`esr_plugin_cc_channel` 加 WS endpoint + Phoenix.Channel handshake,替代 v1_prototype 的 HTTP/SSE。Token-based auth(用 Phase 5 PR 5 落的 cc-channels.yaml)
-- **6b ESR_HOME DB 迁移** — 把 `esr_core_dev.db` 从 repo root 搬到 `$ESR_HOME/<profile>/db/`;`mix esr.home.adopt_db` 任务做安全 copy + config 切换 + 验证启动。注意:路径用 ESR_HOME env 动态组合,不写死(Allen 2026-05-17)
-- **6c CLI token-based auth** — Phase 5 PR 5 的 CLI RPC 当前 admin-all-cap;Phase 6 加 cookie + token 双层,non-admin CLI 用户也能受 CapBAC 保护
-- **6d Workspace-scoped routing rules + 多 Feishu app 支持** — 当前 routing_rules 是 global,workspace 间不能隔离;Plan B 默认 + Phase 5d 的 Class 注册都是 plugin-global。生产化第一性原则:dev/prod 必须能差异化路由
-- **6e Federation MVP**(可选)— Decision #48 形态 A 落地;runtime↔runtime 协议;CLI 通过 local runtime 调远程
-- **6f Plugin scaffolder**(Allen 2026-05-17 现在不做)— `mix esr.gen.plugin` 模板,等积累到 3+ plugin 再考虑
+**3. Deliverables — 原计划 vs 实际(2026-05-18 closeout)**：
+
+> Phase 6 实际 ship 24 PRs(#4 → #27),但 scope 跟原始 6a-6f 列表显著不同。原计划的"基础设施补完"工作压后,实际优先 ship 的是 Feishu↔ESR↔cc 端到端生产化 + 协议合规修复。下表是诚实账目:
+
+| 原计划项 | 状态 | 备注 |
+|---|---|---|
+| **6a CC channel v1 → v2 wire swap** | ⚠️ 部分(deferred to Phase 7) | v2 `EsrPluginCcChannel`(Phoenix.Socket + BridgeRegistry)Phase 6 PR 4 落地,runtime 优先查 v2 binding;但实际 `agent://cc-demo` 仍走 v1_prototype HTTP/SSE 链路。完整 cutover 留到 Phase 7 |
+| **6b ESR_HOME DB 迁移** | ❌ 未做 | 仍在 repo root |
+| **6c CLI token-based auth** | ❌ 未做 | CLI 仍 admin-all-cap |
+| **6d Workspace-scoped routing** | ❌ 未做 | routing_rules 仍 global |
+| **6e Federation MVP** | ❌ 未做(可选) | |
+| **6f Plugin scaffolder** | ❌ 未做(intentionally) | "Allen 2026-05-17 现在不做"持续生效 |
+
+**实际 ship 的工作(Phase 6 真实交付)**:
+
+- **Feishu 生产硬化**:WS long-connect sidecar(PR 15)、`UserBinding` + `BindingPolicy`(PR 15)、`@-mention` 路由(PR 16)、react 异步绕过 Client mailbox(PR 17)、`SenderResolver` auto-spawn on inbound(PR 18)、image/file pass-through(PR 14)、inbound delegation + 错误回执到原 chat(PR 27,Decision #134)
+- **CC bridge / PTY resilience**:per-bridge 文件日志 + verbose trace(PR 21)、eager-announce + auto-prompts(PR 19)、SSE-subscriber dedup(PR 20)、announce retry-forever + backoff(PR 22)、`claude-pty-settings.json` override `remoteControlAtStartup`(PR 23)
+- **CC channel 协议合规**:drop list-valued `meta` keys,conform to channels-reference `Record<string, string>` schema(PR 26,Decision #132)
+- **User identity 基线**:`Esr.Entity.User.default_caps/0` 结构性默认 cap,`Users.create/3` prepend,`BindingPolicy` 对 pre-PR-27 user idempotent 补齐(PR 27,Decision #133)
+
+**3 个 architectural trade-off 在 forensic record 里记下来防 drift**:
+- `User.default_caps` 用 `behavior: :any` 是循环依赖妥协,不是 idiom
+- `InboundDispatcher` dispatch mode `:cast` → `:call` 是 transport-layer 覆盖,`Chat @interface` 仍声明 `:cast`
+- Channel `meta` 全 string 是外部协议契约,非 ESR design choice
+
+详见 [docs/notes/phase-6-architecture-closeout.md](docs/notes/phase-6-architecture-closeout.md) + ARCHITECTURE.md Decision #132/#133/#134。
 
 **4. 前序依赖**:Phase 5 + 4 post-Phase-5 PRs 全部 done。Phase 6 brainstorm 时再细化决策点。
 
-**5. 测试**:F1-F8 全部 e2e 真生产路径跑通(已经基本满足,Phase 5 demo 验证过);新增"CC channel WS 路径 = Phase 1 v1 HTTP 路径"等价性 property test。
+**5. 测试**:F1-F8 全部 e2e 真生产路径跑通(已经基本满足,Phase 5 demo 验证过);新增"CC channel WS 路径 = Phase 1 v1 HTTP 路径"等价性 property test(Phase 7 v2 cutover 时落)。
 
-**6. 相关不变式**:#1-#10(已完整)。Phase 6 不引入新不变式,只是补全前面的承诺。
+**6. 相关不变式**:#1-#10(已完整)。Phase 6 不引入新不变式,但守住一条**外部不变式**——channel meta = `Record<string, string>`(Decision #132)。
 
-**7. brainstorm 重点**:(待 Allen 决定 6a/6b/6c/6d/6e/6f 优先级 + scope cut);6b DB 迁移的安全策略;6c token format;6d workspace.config 加 routing_rules 是否破坏 §5.4.6 "core 不预定义 table"。
+**7. Phase 7 待办**(原 6a/6b/6c/6d/6e 顺延):CC channel v1→v2 完整 cutover、ESR_HOME DB 迁移、CLI token-based auth、Workspace-scoped routing、可选 Federation MVP。Phase 7 brainstorm 时再排优先级。
 
 ---
 

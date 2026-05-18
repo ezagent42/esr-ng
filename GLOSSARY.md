@@ -206,6 +206,16 @@ end
 
 参考: ARCHITECTURE.md §6.4
 
+### BindingPolicy(`EsrPluginFeishu.BindingPolicy`)
+
+Phase 6 PR 15 引入。Feishu 把 `open_id` 绑到 ESR `user://` 时的**副作用模块**——纯存储在 `UserBinding`,side-effects(grant 默认 cap、auto-spawn user Kind、补齐 `Esr.Entity.User.default_caps`)在 `BindingPolicy`。
+
+职责分离的理由:`UserBinding` 测试不该触发 dispatch;`BindingPolicy` 测试可以 stub 存储。未来多策略(per-workspace 默认、role templates)在 `apply/2` 改,不动 store。
+
+PR 27 之后,`apply/2` 也调 `ensure_user_default_caps/2`(idempotent MapSet 语义),覆盖 pre-PR-27 已创建 user。
+
+参考: ARCHITECTURE.md Decision #133, #134; [docs/notes/phase-6-architecture-closeout.md](docs/notes/phase-6-architecture-closeout.md)
+
 ### CapBAC
 
 Capability-based access control。ESR 的权限模型——每个 Invocation 在 `ctx.caps` 携带 capabilities;dispatch step 5.5 检查 caller 持有的 caps 是否允许该 action。
@@ -234,7 +244,11 @@ ESR 通过 `esr_plugin_cc_channel`(Elixir HTTP/SSE + Python MCP server)桥接外
 
 ⚠️ 易混淆 — Phoenix.Channel 是 Phoenix 框架的 WebSocket 抽象,跟 CC Channel 完全是两件事(碰巧同名)。见 §3 易混淆词表。
 
-参考: ARCHITECTURE.md §12.8(Phase 1b 后已重写),Decision #86
+**Meta schema(Phase 6 PR 26, Decision #132)**:`notifications/claude/channel` 的 `meta` 字段是 `Record<string, string>`(Anthropic channels-reference spec 强制)。**任何 non-string value(list / map / nested object)让 claude TUI 整条 notification silently drop**,没有错误返回——symptom 看起来跟 transport 失联一样,极难诊断(PR 14 加 list 类型 attachments key 坏了 inbound,3 周后才发现)。
+
+结构化数据放 `content`(文本 breadcrumb 形式);可选 `meta.file_path: <abs-path>` 字符串(单文件场景,仿 cc-openclaw 约定),由 claude `Read` tool 拉取实际内容。CI gate:`apps/esr_domain_chat/test/esr/behavior/chat_test.exs` "to_claude payload meta values are all strings"。
+
+参考: ARCHITECTURE.md §12.8(Phase 1b 后已重写),Decision #86 #132; [docs/notes/phase-6-architecture-closeout.md](docs/notes/phase-6-architecture-closeout.md) §2.3
 
 ### ctx(Invocation context)
 
@@ -253,6 +267,16 @@ ESR 通过 `esr_plugin_cc_channel`(Elixir HTTP/SSE + Python MCP server)桥接外
 ```
 
 参考: ARCHITECTURE.md §4
+
+### default_caps(`Esr.Entity.User.default_caps/0`)
+
+Phase 6 PR 27 引入。User Kind 的**结构性基线 cap 集**——返回 `[%Capability{kind: :session, behavior: :any, instance: :any, granted_by: system://bootstrap}]`。`Esr.Domain.Identity.Users.create/3` prepend 到 caller 提供的 caps;`EsrPluginFeishu.BindingPolicy.apply/2` 对 pre-PR-27 user 在 bind 时 idempotent 补齐。
+
+⚠️ `behavior: :any` **不是 idiom**——是循环依赖妥协(`esr_domain_identity` 不能引用 `esr_domain_chat` 的 `Esr.Behavior.Chat` 模块)。能用模块引用就用模块引用,narrower scope 永远更安全。future plugin authors 不要 cargo-cult `:any`。
+
+跟 `admin_caps()` 的区别:`admin_caps` 是 `kind=:any behavior=:any instance=:any`,只授给 `user://admin`(authorization escape hatch);`default_caps` 是 `kind=:session behavior=:any instance=:any`,每个 user 都有(只能尝试 session 行为,session 内 ACL 仍走 routing rules)。
+
+参考: ARCHITECTURE.md §7.3, Decision #133; [docs/notes/phase-6-architecture-closeout.md](docs/notes/phase-6-architecture-closeout.md) §2.1
 
 ### Dispatch
 
