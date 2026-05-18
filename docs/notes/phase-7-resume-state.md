@@ -1,7 +1,9 @@
 # Phase 7 resume state (for next Claude Code session)
 
-**Updated:** 2026-05-18 (end of brainstorm + SPEC + PR 31 session).
-**Status:** Phase 7 in flight. SPEC v3 LOCKED + VERIFICATION + PLAN + DECISIONS shipped. PR 31 merged. PRs 32-54 pending.
+**Updated:** 2026-05-18 PM (after Allen rejected the premature v1 declaration in PR #95).
+**Status:** Phase 7 at **rc1** (NOT released). 24 PRs merged on `main` (#84–#109) — Decision Log #135–#144 locked, tool surfaces + skill + onboarding docs shipped. Five blockers remain before v1 can be declared: **PR 32** (CC v1→v2 cutover), **PR 46-impl** (orchestrator 7 tool bodies — currently `{:error, :not_implemented_yet}` stubs), **PR 47** (Generator scoped-cap grant call site), **PR 48** (in-flight template-deletion semantics), **PR 49** (orchestrator e2e demo + recorded video).
+
+A prior revision of `docs/notes/phase-7-handoff.md` (PR #95) declared "ESR v1 released" — that framing has been **withdrawn**; the file is now an rc1 note and a true v1 release note will replace it after the blockers clear.
 
 If a fresh Claude Code session is picking up Phase 7 implementation, read this first. Then read in order:
 
@@ -17,7 +19,7 @@ If a fresh Claude Code session is picking up Phase 7 implementation, read this f
 |---|---|---|---|
 | Pre-7 docs | 30/#84 | ✅ merged | SPEC + VERIFICATION + PLAN + DECISIONS |
 | 7-1-a workspace enforcement | 31/#85 | ✅ merged | New Esr.WorkspaceRegistry (5th ETS Registry); chat.ex:116 plumbs workspace_uri |
-| 7-1-b CC v1→v2 cutover | 32 | ⏳ pending | **LARGE — DEFERRED.** Blast radius listed in SPEC §7-1; delete entire esr_plugin_cc_bridge_v1_prototype app + migrate all references in cc_pty, ezagent, chat.ex, agent.ex, controllers, 3 test files. **Risk to Allen's live cc-demo** — Python bridge needs HTTP/SSE → WebSocket port. Recommend fresh session + careful pre-audit + verify v2 e2e BEFORE delete |
+| 7-1-b CC v1→v2 cutover | 32 | 🚧 **v1 blocker** (in flight) | **LARGE.** Blast radius listed in SPEC §7-1; delete entire esr_plugin_cc_bridge_v1_prototype app + migrate all references in cc_pty, ezagent, chat.ex, agent.ex, controllers, 3 test files. **Risk to Allen's live cc-demo** — Python bridge needs HTTP/SSE → WebSocket port. Pre-audit + verify v2 e2e via agent-browser BEFORE delete. |
 | 7-1-c `mix esr.bootstrap` | 33/#87 | ✅ merged | One-command install; smoke-tested ESR_HOME=/tmp/...&ESR_PROFILE=smoke; idempotent |
 | 7-1-d CLI ↔ LV cap parity | 34/#90 | ✅ merged | Phase 6 PR 7 already shipped CLI token machinery; PR 34 added the V3.4 invariant test (4/4 pass; structurally pins both surfaces to Esr.Identity.list_caps_for) |
 | 7-1-e ws sidecar EOF reap | 35/#88 | ✅ merged | main.js stdin EOF handler + process.exit; 2 tests (static + :slow integration that spawns real Port and asserts pid dead within 3s) |
@@ -41,7 +43,7 @@ If a fresh Claude Code session is picking up Phase 7 implementation, read this f
 | 7-4-b 4 onboarding docs | 51/#97 | ✅ merged | first-30-days + adding-a-plugin + adding-kind-behavior-template + common-failures runbook; ~4500 words |
 | 7-4-c additional invariant tests | 52 | ⏳ pending | template_immutable_hash_test, template_fork_lineage_test, plugin_hot_install_test, etc. — gates land with the PRs that introduce the features |
 | 7-4-d Decision Log #135-#144 + GLOSSARY 16 terms + ROADMAP §9b | 53/#94 | ✅ merged | All D7-* promoted to Decision Log; GLOSSARY + ROADMAP final state shipped |
-| 7-4-e ESR v1 release note + forensic | 54/#95 | ✅ merged | docs/notes/phase-7-handoff.md declares ESR v1; 3 trade-offs not to cargo-cult + cross-PR invariants + deferred items |
+| 7-4-e ESR v1 release note + forensic | 54/#95 | ⚠️ withdrawn → rc1 | PR #95 declared "ESR v1 released" — Allen 2026-05-18 PM rejected as premature; a follow-up PR downgraded `docs/notes/phase-7-handoff.md` to rc1 with explicit blocker list (PR 32 + PR 46-impl + PR 47/48/49). True v1 release note ships after blockers clear. |
 | Resume note updates | 86/#86, 91/#91, this | ✅ merged | Periodic state sync for next session |
 | 7-2 templates (5 PRs) | 37-41 | ⏳ pending | AgentTemplate + SessionTemplate Kinds; template caps; Agent.spawn/4; Generator |
 | 7-3 orchestrator (8 PRs) | 42-49 | ⏳ pending | Capability.matches?/2 extension; ctx :session_uri; cc-orchestrator template; 7 MCP tools; persistence flip; fork/merge; e2e demo |
