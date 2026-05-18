@@ -48,10 +48,19 @@ defmodule Esr.Kind.Runtime do
     # they're currently hosting + know that Kind instance's URI for fan-out.
     # Inject both into ctx at this single point so plugins never have to
     # plumb it themselves.
+    #
+    # Phase 7 PR 43 (D7-3): also inject `:session_uri` derived from the
+    # target URI. This is what `Esr.Capability.instance_match?/2`
+    # consumes when evaluating a `{:within_session, S}` scope-tuple
+    # cap shape (Decision #137). Without this enrichment, CapBAC has
+    # no way to know which session a dispatch is happening in, so
+    # scope-bounded delegation can't be enforced. Derivation is pure
+    # URI parsing — no dispatch, no registry lookup, O(1).
     enriched_ctx =
       ctx
       |> Map.put(:kind_module, kind_module)
       |> Map.put(:self_uri, self_uri)
+      |> Map.put(:session_uri, derive_session_uri(target))
 
     with {:ok, {behavior_name_atom, action}} <- Esr.URI.behavior_action(target),
          {:ok, behavior_module} <- lookup_behavior(kind_module, action),
@@ -166,4 +175,25 @@ defmodule Esr.Kind.Runtime do
 
       {:error, {:behavior_exception, kind, reason}}
   end
+
+  # Phase 7 PR 43 — derive session URI from target URI for ctx enrichment.
+  #
+  # Sources covered:
+  # - `session://main/behavior/chat/send` → `session://main`
+  # - `session://main` → `session://main` (already session)
+  # - `agent://cc-demo/behavior/chat/receive` → nil (not session-targeted)
+  # - any non-session URI → nil
+  #
+  # Pure URI manipulation; no registry / dispatch / GenServer involvement.
+  # Returning `nil` for non-session targets is correct — a cap with
+  # `{:within_session, S}` shape should not match when the dispatch
+  # isn't even session-scoped, and `Capability.instance_match?/2` is
+  # designed to handle nil session_uri (returns false for the tuple
+  # case, preserving deny-as-default).
+  defp derive_session_uri(%URI{scheme: "session", host: host} = target)
+       when is_binary(host) do
+    %URI{scheme: "session", host: host, authority: host}
+  end
+
+  defp derive_session_uri(_other), do: nil
 end
