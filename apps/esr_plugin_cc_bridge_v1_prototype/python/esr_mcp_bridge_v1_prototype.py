@@ -209,8 +209,15 @@ def handle(msg: dict):
 
     if method == "initialize":
         client_info = params.get("clientInfo", {})
-        threading.Thread(target=post_announce, args=(client_info,), daemon=True).start()
-        threading.Thread(target=sse_subscribe_loop, daemon=True).start()
+        # PR 19 (Allen 2026-05-18) eager-announce path already fires
+        # announce + SSE subscribe at main() when ESR_AGENT_URI is set.
+        # Skip re-firing here to avoid TWO SSE consumers racing on
+        # the same channel (each duplicates notifications/claude/channel
+        # writes to stdout, which can confuse claude). Re-announce only
+        # if eager path was skipped (no AGENT_URI).
+        if not AGENT_URI:
+            threading.Thread(target=post_announce, args=(client_info,), daemon=True).start()
+            threading.Thread(target=sse_subscribe_loop, daemon=True).start()
         respond(
             req_id,
             {
