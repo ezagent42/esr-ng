@@ -65,7 +65,7 @@ defmodule EsrWeb.MixProject do
       # compile order (plugin compiles first, modules resolve in router).
       # The plugin contract stays narrow — esr_web depends on it for
       # routing only, not for code calls.
-      {:esr_plugin_ezagent, in_umbrella: true},
+      {:ezagent_plugin_liveview, in_umbrella: true},
       {:esr_plugin_echo, in_umbrella: true},
       # Phase 5 PR 6: Feishu webhook route forwards to
       # EsrPluginFeishu.WebhookPlug — needed at compile time so the

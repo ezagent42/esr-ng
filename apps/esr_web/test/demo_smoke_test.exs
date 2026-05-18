@@ -21,7 +21,7 @@ defmodule EsrCore.Invariants.DemoSmokeTest do
 
   ## Bug 2 — Tailwind didn't scan plugin LV sources
 
-  Shadcn-style classes in esr_plugin_ezagent + esr_domain_ui weren't
+  Shadcn-style classes in ezagent_plugin_liveview + esr_domain_ui weren't
   in the compiled CSS bundle because the @source list only covered
   esr_web/lib. Pages rendered unstyled.
 
@@ -88,7 +88,7 @@ defmodule EsrCore.Invariants.DemoSmokeTest do
 
              Tailwind likely didn't @source the plugin/domain LV paths.
              Check apps/esr_web/assets/css/app.css for:
-               @source "../../../esr_plugin_ezagent/lib"
+               @source "../../../ezagent_plugin_liveview/lib"
                @source "../../../esr_domain_ui/lib"
 
              Then rerun `mix tailwind esr_web --minify`.

@@ -94,7 +94,7 @@ defmodule Mix.Tasks.Esr.CheckInvariants do
           "-c",
           # Strip lines that are pure prose mentions (backtick-quoted
           # symbol inside docstring) rather than actual code calls.
-          "grep -rnE 'PubSub\\.broadcast' apps/esr_core apps/esr_plugin_echo apps/esr_domain_chat apps/esr_plugin_ezagent 2>/dev/null --include='*.ex' " <>
+          "grep -rnE 'PubSub\\.broadcast' apps/esr_core apps/esr_plugin_echo apps/esr_domain_chat apps/ezagent_plugin_liveview 2>/dev/null --include='*.ex' " <>
             "| grep -v 'lib/esr/audit.ex' " <>
             "| grep -v 'lib/esr/invocation.ex' " <>
             "| grep -v 'esr_domain_chat/lib/esr/behavior/chat.ex' " <>
@@ -123,7 +123,7 @@ defmodule Mix.Tasks.Esr.CheckInvariants do
         "bash",
         [
           "-c",
-          "grep -rnE '^\\s*def init\\(' apps/esr_core apps/esr_plugin_echo apps/esr_domain_chat apps/esr_plugin_ezagent 2>/dev/null --include='*.ex' " <>
+          "grep -rnE '^\\s*def init\\(' apps/esr_core apps/esr_plugin_echo apps/esr_domain_chat apps/ezagent_plugin_liveview 2>/dev/null --include='*.ex' " <>
             "| grep -v 'kind/server.ex' " <>
             "| grep -v 'ets_owner.ex' " <>
             "| grep -v 'idempotency/sweeper.ex' " <>
@@ -237,7 +237,7 @@ defmodule Mix.Tasks.Esr.CheckInvariants do
           # files that legitimately mention the atom in their moduledoc
           # to explain the Phase 3d hard-flip rationale.
           "grep -rnE ':stub_grant' apps/esr_core/lib apps/esr_domain_chat/lib " <>
-            "apps/esr_plugin_echo/lib apps/esr_web/lib apps/esr_plugin_ezagent/lib " <>
+            "apps/esr_plugin_echo/lib apps/esr_web/lib apps/ezagent_plugin_liveview/lib " <>
             "--include='*.ex' 2>/dev/null " <>
             "| grep -v 'esr.check_invariants.ex' " <>
             "| grep -v 'lib/esr/telemetry.ex' " <>

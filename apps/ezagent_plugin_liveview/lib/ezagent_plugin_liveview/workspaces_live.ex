@@ -1,4 +1,4 @@
-defmodule EsrPluginEzagent.WorkspacesLive do
+defmodule EzagentPluginLiveview.WorkspacesLive do
   @moduledoc """
   /admin/workspaces — list every persisted Workspace + form to create.
 

@@ -32,7 +32,7 @@ defmodule EsrWeb.Router do
   end
 
   # /admin* requires login (Phase 4-completion Spec 05 §A.2.3).
-  scope "/", EsrPluginEzagent do
+  scope "/", EzagentPluginLiveview do
     pipe_through [:browser, EsrWeb.Plugs.RequireUser]
 
     live "/admin", AdminLive

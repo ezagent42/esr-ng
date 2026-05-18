@@ -7,7 +7,7 @@ defmodule EsrWeb.HomeLive do
   from a tailnet origin (P0-D8). The whole roadmap testing model from Phase 1
   on is LiveView-driven, so proving the WS path now de-risks Phase 1.
 
-  Replaced by the `esr_plugin_ezagent` plugin's real IM in Phase 1.
+  Replaced by the `ezagent_plugin_liveview` plugin's real IM in Phase 1.
   """
   use EsrWeb, :live_view
 

@@ -1,4 +1,4 @@
-defmodule EsrPluginEzagent.AutoDeriveLiveTest do
+defmodule EzagentPluginLiveview.AutoDeriveLiveTest do
   @moduledoc """
   Phase 6 PR 10 — auto-derive LV smoke test.
 
