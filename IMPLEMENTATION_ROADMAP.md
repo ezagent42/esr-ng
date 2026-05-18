@@ -409,18 +409,56 @@ Deliverable 项:
 
 ---
 
-## 9b. Phase 7 — Multi-agent orchestration(下一个 phase,brainstorm 中)
+## 9b. Phase 7 — Multi-agent orchestration + ESR v1 release(in flight)
 
-**1. 目标**(Allen 2026-05-18 sketch):agent 可配置 + multi-agent 编排。典型 flow:**创建 session → 加入一个预先配置好的 agent → 调用这个 agent 配置其它 agent + 写 matcher**。 "orchestrator agent" pattern——人类只跟一个 coordinator 对话,coordinator 在 session 里 spawn/wire 出 worker agents。
+**1. 目标(LOCKED v3 — Allen 2026-05-18 brainstorm rounds 1-3)**:
+Phase 7 是 Allen 亲手驱动的最后一个 phase + **ESR v1 official release**。两个互锁目标:
+1. Production-grade **session-template generator**——人类创建 session → 自带 orchestrator(LLM-driven session-internal manager)→ 与 orchestrator 对话 = template 完善过程 → session 可被 fork(config only)、可 update_template(新 hash 不动老)、可 save_template_as 起新 template
+2. Make ESR **self-sustaining** for dev team without Allen——所有 deferred Phase 6 infra debt 关掉,handoff readiness(invariant tests + skill + 4 onboarding docs)落地,Decision Log + GLOSSARY + ROADMAP 都 current 到 v1 状态
 
-**2. 待 brainstorm 的关键决策点**:
-- "agent 配置" 的具体载荷:system prompt? model + effort? tool 白名单? 默认 caps? Pre-bound MCP servers?
-- "预先配置好的 agent" 是**模板**(stamp 出实例)还是**已运行 agent**(已 provision)?
-- "agent 配置其它 agent" 的能力边界:能改 prompt 但不能改 cap? 还是 orchestrator 也能 grant cap?
-- orchestrator 写的 matcher 是 session-scoped 还是 global? 跟现有 routing_rules 表关系如何?
-- Phase 6 deferred 的 6a-6e 跟 Phase 7 哪些可以并行,哪些前置(workspace-scoped routing 似乎是 prerequisite)?
+**2. SPEC/VERIFICATION/PLAN/DECISIONS** — 4 个文档已 ship:`phase-specs/phase7/{SPEC,VERIFICATION,PLAN,DECISIONS}.md`(SPEC v3 LOCKED + V1-V5 measurable criteria + 24-PR 顺序 + impl 时累积的 Decision)
 
-**3. 暂定 scope cut**:Phase 7 只做 single-session orchestration MVP;cross-session / cross-workspace / agent 之间的 capability delegation(Decision #76 "v0 不支持 delegation" 仍 holds)留到 Phase 8+。
+**3. Decisions D7-1 → D7-10 已 LOCKED**(全部在 ARCHITECTURE Decision Log Phase 7 closeout 升 #135-#144):
+- D7-1: Orchestrator LLM-driven not deterministic
+- D7-2: AgentTemplate + SessionTemplate 都是 `Esr.Kind.Template` umbrella 下的 Template Class
+- D7-3: Scope-bounded cap delegation(`{:within_session, _}` + `{:spawned_by, _}` tuple shapes,ESR v1 marker)
+- D7-4: Federation drop(Allen reopens later)
+- D7-5: ESR_HOME DB migration mandatory + `mix esr.bootstrap` one-command install
+- D7-6: `esr-developer` skill 是 dev team 的 Allen 替身
+- D7-7: Fork unit = configuration only(无 message history)
+- D7-8: Plugin runtime hot-install via `:application.load + start`(no unload)
+- D7-9: ESR packaging = `mix esr.bootstrap`(no OTP release)
+- D7-10: SessionTemplate version = SHA hash(immutable)+ tag(mutable overlay)
+
+**4. Sub-step model**(per PLAN.md):
+- **7-1 Infra closeout** — 6 PRs:workspace routing enforcement / CC v1→v2 cutover / mix esr.bootstrap / CLI token + parity / sidecar EOF reap / mix esr.plugin.install
+- **7-2 Agent + Session templates** — 5 PRs:AgentTemplate Kind / SessionTemplate Kind + git-hash versioning / template caps / Agent.spawn/4 + slice fields / LV+CLI 表单
+- **7-3 Orchestrator** — 8 PRs:matches?/2 scope extension / dispatch ctx :session_uri / cc-orchestrator template / 7 MCP tools / Session persistence flip / fork+merge / spawn_from_template CapBAC / e2e demo
+- **7-4 Handoff readiness** — 5 PRs:`esr-developer` skill / 4 onboarding docs / ≥8 invariant tests / Decision Log #135-#144 + GLOSSARY + ROADMAP final / forensic note + ESR v1 release declaration
+
+**5. Live progress(此 ROADMAP 文件最近更新时)**——Phase 7 自启动以来 9+ PR 已 merged 到 main:
+- Pre-7 docs(PR 30/#84): SPEC v3 + VERIFICATION + PLAN + DECISIONS LOCKED
+- 7-1-a workspace enforcement(PR 31/#85): WorkspaceRegistry(第 5 个 ETS Registry)
+- 7-1-c `mix esr.bootstrap`(PR 33/#87): V1.1 + V4.5
+- 7-1-d CLI ↔ LV cap parity(PR 34/#90): V3.4
+- 7-1-e sidecar EOF reap(PR 35/#88): V4.3
+- 7-1-f `mix esr.plugin.install`(PR 36/#89): V1.4 + D7-8
+- 7-2-a AgentTemplate Kind(PR 37/#92): D7-2 一半
+- 7-3-a Capability.matches?/2 scope-tuple extension(PR 42/#93): D7-3 contract(spawned_by deny-by-default placeholder)
+- 7-4-d Decision Log #135-#144 + GLOSSARY + ROADMAP final(this PR / PR 53)
+
+**剩余约 14 PR**(7-1-b CC v1→v2 cutover、7-2 SessionTemplate + template caps + Agent.spawn/4 + LV 表单、7-3 orchestrator MVP 多 PRs、7-4 ESR skill + 4 docs + handoff note)。
+
+**6. Non-goals(deferred to dev-team v1.x+)**:
+- **Federation**(D7-4,Allen reopens)
+- **Plugin unload / swap**(D7-8)
+- **Production OTP release / Docker / systemd**(D7-9;`mix esr.bootstrap` 够 dev team 起步)
+- **SessionTemplate three-way merge**(D7-7)
+- **Template synthesis**(orchestrator 生成新 AgentTemplate)
+- **Cross-session agent delegation**
+- **Multimedia / streaming**(Phase 8 — §9c Dyte direction)
+
+**7. ESR v1 release(Phase 7 闭幕同时)** — Decision Log 加 D7-3 即正式标记 v0→v1。`docs/notes/phase-7-handoff.md` 是 v1 release note(PR 54 deliverable)。
 
 ---
 

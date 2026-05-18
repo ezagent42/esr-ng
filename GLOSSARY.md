@@ -591,6 +591,107 @@ Template Instance 的代表性例子。**薄 Resource Kind**——state 是 fold
 
 参考: ARCHITECTURE.md §3.1.1,Decision #63
 
+### `Esr.WorkspaceRegistry`(Phase 7 PR 31)
+
+第 5 个 ETS Registry,在 Kind/Behavior/Routing/Spawn/Template Registry 之外补的 session→workspace 反向 lookup。Workspace.Loader.invoke_template 在 spawn session 后 `bind(session_uri, workspace_uri)`;`Esr.Behavior.Chat.invoke(:send)` at chat.ex:116 `lookup(session_uri)` 拿到 workspace_uri 传给 `Resolver.resolve/4`,这样 workspace-scoped routing rules 才会实际被过滤(Phase 6 PR 8 加了字段但 chat.ex 没喂)。Unbound session(pre-PR-31 snapshot)返 `:error` → fallback `nil` → 跟 pre-PR-31 全局行为兼容。
+
+参考: ARCHITECTURE.md Decision #135,IMPL-7-1 in phase-specs/phase7/DECISIONS.md
+
+### AgentTemplate(Phase 7 PR 37)
+
+Template Class 之一,在 `Esr.Kind.Template` umbrella(esr_core)下。Slice 是**指向 sandbox 目录的指针 + cap policy**(`working_directory` / `claude_config_dir` / 可选 `settings_path` / 可选 `mcp_config_path` / `default_caps`),**不**模型 prompt/model/tools——那些在 sandbox 内的 `.claude/settings.json` 等文件里。URI `template://agent/<name>`,no version suffix(AgentTemplate 是人工编辑、非版本化的;Phase 8+ 才考虑 blueprint synthesis)。`Esr.Entity.Agent.spawn/4`(PR 40)按 template 实例化 worker agent。
+
+⚠️ 别跟 `Esr.Kind.Template`(umbrella behaviour)或 `SessionTemplate` 混。AgentTemplate 是 **一种** Template Class;Template umbrella 包括 GenericSession/CcChannelInstance/AgentTemplate/SessionTemplate 等。
+
+参考: ARCHITECTURE.md Decision #136,SPEC §AgentTemplate
+
+### SessionTemplate(Phase 7 PR 38)
+
+Template Class 之一,表示**一个团队的形状**——agent_slots(命名位置 + 各自的 AgentTemplate URI)+ routing_rules(slot-name 引用,实例化时 resolve)+ orchestrator_template_uri + default_workspace_uri + parent_template_uri(fork lineage)+ version_hash + 可选 version_tag。URI `template://session/<name>@<hash>`(git-style content-addressable)。**Instantiate** 通过 `Esr.Entity.Session.spawn_from_template/2`(the Generator),产新 session URI + 内嵌 orchestrator + worker agents。**Fork** 通过 `Esr.Entity.SessionTemplate.fork(parent_uri@hash, new_name)` 创建新 template row 并立即实例化。
+
+参考: ARCHITECTURE.md Decision #136, #143,SPEC §SessionTemplate
+
+### Generator(Phase 7)
+
+非 agent——是**创建 session 的程序**。具体入口 `Esr.Entity.Session.spawn_from_template(session_template_uri, owner)`,读 SessionTemplate 配置 → 新 session URI → spawn orchestrator agent(scope-bounded delegation caps)+ 各 worker agent → 装 routing rules → 初始化 working-copy template state。每个新 session 自带它的 orchestrator 实例。
+
+⚠️ 别跟 **Orchestrator** 混。Generator 一次性跑(创建 session);Orchestrator 是 session-internal 长寿 LLM-driven agent,管 session lifetime 内的 template refinement。Allen 2026-05-18:"创建一个新 session(自带 orchestrator)的一段程序是 generator"。
+
+参考: ARCHITECTURE.md Decision #136,SPEC §Generator
+
+### Orchestrator(Phase 7,大写以区别于通用名词)
+
+每个 session **内** 一个的 LLM-driven manager agent,从 SessionTemplate 的 orchestrator_template_uri 实例化。持有 6 个 MCP 工具(`add_agent_slot` / `remove_agent_slot` / `update_agent_template` / `write_matcher` / `update_template` / `save_template_as` / `list_templates`),通过标准 `Esr.Invocation.dispatch/1` 调用 ESR action,scope-bounded delegation cap(`{:within_session, S}` + `{:spawned_by, orchestrator_uri}`)守护它只能在自己 session/lineage 内行使权力。**不能 fork**——fork 是 SessionTemplate registry 操作,orchestrator 只能 `update_template`(原地 commit 新 hash)或 `save_template_as(new_name)`(另存)。
+
+参考: ARCHITECTURE.md Decision #136, #137,SPEC §Orchestrator,D7-1 / D7-3 / D7-10
+
+### Scoped Delegation(v1,Phase 7 PR 42)
+
+`Esr.Capability.instance` 字段新增两个 tuple shape:`{:within_session, %URI{}}` 和 `{:spawned_by, %URI{}}`。Phase 7 闭幕 = ESR v1 release,正式退役 v0 "no delegation" baseline(ARCHITECTURE §17.6)。CapBAC step 5.5 的 `instance_match?/2` 处理 tuple:within_session 用 URI 字符串前缀(带 `/` 边界)匹配;spawned_by 用 lineage 注册表 lookup(PR 42 ship 占位,PR 40 接 Agent.spawned_by slice + lookup)。**关键性质:scope tuple 只收窄,不放宽**——`{:within_session, A}` 不会让 cap 跨到 session B。`:any` 仍然是唯一通配符。
+
+参考: ARCHITECTURE.md Decision #137, §17.6, §7.3, §7.5;capability_test.exs "scope-bounded instance tuples"
+
+### Template version hash(Phase 7 D7-10)
+
+Git-style 不可变内容寻址 + 可变 tag overlay。每个 SessionTemplate row 的 URI 是 `template://session/<name>@<version_hash>`,hash = SHA-256 over slice content(canonical encode,排除 timestamps + created_by);**hash 一旦写就不可变**(content-addressable),orchestrator `update_template` 产新 row 新 hash 不覆盖老。tags 在另一个 `template_tags` registry 存 `(name, tag) → version_hash` 可重新指向。已实例化 session snapshot the resolved hash at instantiate time 不受后续 update 或 tag move 影响。
+
+参考: ARCHITECTURE.md Decision #143,SPEC §Template version semantics
+
+### `template:read` / `template:write` / `template:instantiate`(Phase 7)
+
+三种 template-scoped cap kinds,精细控制 SessionTemplate 操作:
+- `template:read`:orchestrator 的 `list_templates` 工具看到哪些 candidate
+- `template:write`:orchestrator 的 `update_template`(merge back parent)需要 parent 的 name-scoped write cap;`save_template_as` 不需要(创建新 template 用通用 template-creation cap)
+- `template:instantiate`:`Esr.Entity.Session.spawn_from_template/2`(Generator)的 CapBAC gate;默认 grant 给任何拥有该 template read cap 的 user
+
+参考: ARCHITECTURE.md Decision #136, §7.3
+
+### `mix esr.bootstrap`(Phase 7 PR 33)
+
+一键安装命令,把现存的 `esr.home.init` + `deps.get` + `esr.home.adopt_db` + `ecto.create+migrate` + 健康检查包成 single mix task。canonical install entry for dev team's "quasi-production" deployments。Idempotent(已 bootstrapped 重跑 no-op,CI gate 用)。**没做的:** 不启 phx.server(install ≠ runtime;打印启动命令于结尾);不 mint operator secrets;不跑 plugin-specific seed。
+
+参考: ARCHITECTURE.md Decision #139,SPEC §7-1 + D7-5/D7-9
+
+### `mix esr.plugin.install <path>`(Phase 7 PR 36)
+
+Runtime 热装 OTP plugin 进运行中的 ESR,无需重启 phx.server。机制:`:code.add_path(ebin)` + `:application.load(.app)` + `:application.ensure_all_started(app)`,plugin 自己的 `Application.start/2` 在 ensure_all_started 时跑(BehaviorRegistry.register / TemplateRegistry.register 等 hooks 不变)。**Mix.env() 陷阱**:plugin 的 Application.start 用 `Mix.env()` 拿到的是 build-time env;推荐 `System.get_env("MIX_ENV")`。**不做 plugin uninstall**:活的 Kind instance lifecycle 管理复杂,留 dev team v1.x+。
+
+参考: ARCHITECTURE.md Decision #142,SPEC §7-1 + D7-8
+
+### `CLAUDE_CONFIG_DIR` per-agent isolation(Phase 7,AgentTemplate)
+
+Claude Code 2.1.143 环境变量,relocate 整个 `.claude/` 状态目录(credentials + OAuth + MCP cache + plugin/skill cache + session history)。AgentTemplate.claude_config_dir 字段值会被 set 成这个 env var,实现 per-agent 完整隔离。**macOS caveat**:credentials 在 macOS 上走 Keychain 不走 file,`CLAUDE_CONFIG_DIR` 不动 Keychain → 多 agent 同 OS user 共享 Keychain 凭证。Mitigation:`api_key_helper` 字段配每 template 自己的 helper 脚本,或分 OS user,或 production 用 Linux(完全 work)。
+
+参考: ARCHITECTURE.md Decision #136,SPEC §AgentTemplate macOS Keychain caveat
+
+### `Agent.spawned_by` lineage(Phase 7 PR 40,与 PR 42 配合)
+
+Agent Kind slice 新增字段,记录这个 Agent 是被谁 spawn 出来的(URI)。`Esr.Entity.Agent.spawn/4` 的 `granted_by` 参数同时充当 lineage anchor + cap-grant attribution。配合 PR 42 的 `{:spawned_by, principal_uri}` cap shape,实现 "orchestrator 只能 grant cap 给自己 spawn 的 worker agent" 这种 lineage-bounded delegation。Migration:pre-Phase-7 Agent snapshot 加载时 `spawned_by: nil`,行为跟 today 一致(无 spawned_by 限制的 cap 不会匹配它们)。
+
+参考: ARCHITECTURE.md Decision #137,SPEC §7-2 + §7-3 (b)
+
+### `Capability.matches?/2` tuple-shape 扩展(Phase 7 PR 42)
+
+`instance` 字段从 `URI.t() | :any` 扩到 `URI.t() | :any | scope_tuple()`,新增 tuple shapes 在 `Esr.Capability` 的 `instance_match?/2` 处理。**关键设计**:不在 CapBAC step 5.5 里 dispatch lookup 来 resolve scope context(会无限递归);用一个独立的 ETS 注册表(workspace_uri lookup 已经是 WorkspaceRegistry,spawn lineage 是 PR 40 加的新 registry)。CapBAC step 5.5 只做 O(1) ETS 读,无 dispatch。
+
+参考: ARCHITECTURE.md Decision #137,SPEC §7-3 (a)
+
+### Working-copy template state(Phase 7 PR 44)
+
+每个 running session 的 Chat slice 新增 `template_working_copy` 字段,实时记录 session 内部模板演化(orchestrator 的 add_agent_slot / write_matcher 等工具更新这里,不直接动 SessionTemplate row)。`save_template` / `update_template` 时读这里写回 registry。**Persistence flip**:Session Kind 之前是 `:ephemeral`,Phase 7 改为 `{:snapshot, :on_change}` 让 working-copy 重启不丢。
+
+参考: ARCHITECTURE.md Decision #136, #141,SPEC §7-3 "Working-copy session slice"
+
+### Template fork lineage(Phase 7 PR 38)
+
+SessionTemplate row 的 `parent_template_uri` 字段。Fork 时 child 指向 parent 的特定 version_hash;merge-back(orchestrator `update_template`)写 parent 的 name + 新 hash,旧 hash 行不动。Lineage 是树形(child 可再 fork → grandchild),不做 merge graph。CI gate `template_fork_lineage_test.exs` 锁 fork 必带 parent + 老版不变。
+
+参考: ARCHITECTURE.md Decision #141, #143,SPEC §Fork vs update semantics
+
+### BindingPolicy(`EsrPluginFeishu`)
+
+(Phase 6 PR 15 + PR 27 — 这里 cross-link 完整定义已在 GLOSSARY 早前位置;Phase 7 docs 跨条目重复引用时直接说 "BindingPolicy")
+
 ---
 
 ## 3. 易混淆词消歧
