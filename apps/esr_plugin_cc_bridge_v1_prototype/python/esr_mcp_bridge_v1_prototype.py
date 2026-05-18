@@ -99,6 +99,17 @@ def write_frame(obj: dict) -> None:
 
 
 def post_announce(claude_info: dict) -> bool:
+    """
+    Allen 2026-05-18 PR 22: retry forever (with backoff) until
+    announce succeeds. Old behavior: single try, if esrd was still
+    booting we just gave up and the Agent Kind never got registered,
+    causing every inbound message to "no_such_actor" — see the
+    "PR21 logged test" debug session for the failure mode.
+
+    Returns True once a successful announce lands. The thread that
+    calls this WILL block until success — that's fine because
+    post_announce is always invoked in a daemon thread.
+    """
     payload = {
         "bridge_id": BRIDGE_ID,
         "claude_info": claude_info,
@@ -107,19 +118,30 @@ def post_announce(claude_info: dict) -> bool:
     if AGENT_URI:
         payload["agent_uri"] = AGENT_URI
     body = json.dumps(payload).encode("utf-8")
-    req = urllib.request.Request(
-        f"{ESRD_URL}/api/cc-bridge/announce",
-        data=body,
-        method="POST",
-        headers={"Content-Type": "application/json"},
-    )
-    try:
-        with urllib.request.urlopen(req, timeout=3) as resp:
-            LOG.info("announce HTTP %s", resp.status)
-            return 200 <= resp.status < 300
-    except urllib.error.URLError as e:
-        LOG.warning("announce failed: %s", e)
-        return False
+
+    attempt = 0
+    while True:
+        attempt += 1
+        req = urllib.request.Request(
+            f"{ESRD_URL}/api/cc-bridge/announce",
+            data=body,
+            method="POST",
+            headers={"Content-Type": "application/json"},
+        )
+        try:
+            with urllib.request.urlopen(req, timeout=5) as resp:
+                LOG.info("announce HTTP %s (attempt %d)", resp.status, attempt)
+                return 200 <= resp.status < 300
+        except urllib.error.URLError as e:
+            # Cap backoff at 10s so we don't lose minutes when esrd
+            # restarts mid-session.
+            import time
+
+            delay = min(2 * attempt, 10)
+            LOG.warning(
+                "announce attempt %d failed: %s — retry in %ds", attempt, e, delay
+            )
+            time.sleep(delay)
 
 
 def post_disconnect() -> bool:
