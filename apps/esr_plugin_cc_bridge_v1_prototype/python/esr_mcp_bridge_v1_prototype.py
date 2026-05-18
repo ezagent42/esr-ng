@@ -58,11 +58,37 @@ _stdout_lock = threading.Lock()
 
 
 def setup_logging():
-    logging.basicConfig(
-        stream=sys.stderr,
-        level=logging.INFO,
-        format=f"[esr_mcp_bridge {BRIDGE_ID}] %(asctime)s %(levelname)s %(message)s",
+    """
+    Allen 2026-05-18 PR 21: log to a per-bridge file in $ESR_HOME so
+    we can actually inspect what the bridge is doing. claude swallows
+    MCP-server stderr, so the old `stream=sys.stderr` setup produced
+    no visible output anywhere.
+
+    File: $ESR_HOME/<profile>/logs/cc-bridge-<bridge_id>.log
+    Defaults: $ESR_HOME=~/.esr-ng, profile=default.
+
+    Per-event logs at DEBUG let us see each inbound SSE event the
+    bridge forwards, plus each MCP message claude sends. INFO covers
+    announce + connection state changes.
+    """
+    home = os.path.expanduser(os.environ.get("ESR_HOME", "~/.esr-ng"))
+    profile = os.environ.get("ESR_PROFILE", "default")
+    log_dir = os.path.join(home, profile, "logs")
+    os.makedirs(log_dir, exist_ok=True)
+    log_path = os.path.join(log_dir, f"cc-bridge-{BRIDGE_ID}.log")
+
+    handler = logging.FileHandler(log_path, mode="a", encoding="utf-8")
+    handler.setFormatter(
+        logging.Formatter(
+            f"[esr_mcp_bridge {BRIDGE_ID}] %(asctime)s %(levelname)s %(message)s"
+        )
     )
+
+    root = logging.getLogger()
+    root.setLevel(logging.DEBUG)
+    root.handlers = [handler]
+
+    LOG.info("bridge log file: %s", log_path)
 
 
 def write_frame(obj: dict) -> None:
@@ -186,16 +212,24 @@ def handle_sse_event(raw: str):
         LOG.warning("SSE event not JSON: %r", raw)
         return
 
+    content = evt.get("content", "")
+    meta = evt.get("meta", {})
+
+    LOG.info(
+        "SSE event → claude: content=%r meta_keys=%r",
+        content[:120] + ("…" if len(content) > 120 else ""),
+        list(meta.keys()),
+    )
+
     write_frame(
         {
             "jsonrpc": "2.0",
             "method": "notifications/claude/channel",
-            "params": {
-                "content": evt.get("content", ""),
-                "meta": evt.get("meta", {}),
-            },
+            "params": {"content": content, "meta": meta},
         }
     )
+
+    LOG.debug("notifications/claude/channel written to stdout")
 
 
 def respond(req_id, result):
@@ -206,6 +240,11 @@ def handle(msg: dict):
     method = msg.get("method", "")
     req_id = msg.get("id")
     params = msg.get("params", {})
+
+    # Allen 2026-05-18 PR 21: log every MCP message claude sends so
+    # we can verify whether channel notifications elicit any reaction
+    # (esp. `tools/call` for `reply`).
+    LOG.info("claude → bridge: method=%s id=%s", method, req_id)
 
     if method == "initialize":
         client_info = params.get("clientInfo", {})
