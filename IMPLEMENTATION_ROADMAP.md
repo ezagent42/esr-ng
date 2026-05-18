@@ -409,6 +409,43 @@ Deliverable 项:
 
 ---
 
+## 9b. Phase 7 — Multi-agent orchestration(下一个 phase,brainstorm 中)
+
+**1. 目标**(Allen 2026-05-18 sketch):agent 可配置 + multi-agent 编排。典型 flow:**创建 session → 加入一个预先配置好的 agent → 调用这个 agent 配置其它 agent + 写 matcher**。 "orchestrator agent" pattern——人类只跟一个 coordinator 对话,coordinator 在 session 里 spawn/wire 出 worker agents。
+
+**2. 待 brainstorm 的关键决策点**:
+- "agent 配置" 的具体载荷:system prompt? model + effort? tool 白名单? 默认 caps? Pre-bound MCP servers?
+- "预先配置好的 agent" 是**模板**(stamp 出实例)还是**已运行 agent**(已 provision)?
+- "agent 配置其它 agent" 的能力边界:能改 prompt 但不能改 cap? 还是 orchestrator 也能 grant cap?
+- orchestrator 写的 matcher 是 session-scoped 还是 global? 跟现有 routing_rules 表关系如何?
+- Phase 6 deferred 的 6a-6e 跟 Phase 7 哪些可以并行,哪些前置(workspace-scoped routing 似乎是 prerequisite)?
+
+**3. 暂定 scope cut**:Phase 7 只做 single-session orchestration MVP;cross-session / cross-workspace / agent 之间的 capability delegation(Decision #76 "v0 不支持 delegation" 仍 holds)留到 Phase 8+。
+
+---
+
+## 9c. Phase 8 — Media + streaming(future,record-only)
+
+**1. 目标**:从 message-passing 扩到 multimedia(图片/文件已经有了)+ 流媒体(语音/视频)。
+
+**2. 设计方向**(Allen 2026-05-18):**Control plane / data plane 分离**——ESR 仍是 control plane(signaling / 鉴权 / 会话状态 / audit log),媒体字节走外部 SFU。**不抽象通用 channel**(会把 message-passing 跟 streaming 的根本差异藏起来,诱导误用)。
+
+**3. 候选数据面**:
+- **Dyte**(Allen 倾向)— 托管 SFU,SDK 完整,接入最快;cost 跟 minutes 走
+- **LiveKit**(开源 self-host)— 灵活但运维负担
+- **Volcengine**(已有 voice pivot 经验)— TTS/STT bidirectional WebSocket,跟豆包配套
+
+**4. ESR 侧最小新组件**(草稿):
+- `Esr.Entity.MediaSession`(新 Kind,URI scheme `media://room-id`)
+- `Esr.Behavior.MediaSignaling`(actions: join / leave / offer / answer / ice)
+- 一个 plugin(e.g. `esr_plugin_dyte`)实现 token 颁发 + webhook 接收 SFU 事件,把 join/leave 当 control message 灌进 dispatch
+- 媒体字节**永不**进 ESR 进程 — peer ↔ SFU,SFU webhook 只发"who joined/left"
+- CapBAC gate `media.join`,routing rule 决定谁能加入哪个 media://room
+
+**5. 风险 / 待答**:Phase 8 brainstorm 才动;现在记录方向,不锁实现。
+
+---
+
 ## 10. 文件清单
 
 phase 0 起 esr-ng repo 里应该有：
