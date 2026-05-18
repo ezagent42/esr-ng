@@ -205,19 +205,89 @@ defmodule Esr.CapabilityTest do
                "prefix check requires '/' boundary, not raw startsWith"
     end
 
-    test "{:spawned_by, P} placeholder returns false until PR 40 ships lineage (deny-by-default)" do
-      cap = scoped_cap({:spawned_by, URI.new!("agent://orchestrator-1")})
+    test "{:spawned_by, P} with no lineage recorded denies (deny-when-absent)" do
+      # PR 40 ships Esr.AgentLineage registry; without a recorded
+      # spawn relationship, the cap denies. This is the new
+      # placeholder-equivalent (was hard-coded false in PR 42; now
+      # ETS lookup that's empty).
+      cap = scoped_cap({:spawned_by, URI.new!("agent://orchestrator-unrecorded")})
 
       needed_any_agent = %{
         kind: :agent,
         behavior: :any,
-        instance: URI.parse("agent://worker-spawned-by-orchestrator-1")
+        instance: URI.parse("agent://worker-no-lineage-#{System.unique_integer([:positive])}")
       }
 
       refute Capability.matches?(cap, needed_any_agent),
-             "PR 42 ships {:spawned_by, _} as deny-by-default placeholder; " <>
-               "PR 40 lineage registry will flip this to a real match. " <>
-               "Until then, deny is the conservative correct answer."
+             "{:spawned_by, _} cap must deny when AgentLineage has no record " <>
+               "of the spawn relationship — deny-when-absent is the conservative default"
+    end
+
+    test "{:spawned_by, P} matches when lineage IS recorded (PR 40 real impl)" do
+      orchestrator = URI.new!("agent://orchestrator-#{System.unique_integer([:positive])}")
+      worker = URI.new!("agent://worker-#{System.unique_integer([:positive])}")
+
+      :ok = Esr.AgentLineage.record(worker, orchestrator)
+
+      # Sanity: verify the record landed (catches scope_cap kind
+      # mismatch or test sandbox confusion before we blame the
+      # matches? code).
+      assert {:ok, returned} = Esr.AgentLineage.lookup(worker)
+
+      assert URI.to_string(returned) == URI.to_string(orchestrator),
+             "AgentLineage.lookup returned wrong orchestrator URI"
+
+      assert Esr.AgentLineage.spawned_in_lineage?(worker, orchestrator),
+             "AgentLineage.spawned_in_lineage? returned false despite the record"
+
+      cap = %Capability{
+        kind: :agent,
+        behavior: :any,
+        instance: {:spawned_by, orchestrator},
+        granted_by: URI.parse("user://admin"),
+        granted_at: ~U[2026-05-18 00:00:00Z]
+      }
+
+      needed_worker = %{
+        kind: :agent,
+        behavior: :any,
+        instance: worker
+      }
+
+      assert Capability.matches?(cap, needed_worker),
+             "{:spawned_by, orchestrator} cap must match when worker was recorded as " <>
+               "spawned by orchestrator (PR 40 real lineage impl)"
+
+      # Clean up so this test doesn't leak ETS state to other tests
+      Esr.AgentLineage.forget(worker)
+    end
+
+    test "{:spawned_by, P} does NOT match an unrelated agent (lineage isolation)" do
+      orchestrator_a = URI.new!("agent://orch-a-#{System.unique_integer([:positive])}")
+      orchestrator_b = URI.new!("agent://orch-b-#{System.unique_integer([:positive])}")
+      worker_of_a = URI.new!("agent://worker-of-a-#{System.unique_integer([:positive])}")
+
+      :ok = Esr.AgentLineage.record(worker_of_a, orchestrator_a)
+
+      cap_for_b = %Capability{
+        kind: :agent,
+        behavior: :any,
+        instance: {:spawned_by, orchestrator_b},
+        granted_by: URI.parse("user://admin"),
+        granted_at: ~U[2026-05-18 00:00:00Z]
+      }
+
+      needed_worker_of_a = %{
+        kind: :agent,
+        behavior: :any,
+        instance: worker_of_a
+      }
+
+      refute Capability.matches?(cap_for_b, needed_worker_of_a),
+             "orchestrator B's {:spawned_by, B} cap must NOT match a worker spawned by " <>
+               "orchestrator A — lineage isolation prevents cross-orchestrator authority"
+
+      Esr.AgentLineage.forget(worker_of_a)
     end
 
     test "scope tuple cap with wrong kind does NOT match (scope only narrows, never broadens)" do

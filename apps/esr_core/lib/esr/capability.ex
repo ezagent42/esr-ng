@@ -98,14 +98,14 @@ defmodule Esr.Capability do
       String.starts_with?(needed_str, session_str <> "/")
   end
 
-  defp instance_match?({:spawned_by, %URI{} = _principal_uri}, %URI{} = _needed_instance) do
-    # PR 42 placeholder: returns false until PR 40 ships the
-    # Agent.spawned_by slice field + lineage lookup registry.
-    # Denying-by-default is the correct conservative behavior — a
-    # principal holding a `{:spawned_by, X}` cap will simply find
-    # all dispatches denied until the lineage data is available.
-    # See moduledoc for the contract split rationale.
-    false
+  defp instance_match?({:spawned_by, %URI{} = principal_uri}, %URI{} = needed_instance) do
+    # PR 40 ships the Esr.AgentLineage ETS registry that
+    # `Esr.Entity.Agent.spawn/4` populates. CapBAC step 5.5 reads
+    # it here — O(1) ETS lookup, no dispatch. Walks the lineage
+    # chain from needed_instance up to a depth bound to check if
+    # principal_uri appears in the chain (inclusive — a principal
+    # is in its own lineage).
+    Esr.AgentLineage.spawned_in_lineage?(needed_instance, principal_uri)
   end
 
   defp instance_match?(same, same), do: true

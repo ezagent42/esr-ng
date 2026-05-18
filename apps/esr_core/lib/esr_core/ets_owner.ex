@@ -40,7 +40,11 @@ defmodule EsrCore.EtsOwner do
     # Phase 7 PR 31 (IMPL-7-1): session→workspace back-edge for
     # Esr.Behavior.Chat.invoke(:send) to plumb workspace_uri into
     # Resolver. See WorkspaceRegistry moduledoc.
-    {Esr.WorkspaceRegistry, :set}
+    {Esr.WorkspaceRegistry, :set},
+    # Phase 7 PR 40: agent spawn lineage for {:spawned_by, _} cap
+    # shape (Decision #137 / PR 42). Esr.Entity.Agent.spawn/4
+    # records here; CapBAC step 5.5 (future PR 46+) reads here.
+    {Esr.AgentLineage, :set}
   ]
 
   def start_link(_opts) do
