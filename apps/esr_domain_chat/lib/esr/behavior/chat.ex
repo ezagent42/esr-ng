@@ -76,6 +76,14 @@ defmodule Esr.Behavior.Chat do
       monitors: %{},
       # %{URI => DateTime} — when last seen offline (only present for offline)
       last_seen: %{}
+      # Phase 7 PR 44 + PR 46: orchestrator's working-copy template
+      # state will be ADDED to this slice when the orchestrator tools
+      # first mutate it (lazy add via Map.put rather than init field
+      # so existing tests asserting exact slice shape don't regress).
+      # Field name: `template_working_copy`. Format documented in
+      # SPEC §7-3 "Working-copy session slice".
+      # User / Agent Kind contexts never write to it; Session-context
+      # only.
     }
   end
 
