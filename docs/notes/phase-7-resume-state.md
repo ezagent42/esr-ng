@@ -17,11 +17,11 @@ If a fresh Claude Code session is picking up Phase 7 implementation, read this f
 |---|---|---|---|
 | Pre-7 docs | 30/#84 | ✅ merged | SPEC + VERIFICATION + PLAN + DECISIONS |
 | 7-1-a workspace enforcement | 31/#85 | ✅ merged | New Esr.WorkspaceRegistry (5th ETS Registry); chat.ex:116 plumbs workspace_uri |
-| 7-1-b CC v1→v2 cutover | 32 | ⏳ pending | LARGE. Blast radius listed in SPEC §7-1; delete entire esr_plugin_cc_bridge_v1_prototype app + migrate all references in cc_pty, ezagent, chat.ex, agent.ex, controllers, 3 test files |
-| 7-1-c `mix esr.bootstrap` | 33 | ⏳ pending | New mix task wrapping esr.home.init + esr.home.adopt_db + ecto.migrate + health check |
-| 7-1-d CLI token auth | 34 | ⏳ pending | Per-user bearer token + LV mint UI + parity invariant test `cli_lv_cap_parity_test.exs` |
-| 7-1-e ws sidecar EOF reap | 35 | ⏳ pending | Add `process.stdin.on('end', () => process.exit())` to `apps/esr_plugin_feishu/priv/ws_sidecar/main.js` + integration test |
-| 7-1-f `mix esr.plugin.install` | 36 | ⏳ pending | Runtime hot-load via :application.load/:application.start; concurrency lock; Mix.env() pitfall doc |
+| 7-1-b CC v1→v2 cutover | 32 | ⏳ pending | **LARGE — only 7-1 item left.** Blast radius listed in SPEC §7-1; delete entire esr_plugin_cc_bridge_v1_prototype app + migrate all references in cc_pty, ezagent, chat.ex, agent.ex, controllers, 3 test files. **Risk to Allen's live cc-demo** — Python bridge needs HTTP/SSE → WebSocket port. Recommend fresh session + careful pre-audit + verify v2 e2e BEFORE delete |
+| 7-1-c `mix esr.bootstrap` | 33/#87 | ✅ merged | One-command install; smoke-tested ESR_HOME=/tmp/...&ESR_PROFILE=smoke; idempotent |
+| 7-1-d CLI ↔ LV cap parity | 34/#90 | ✅ merged | Phase 6 PR 7 already shipped CLI token machinery; PR 34 added the V3.4 invariant test (4/4 pass; structurally pins both surfaces to Esr.Identity.list_caps_for) |
+| 7-1-e ws sidecar EOF reap | 35/#88 | ✅ merged | main.js stdin EOF handler + process.exit; 2 tests (static + :slow integration that spawns real Port and asserts pid dead within 3s) |
+| 7-1-f `mix esr.plugin.install` | 36/#89 | ✅ merged | Runtime hot-load via :application.load/:application.start; D7-8 contract (no uninstall); Mix.env() pitfall noted; 3/3 structural tests pass |
 | 7-2 templates (5 PRs) | 37-41 | ⏳ pending | AgentTemplate + SessionTemplate Kinds; template caps; Agent.spawn/4; Generator |
 | 7-3 orchestrator (8 PRs) | 42-49 | ⏳ pending | Capability.matches?/2 extension; ctx :session_uri; cc-orchestrator template; 7 MCP tools; persistence flip; fork/merge; e2e demo |
 | 7-4 handoff (5 PRs) | 50-54 | ⏳ pending | ESR skill; 4 docs; ≥8 invariant tests; Decision Log #135-#144; forensic note + v1 release |
