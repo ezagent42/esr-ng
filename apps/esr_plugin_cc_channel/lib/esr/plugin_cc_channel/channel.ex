@@ -1,21 +1,33 @@
 defmodule EsrPluginCcChannel.Channel do
   @moduledoc """
-  Phase 6 PR 4 — Phoenix.Channel that hosts one CC bridge session.
+  Phoenix.Channel hosting one CC bridge session.
 
   Topic shape: `cc:bridge:<agent_uri>` — agent_uri must match the
-  Socket-level token auth (the Socket pre-filled
-  `socket.assigns.agent_uri`). Join asserts the topic matches.
+  Socket-level token auth (`socket.assigns.agent_uri`). Join asserts
+  the topic matches.
 
   ## Lifecycle
-  - `join/3` — bind socket pid as the bridge for `agent_uri` via
-    `Esr.Bridge.V2.Registry.bind/2` (a new tiny registry — see
-    EsrPluginCcChannel.BridgeRegistry).
-  - `handle_in("reply", %{...})` — bridge POSTs an outbound reply
-    (claude's tool call result). Dispatches `chat/send` on each
-    target session.
+
+  - `join/3` —
+      1. binds socket pid as the bridge for `agent_uri` via
+         `EsrPluginCcChannel.BridgeRegistry.bind/3` (capturing the
+         claude/tools/remote-ip info the Python bridge passed in join
+         params, so admin LV's connected-bridges table has something
+         to render);
+      2. ensures the `Esr.Entity.Agent` Kind for `agent_uri` exists by
+         dispatching to `Esr.SpawnRegistry.spawn/1`. Mirrors what the
+         v1 announce controller did — without this step, inbound
+         dispatches against `agent://...` URIs have no Kind pid to
+         receive on and silently drop.
+
+  - `handle_in("reply", %{...})` — Python bridge POSTs Claude's `reply`
+    tool call. Accepts `text`, `session_uris`, optional `ref`, and
+    **optional `attachments`** (`[{type, local_path, name}]`). Dispatches
+    `chat/send` against each target session URI.
+
   - `terminate/2` — unbind on socket close.
 
-  ## Why a separate Channel module (not put logic in Socket)
+  ## Why a separate Channel module (not in Socket)
 
   Socket = auth + per-connection assigns. Channel = topic-scoped
   message routing. The split lets multiple bridges share the same
@@ -25,18 +37,30 @@ defmodule EsrPluginCcChannel.Channel do
 
   External callers (chat plugin's Agent receive handler) reach the
   bridge by sending `{:to_claude, payload}` to the bound Channel pid.
-  The Channel forwards via `push(socket, "to_claude", payload)` so
-  the WS client gets a real Phoenix.Channel event.
+  The Channel forwards via `push(socket, "to_claude", payload)` so the
+  WS client gets a real Phoenix.Channel event.
   """
   use Phoenix.Channel
+
+  require Logger
 
   alias EsrPluginCcChannel.BridgeRegistry
 
   @impl true
-  def join("cc:bridge:" <> _topic_uri, _params, socket) do
-    case BridgeRegistry.bind(socket.assigns.agent_uri, self()) do
-      :ok -> {:ok, socket}
-      {:error, reason} -> {:error, %{reason: inspect(reason)}}
+  def join("cc:bridge:" <> _topic_uri, params, socket) do
+    info = %{
+      claude_info: Map.get(params, "claude_info", %{}),
+      tools: Map.get(params, "tools", []),
+      remote_ip: format_remote_ip(socket)
+    }
+
+    case BridgeRegistry.bind(socket.assigns.agent_uri, self(), info) do
+      :ok ->
+        :ok = ensure_agent_kind(socket.assigns.agent_uri)
+        {:ok, socket}
+
+      {:error, reason} ->
+        {:error, %{reason: inspect(reason)}}
     end
   end
 
@@ -44,10 +68,16 @@ defmodule EsrPluginCcChannel.Channel do
   def handle_in("reply", %{"text" => text, "session_uris" => sessions} = params, socket)
       when is_binary(text) and is_list(sessions) do
     ref = Map.get(params, "ref")
-    GenServer.cast(socket.transport_pid, :ok)
+    attachments = Map.get(params, "attachments", [])
 
-    send(self(), {:dispatch_reply, sessions, text, ref})
-    {:noreply, socket}
+    cond do
+      not is_list(attachments) ->
+        {:reply, {:error, %{reason: "attachments must be a list of maps"}}, socket}
+
+      true ->
+        send(self(), {:dispatch_reply, sessions, text, ref, attachments})
+        {:reply, :ok, socket}
+    end
   end
 
   def handle_in("reply", _other, socket) do
@@ -62,7 +92,7 @@ defmodule EsrPluginCcChannel.Channel do
     {:noreply, socket}
   end
 
-  def handle_info({:dispatch_reply, sessions, text, ref}, socket) do
+  def handle_info({:dispatch_reply, sessions, text, ref, attachments}, socket) do
     agent_uri = socket.assigns.agent_uri
 
     ref_uri =
@@ -72,7 +102,8 @@ defmodule EsrPluginCcChannel.Channel do
         s when is_binary(s) -> URI.new!(s)
       end
 
-    msg = Esr.Message.new(agent_uri, %{text: text, attachments: []}, ref: ref_uri)
+    body = %{text: text, attachments: normalize_attachments(attachments)}
+    msg = Esr.Message.new(agent_uri, body, ref: ref_uri)
 
     for session_uri_str <- sessions do
       target = URI.new!("#{session_uri_str}/behavior/chat/send")
@@ -98,5 +129,65 @@ defmodule EsrPluginCcChannel.Channel do
   def terminate(_reason, socket) do
     BridgeRegistry.unbind(socket.assigns.agent_uri)
     :ok
+  end
+
+  # Mirrors the v1 announce controller's start_agent_kind path so that
+  # inbound dispatches (Feishu → chat router → Agent.invoke(:receive))
+  # have a live Kind pid to receive on. Idempotent — repeats on every
+  # join, falls through cleanly if the Kind is already registered.
+  defp ensure_agent_kind(%URI{} = agent_uri) do
+    case Esr.SpawnRegistry.spawn(agent_uri) do
+      {:ok, _pid} ->
+        :ok
+
+      {:error, {:no_spawn_fn, scheme}} ->
+        # The agent:// spawn fn is registered by esr_domain_chat at
+        # boot. If it's missing, the chat plugin failed to start — log
+        # but don't fail the bridge join (the inbound path would also
+        # be broken; surfacing :ok at least lets reply traffic flow).
+        Logger.warning(
+          "EsrPluginCcChannel.Channel: no spawn_fn for scheme #{scheme}; " <>
+            "Agent Kind for #{URI.to_string(agent_uri)} not ensured"
+        )
+
+        :ok
+
+      {:error, reason} ->
+        Logger.warning(
+          "EsrPluginCcChannel.Channel: failed to ensure Agent Kind for " <>
+            "#{URI.to_string(agent_uri)}: #{inspect(reason)}"
+        )
+
+        :ok
+    end
+  end
+
+  # Mirror chat.ex normalize_attachments/1 surface so the Channel can
+  # accept raw maps from the Python bridge (`{"type": "image",
+  # "local_path": "/abs", "name": "x"}`) without depending on chat's
+  # private helper.
+  defp normalize_attachments(list) when is_list(list) do
+    Enum.map(list, fn
+      %{} = m -> normalize_attachment_keys(m)
+      other -> other
+    end)
+  end
+
+  defp normalize_attachment_keys(m) do
+    Enum.into(m, %{}, fn
+      {k, v} when is_binary(k) -> {String.to_atom(k), normalize_attachment_value(k, v)}
+      {k, v} -> {k, v}
+    end)
+  end
+
+  defp normalize_attachment_value("type", v) when is_binary(v), do: String.to_atom(v)
+  defp normalize_attachment_value(_, v), do: v
+
+  defp format_remote_ip(socket) do
+    case socket.assigns[:remote_ip] do
+      {a, b, c, d} -> "#{a}.#{b}.#{c}.#{d}"
+      other when not is_nil(other) -> inspect(other)
+      nil -> "unknown"
+    end
   end
 end
