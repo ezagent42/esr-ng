@@ -53,7 +53,7 @@ defmodule EsrDomainChat.Application do
   use Application
 
   alias Esr.{BehaviorRegistry, Invocation, RoutingRegistry}
-  alias Esr.Entity.{Agent, AgentTemplate, Session, User}
+  alias Esr.Entity.{Agent, AgentTemplate, Session, SessionTemplate, User}
   alias Esr.Behavior.Chat
   alias EsrDomainChat.Routing.{MentionRouting, SessionRouting}
 
@@ -69,6 +69,9 @@ defmodule EsrDomainChat.Application do
       # boot; templates materialize on admin create (LV or mix task) or
       # on snapshot restore at next reference.
       {DynamicSupervisor, name: EsrDomainChat.AgentTemplateSupervisor, strategy: :one_for_one},
+      # Phase 7 PR 38: supervisor for SessionTemplate Kinds. Same shape
+      # as AgentTemplateSupervisor — 0 children at boot, lazy spawn.
+      {DynamicSupervisor, name: EsrDomainChat.SessionTemplateSupervisor, strategy: :one_for_one},
       kind_server_spec(:session_main, Session, Session.default_uri())
       # Phase 6 PR 2: admin User spawn moved to EsrDomainIdentity.Application
       # (User Kind belongs to identity domain). Chat's start callback below
@@ -136,9 +139,13 @@ defmodule EsrDomainChat.Application do
               {Esr.Kind.Server, {AgentTemplate, %{uri: uri}}}
             )
 
+          "session" ->
+            DynamicSupervisor.start_child(
+              EsrDomainChat.SessionTemplateSupervisor,
+              {Esr.Kind.Server, {SessionTemplate, %{uri: uri}}}
+            )
+
           other ->
-            # SessionTemplate host (PR 38) will pattern-match here.
-            # For now anything else is unknown.
             {:error, {:unknown_template_host, other}}
         end
       end)
