@@ -95,6 +95,12 @@ defmodule EsrDomainChat.Application do
         # PR 12 closeout: replace with an explicit registry-ready gate.
         :ok = EsrDomainWorkspace.Application.boot_complete()
 
+        # Phase 7 PR 45: install the cc-orchestrator AgentTemplate seed
+        # so SessionTemplate-instantiation paths (PR 41 Generator) can
+        # reference `template://agent/cc-orchestrator` without operator
+        # setup. Idempotent: re-install on existing template is a no-op.
+        :ok = seed_cc_orchestrator_template()
+
         {:ok, sup_pid}
 
       other ->
@@ -105,6 +111,43 @@ defmodule EsrDomainChat.Application do
   defp register_template_classes do
     :ok = Esr.TemplateRegistry.register(Esr.Template.GenericSession)
     :ok
+  end
+
+  # Phase 7 PR 45 — seed cc-orchestrator AgentTemplate at boot.
+  #
+  # The cc-orchestrator is the LLM-driven session-internal manager
+  # (Decision D7-1, #136). Every SessionTemplate's
+  # `orchestrator_template_uri` field defaults to
+  # `template://agent/cc-orchestrator` — so the template must exist
+  # by the time the Generator (PR 41) tries to spawn an orchestrator
+  # instance. This boot-time seed makes that resolution work
+  # out-of-the-box in dev / single-host deployments.
+  #
+  # Slice values use placeholder defaults pointing at the operator's
+  # current `~/.claude/` — production multi-tenant deployments will
+  # configure per-template `claude_config_dir` to isolate sandboxes
+  # (D7-2 AgentTemplate slice fields). macOS Keychain caveat applies
+  # — multi-orchestrator on one mac shares Keychain credentials; use
+  # `api_key_helper` or separate OS users (skill anti-pattern + runbook).
+  #
+  # Spawn semantics: SpawnRegistry returns `{:error, {:already_started, _}}`
+  # if the Kind is already alive (snapshot restore on subsequent
+  # boots); this fn treats that as success per the boot-seed
+  # idempotency convention.
+  defp seed_cc_orchestrator_template do
+    uri = URI.parse("template://agent/cc-orchestrator")
+
+    case Esr.SpawnRegistry.spawn(uri) do
+      {:ok, _pid} -> :ok
+      {:error, {:already_started, _pid}} -> :ok
+      {:error, reason} ->
+        require Logger
+        Logger.warning(
+          "Failed to seed cc-orchestrator template at boot: #{inspect(reason)}; " <>
+            "orchestrator-style SessionTemplate instantiation will fail until manually created"
+        )
+        :ok
+    end
   end
 
   defp register_spawn_fns do
