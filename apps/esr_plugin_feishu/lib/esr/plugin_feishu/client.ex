@@ -80,16 +80,72 @@ defmodule EsrPluginFeishu.Client do
 
   `emoji_type` is a Feishu reaction name like "OK", "DONE",
   "HEART", etc. See https://open.feishu.cn/document/.../emojis
+
+  Phase 6 PR 17 (Allen 2026-05-18 "OK 还是要等好几秒"): bypass the
+  Client GenServer's mailbox so the react POST doesn't queue behind
+  the chat fan-out's send_text calls. Get the token via fast
+  `peek_token` then do the HTTP POST in the caller process.
   """
   @spec react(String.t(), String.t()) :: :ok | {:error, term()}
   def react(message_id, emoji_type \\ "OK") when is_binary(message_id) do
-    GenServer.call(__MODULE__, {:react, message_id, emoji_type}, 10_000)
+    with {:ok, token} <- peek_token() do
+      body = %{reaction_type: %{emoji_type: emoji_type}}
+
+      case http_post_json_direct(
+             "#{@lark_base}/im/v1/messages/#{message_id}/reactions",
+             body,
+             [{~c"Authorization", String.to_charlist("Bearer #{token}")}]
+           ) do
+        {:ok, %{"code" => 0}} -> :ok
+        {:ok, %{"code" => code, "msg" => msg}} -> {:error, {:lark_error, code, msg}}
+        err -> err
+      end
+    end
+  end
+
+  # Mirror of http_post_json but available outside the GenServer
+  # process (so react can run without holding up the Client mailbox).
+  defp http_post_json_direct(url, payload, extra_headers) do
+    body = Jason.encode!(payload)
+
+    headers = [
+      {~c"Content-Type", ~c"application/json; charset=utf-8"} | extra_headers
+    ]
+
+    request = {String.to_charlist(url), headers, ~c"application/json", body}
+
+    case :httpc.request(:post, request, [{:timeout, 5000}, {:connect_timeout, 5000}], []) do
+      {:ok, {{_, 200, _}, _, resp_body}} ->
+        case Jason.decode(to_string(resp_body)) do
+          {:ok, decoded} -> {:ok, decoded}
+          err -> err
+        end
+
+      {:ok, {{_, status, _}, _, resp_body}} ->
+        {:error, {:http_status, status, to_string(resp_body)}}
+
+      {:error, reason} ->
+        {:error, {:http_error, reason}}
+    end
   end
 
   @doc "Returns `{:ok, status}` describing the client's credential state."
   def status do
     GenServer.call(__MODULE__, :status)
   end
+
+  @doc """
+  Fast path for callers that want to do their own HTTP POST without
+  serializing on the Client GenServer's mailbox.
+
+  Returns the current cached tenant_access_token (mints one if expired).
+  Allen 2026-05-17: react ack was slow because send_text calls queued
+  ahead of it in Client's mailbox. Splitting "token mint" (sync, fast)
+  from "do POST" (async, can run in parallel) gives back fan-out
+  parallelism.
+  """
+  @spec peek_token() :: {:ok, String.t()} | {:error, term()}
+  def peek_token, do: GenServer.call(__MODULE__, :peek_token, 10_000)
 
   # --- callbacks ----------------------------------------------------------
 
@@ -279,30 +335,8 @@ defmodule EsrPluginFeishu.Client do
     end
   end
 
-  # --- Phase 6 PR 15: emoji react ack ---------------------------------
-
-  def handle_call({:react, _, _}, _from, %__MODULE__{app_id: nil} = state),
-    do: {:reply, {:error, :credentials_not_configured}, state}
-
-  def handle_call({:react, message_id, emoji_type}, _from, state) do
-    case ensure_token(state) do
-      {:ok, token, new_state} ->
-        body = %{reaction_type: %{emoji_type: emoji_type}}
-
-        case http_post_json(
-               "#{@lark_base}/im/v1/messages/#{message_id}/reactions",
-               body,
-               [{~c"Authorization", String.to_charlist("Bearer #{token}")}]
-             ) do
-          {:ok, %{"code" => 0}} -> {:reply, :ok, new_state}
-          {:ok, %{"code" => code, "msg" => msg}} -> {:reply, {:error, {:lark_error, code, msg}}, new_state}
-          err -> {:reply, err, new_state}
-        end
-
-      err ->
-        {:reply, err, state}
-    end
-  end
+  # Phase 6 PR 17: react/2 moved out of the GenServer mailbox; see
+  # the public react/2 + http_post_json_direct/3 above.
 
   def handle_call(:status, _from, state) do
     s = %{
@@ -312,6 +346,16 @@ defmodule EsrPluginFeishu.Client do
     }
 
     {:reply, s, state}
+  end
+
+  def handle_call(:peek_token, _from, %__MODULE__{app_id: nil} = state),
+    do: {:reply, {:error, :credentials_not_configured}, state}
+
+  def handle_call(:peek_token, _from, state) do
+    case ensure_token(state) do
+      {:ok, token, new_state} -> {:reply, {:ok, token}, new_state}
+      err -> {:reply, err, state}
+    end
   end
 
   # --- token mint + caching ------------------------------------------------
