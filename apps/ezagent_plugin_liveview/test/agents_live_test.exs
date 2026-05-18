@@ -1,4 +1,4 @@
-defmodule EsrPluginEzagent.AgentsLiveTest do
+defmodule EzagentPluginLiveview.AgentsLiveTest do
   @moduledoc """
   Phase 5 PR 3 invariant — /admin/agents lists live PTY agents,
   /admin/agents/<encoded-uri> renders detail + accepts restart click.

@@ -1,4 +1,4 @@
-defmodule EsrPluginEzagent.Admin.ChatWindow do
+defmodule EzagentPluginLiveview.Admin.ChatWindow do
   @moduledoc """
   Center pane: session header + message stream + compose form.
   Stateless — parent (AdminLive) owns the :messages stream, compose form,

@@ -1,4 +1,4 @@
-defmodule EsrPluginEzagent.UsersLiveTest do
+defmodule EzagentPluginLiveview.UsersLiveTest do
   use ExUnit.Case
   import Phoenix.ConnTest
   import Phoenix.LiveViewTest

@@ -1,4 +1,4 @@
-defmodule EsrPluginEzagent.FeishuBindingsLive do
+defmodule EzagentPluginLiveview.FeishuBindingsLive do
   @moduledoc """
   Phase 6 PR 15 — /admin/feishu/bindings.
 

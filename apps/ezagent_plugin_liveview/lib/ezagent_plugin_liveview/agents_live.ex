@@ -1,4 +1,4 @@
-defmodule EsrPluginEzagent.AgentsLive do
+defmodule EzagentPluginLiveview.AgentsLive do
   @moduledoc """
   Phase 5 PR 3: list of live PTY-managed agents.
 

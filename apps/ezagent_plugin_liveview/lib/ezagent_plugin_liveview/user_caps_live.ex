@@ -1,4 +1,4 @@
-defmodule EsrPluginEzagent.UserCapsLive do
+defmodule EzagentPluginLiveview.UserCapsLive do
   @moduledoc """
   Phase 6 PR 6 — admin UI for granting/revoking caps on any User Kind
   (including users provisioned from Feishu adapter).

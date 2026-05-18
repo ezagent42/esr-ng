@@ -1,4 +1,4 @@
-defmodule EsrPluginEzagent.RoutingLiveTest do
+defmodule EzagentPluginLiveview.RoutingLiveTest do
   use ExUnit.Case
   import Phoenix.ConnTest
   import Phoenix.LiveViewTest

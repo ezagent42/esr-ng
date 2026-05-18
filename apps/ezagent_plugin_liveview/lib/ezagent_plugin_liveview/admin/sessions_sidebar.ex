@@ -1,4 +1,4 @@
-defmodule EsrPluginEzagent.Admin.SessionsSidebar do
+defmodule EzagentPluginLiveview.Admin.SessionsSidebar do
   @moduledoc """
   Left sidebar: sessions list + new-session form + floating-agent picker.
   Stateless — parent (AdminLive) owns assigns and event handlers.

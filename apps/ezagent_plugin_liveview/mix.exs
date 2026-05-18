@@ -1,9 +1,9 @@
-defmodule EsrPluginEzagent.MixProject do
+defmodule EzagentPluginLiveview.MixProject do
   use Mix.Project
 
   def project do
     [
-      app: :esr_plugin_ezagent,
+      app: :ezagent_plugin_liveview,
       version: "0.1.0",
       build_path: "../../_build",
       config_path: "../../config/config.exs",

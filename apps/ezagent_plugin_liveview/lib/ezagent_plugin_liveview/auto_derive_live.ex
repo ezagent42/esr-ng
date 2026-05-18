@@ -1,4 +1,4 @@
-defmodule EsrPluginEzagent.AutoDeriveLive do
+defmodule EzagentPluginLiveview.AutoDeriveLive do
   @moduledoc """
   Phase 6 PR 10 — generic LV that lists / details any Kind via
   `EsrDomainUi.AutoDerive`.

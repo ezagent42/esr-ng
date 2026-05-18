@@ -1,4 +1,4 @@
-defmodule EsrPluginEzagent.WorkspaceDetailLive do
+defmodule EzagentPluginLiveview.WorkspaceDetailLive do
   @moduledoc """
   /admin/workspaces/:name — single Workspace view.
 
