@@ -1,7 +1,7 @@
 defmodule EzagentPluginLiveview.AutoDeriveLive do
   @moduledoc """
   Phase 6 PR 10 — generic LV that lists / details any Kind via
-  `EsrDomainUi.AutoDerive`.
+  `EzagentDomainUi.AutoDerive`.
 
   Two modes (drive by URL):
     /admin/auto/:kind          → list view (table of live URIs +
@@ -15,10 +15,10 @@ defmodule EzagentPluginLiveview.AutoDeriveLive do
   """
 
   use Phoenix.LiveView
-  use EsrDomainUi.Components
+  use EzagentDomainUi.Components
   import Phoenix.Component
 
-  alias EsrDomainUi.AutoDerive
+  alias EzagentDomainUi.AutoDerive
 
   @impl true
   def mount(params, _session, socket) do

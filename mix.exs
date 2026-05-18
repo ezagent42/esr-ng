@@ -1,4 +1,4 @@
-defmodule EsrCore.Umbrella.MixProject do
+defmodule EzagentCore.Umbrella.MixProject do
   use Mix.Project
 
   def project do

@@ -11,7 +11,7 @@ defmodule EzagentPluginLiveview.SnapshotsLive do
   use Phoenix.LiveView
   import Phoenix.Component
 
-  alias Esr.Ecto.KindSnapshot
+  alias Ezagent.Ecto.KindSnapshot
 
   @impl true
   def mount(_params, _session, socket) do

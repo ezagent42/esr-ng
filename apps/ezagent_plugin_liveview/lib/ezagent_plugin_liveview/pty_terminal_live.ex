@@ -9,9 +9,9 @@ defmodule EzagentPluginLiveview.PtyTerminalLive do
     `pty:output:<agent_uri>` PubSub. LV subscribes and pushes the
     raw bytes to xterm via `push_event(socket, "pty_chunk", %{bytes})`
   - Input: xterm hook `onData` fires `pushEvent("pty_input", {bytes})`
-    → this LV's `handle_event("pty_input", ...)` → `Esr.Invocation.dispatch`
+    → this LV's `handle_event("pty_input", ...)` → `Ezagent.Invocation.dispatch`
     to `pty-input://default/behavior/pty/write` (CapBAC + audit fire)
-    → `Esr.Behavior.Pty.invoke(:write, ...)` looks up PtyServer and
+    → `Ezagent.Behavior.Pty.invoke(:write, ...)` looks up PtyServer and
     writes the bytes
 
   **Never pushes input directly to PubSub.** The dispatch path is the
@@ -31,8 +31,8 @@ defmodule EzagentPluginLiveview.PtyTerminalLive do
       {:ok, agent_uri} ->
         if connected?(socket) do
           Phoenix.PubSub.subscribe(
-            EsrCore.PubSub,
-            Esr.PluginCcPty.PtyServer.output_topic(agent_uri)
+            EzagentCore.PubSub,
+            Ezagent.PluginCcPty.PtyServer.output_topic(agent_uri)
           )
         end
 
@@ -52,15 +52,15 @@ defmodule EzagentPluginLiveview.PtyTerminalLive do
   defp assign_caller(socket, session) do
     caller_uri =
       case Map.get(session || %{}, "current_user_uri") do
-        nil -> Esr.Entity.User.admin_uri()
+        nil -> Ezagent.Entity.User.admin_uri()
         uri_str -> URI.parse(uri_str)
       end
 
     caller_caps =
-      if URI.to_string(caller_uri) == URI.to_string(Esr.Entity.User.admin_uri()) do
-        Esr.Entity.User.admin_caps()
+      if URI.to_string(caller_uri) == URI.to_string(Ezagent.Entity.User.admin_uri()) do
+        Ezagent.Entity.User.admin_caps()
       else
-        Esr.Identity.list_caps_for(caller_uri)
+        Ezagent.Identity.list_caps_for(caller_uri)
       end
 
     socket
@@ -71,7 +71,7 @@ defmodule EzagentPluginLiveview.PtyTerminalLive do
   defp dispatch_target_uri,
     do:
       URI.parse(
-        URI.to_string(Esr.Entity.PtyInput.default_uri()) <>
+        URI.to_string(Ezagent.Entity.PtyInput.default_uri()) <>
           "/behavior/pty/write"
       )
 
@@ -91,7 +91,7 @@ defmodule EzagentPluginLiveview.PtyTerminalLive do
 
   @impl true
   def handle_event("pty_input", %{"bytes" => bytes}, socket) when is_binary(bytes) do
-    inv = %Esr.Invocation{
+    inv = %Ezagent.Invocation{
       target: socket.assigns.dispatch_target,
       mode: :cast,
       args: %{agent_uri: URI.to_string(socket.assigns.agent_uri), bytes: bytes},
@@ -102,7 +102,7 @@ defmodule EzagentPluginLiveview.PtyTerminalLive do
       }
     }
 
-    case Esr.Invocation.dispatch(inv) do
+    case Ezagent.Invocation.dispatch(inv) do
       {:ok, _} ->
         {:noreply, socket}
 
@@ -147,7 +147,7 @@ defmodule EzagentPluginLiveview.PtyTerminalLive do
         <p style="font-size: 13px; color: #666;">
           <a href={"/admin/agents/#{URI.encode_www_form(URI.to_string(@agent_uri))}"} style="color: #0969da;">← Agent status</a>
           <span style="margin-left: 16px;">
-            Input → <code>Esr.Invocation.dispatch</code> → CapBAC → audit → PTY.
+            Input → <code>Ezagent.Invocation.dispatch</code> → CapBAC → audit → PTY.
           </span>
         </p>
       </header>

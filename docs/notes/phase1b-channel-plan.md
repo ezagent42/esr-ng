@@ -17,8 +17,8 @@ The big surprise: **a "channel" IS just an MCP server with one extra capability 
 | Addition | Where | Direction |
 |---|---|---|
 | `capabilities.experimental['claude/channel'] = {}` | In `initialize` response | declares this is a channel |
-| `notifications/claude/channel` method | Server → claude (JSON-RPC notification, no id) | **ESR push → claude as `<channel>` tag** |
-| Standard MCP tool (e.g. `reply`) | Claude → server (`tools/call`) | **claude reply → ESR** |
+| `notifications/claude/channel` method | Server → claude (JSON-RPC notification, no id) | **Ezagent push → claude as `<channel>` tag** |
+| Standard MCP tool (e.g. `reply`) | Claude → server (`tools/call`) | **claude reply → Ezagent** |
 
 That's it. No new transport, no WebSocket, no separate channel-server process.
 
@@ -38,7 +38,7 @@ During research preview this bypasses the channel-allowlist (with confirmation p
 
 Current state:
 - Python MCP server with `initialize`, `tools/list`, `tools/call reply` (no `esr_announce` — announce is implicit at init)
-- HTTP `POST /api/cc-bridge/announce` for one-way claude→ESR proof
+- HTTP `POST /api/cc-bridge/announce` for one-way claude→Ezagent proof
 - LiveView shows connected bridges, no message flow
 
 Channel-ready state:
@@ -46,13 +46,13 @@ Channel-ready state:
    - Add `experimental: {"claude/channel": {}}` to initialize response
    - Add `instructions` to initialize response telling Claude how to handle channel events
    - Add `reply` tool (announce stays implicit at init — no separate tool)
-   - Add SSE subscription to `GET /api/cc-bridge/events?bridge_id=X` — pulls ESR-side messages
+   - Add SSE subscription to `GET /api/cc-bridge/events?bridge_id=X` — pulls Ezagent-side messages
    - On SSE event arrival, emit `notifications/claude/channel` to claude over stdout
-2. **esr_web** (~+40 LOC):
+2. **ezagent_web** (~+40 LOC):
    - Add SSE endpoint `GET /api/cc-bridge/events?bridge_id=X` that subscribes to Phoenix.PubSub topic `esr:bridge_v1:to_claude:<bridge_id>` and streams events as SSE
-   - Existing POST endpoint stays (claude → ESR path)
+   - Existing POST endpoint stays (claude → Ezagent path)
 3. **LiveView /admin** (~+30 LOC):
-   - Add "Send message" form per connected bridge → calls `Esr.Bridge.V1Prototype.Server.push_to_claude/2` → PubSub.broadcast → SSE → bridge → claude
+   - Add "Send message" form per connected bridge → calls `Ezagent.Bridge.V1Prototype.Server.push_to_claude/2` → PubSub.broadcast → SSE → bridge → claude
    - Subscribe to `esr:bridge_v1:replies:<bridge_id>` topic to show claude's replies
 4. **Server GenServer** (~+30 LOC):
    - Add `push_to_claude/2` (broadcasts on the per-bridge to_claude topic)
@@ -65,11 +65,11 @@ Channel-ready state:
 ```
   LV /admin (browser)
       ↓ form submit (mode=cast)
-  Esr.Invocation.dispatch  (existing)
+  Ezagent.Invocation.dispatch  (existing)
       ↓ behavior=channel/push  (NEW small Behavior)
-  Esr.Bridge.V1Prototype.Server.push_to_claude(bridge_id, text)
+  Ezagent.Bridge.V1Prototype.Server.push_to_claude(bridge_id, text)
       ↓ Phoenix.PubSub.broadcast esr:bridge_v1:to_claude:<bridge_id>
-  esr_web SSE endpoint (subscriber)
+  ezagent_web SSE endpoint (subscriber)
       ↓ SSE stream
   Python bridge (SSE client)
       ↓ MCP notifications/claude/channel
@@ -77,8 +77,8 @@ Channel-ready state:
       ↓ claude responds, calls reply tool
   Python bridge tools/call handler
       ↓ HTTP POST /api/cc-bridge/reply
-  EsrWeb.CcBridgeAnnounceController.reply
-      ↓ Esr.Bridge.V1Prototype.Server.record_reply
+  EzagentWeb.CcBridgeAnnounceController.reply
+      ↓ Ezagent.Bridge.V1Prototype.Server.record_reply
       ↓ Phoenix.PubSub.broadcast esr:bridge_v1:replies:<bridge_id>
   LV /admin shows reply in "messages with claude" panel
 ```
@@ -107,14 +107,14 @@ The empirical test for "really connected via channel":
 
 | File | Action | ~LOC |
 |---|---|---|
-| `apps/esr_plugin_cc_bridge_v1_prototype/python/esr_mcp_bridge_v1_prototype.py` | add experimental capability + reply tool + SSE subscription + notification emit | +60 |
-| `apps/esr_web/lib/esr_web/controllers/cc_bridge_announce_controller.ex` | add `events_sse/2` + `reply/2` actions | +50 |
-| `apps/esr_web/lib/esr_web/router.ex` | add GET /api/cc-bridge/events + POST /api/cc-bridge/reply | +2 |
-| `apps/esr_plugin_cc_bridge_v1_prototype/lib/esr/bridge/v1_prototype/server.ex` | add push_to_claude, record_reply, per-bridge topics | +30 |
-| `apps/esr_web_liveview/lib/esr_web_liveview/admin_live.ex` | add Send-to-Claude form + replies panel | +60 |
+| `apps/ezagent_plugin_cc_bridge_v1_prototype/python/esr_mcp_bridge_v1_prototype.py` | add experimental capability + reply tool + SSE subscription + notification emit | +60 |
+| `apps/ezagent_web/lib/ezagent_web/controllers/cc_bridge_announce_controller.ex` | add `events_sse/2` + `reply/2` actions | +50 |
+| `apps/ezagent_web/lib/ezagent_web/router.ex` | add GET /api/cc-bridge/events + POST /api/cc-bridge/reply | +2 |
+| `apps/ezagent_plugin_cc_bridge_v1_prototype/lib/esr/bridge/v1_prototype/server.ex` | add push_to_claude, record_reply, per-bridge topics | +30 |
+| `apps/ezagent_web_liveview/lib/ezagent_web_liveview/admin_live.ex` | add Send-to-Claude form + replies panel | +60 |
 | `scripts/cc-bridge-attach.sh` | add `--dangerously-load-development-channels` flag | +1 |
 | `phase-specs/phase1/SPEC.md` + `VERIFICATION.md` + `PLAN.md` | revise to channel mode | edit |
-| `apps/esr_plugin_cc_bridge_v1_prototype/test/` | add channel-mode tests | +60 |
+| `apps/ezagent_plugin_cc_bridge_v1_prototype/test/` | add channel-mode tests | +60 |
 
 Total: ~263 LOC code + spec rev.
 

@@ -52,7 +52,7 @@ Total estimate: **~24 PRs**, 12-15 days autonomous execution.
                        └──────────────┘
 ```
 
-**Parallelizable:** 7-4 ESR skill content + onboarding docs writing can ramp during 7-1/7-2/7-3 (writers don't block on code). The 6+ invariant tests of 7-4 close LAST because they depend on 7-1/7-2/7-3 features.
+**Parallelizable:** 7-4 Ezagent skill content + onboarding docs writing can ramp during 7-1/7-2/7-3 (writers don't block on code). The 6+ invariant tests of 7-4 close LAST because they depend on 7-1/7-2/7-3 features.
 
 ---
 
@@ -66,10 +66,10 @@ Each row: number, title, sub-step, est. effort (S/M/L), V criteria closed, depen
 |---|---|---|---|---|
 | 31 | feat(routing): enforce workspace_uri across all matcher invocations + invariant test | S | V3.2, V4.4 | — |
 | 32 | refactor(cc-channel): full v1→v2 cutover + delete v1 prototype app + grep invariant | L (large blast radius) | V4.2, V4.6 | 31 |
-| 33 | feat(mix): `mix esr.bootstrap` one-command setup | S | V1.1, V4.5 | — (parallel to 31) |
+| 33 | feat(mix): `mix ezagent.bootstrap` one-command setup | S | V1.1, V4.5 | — (parallel to 31) |
 | 34 | feat(identity): per-user CLI bearer token + LV mint UI + parity invariant | M | V3.4, V4.7 | 31 |
 | 35 | fix(feishu): ws_sidecar EOF→exit handler + orphan reap invariant | S | V4.3 | — |
-| 36 | feat(mix): `mix esr.plugin.install` runtime hot-load + invariant | M | V1.4, V4.* | 35 (just to avoid sidecar contention in tests) |
+| 36 | feat(mix): `mix ezagent.plugin.install` runtime hot-load + invariant | M | V1.4, V4.* | 35 (just to avoid sidecar contention in tests) |
 
 **7-1 closeout PR**: combined progress report + manual smoke test of the 6 PRs together. No code; Feishu update only.
 
@@ -77,11 +77,11 @@ Each row: number, title, sub-step, est. effort (S/M/L), V criteria closed, depen
 
 | # | Title | Effort | V criteria | Deps |
 |---|---|---|---|---|
-| 37 | feat(domain): Esr.Entity.AgentTemplate Kind + slice + LV creation form + mix task | M | V2.* prerequisites | 32 (v2 cutover for `cc-orchestrator` template) |
-| 38 | feat(domain): Esr.Entity.SessionTemplate Kind + git-style hash versioning + tag registry | L | V2.3, V2.5, D7-10 | 37 |
+| 37 | feat(domain): Ezagent.Entity.AgentTemplate Kind + slice + LV creation form + mix task | M | V2.* prerequisites | 32 (v2 cutover for `cc-orchestrator` template) |
+| 38 | feat(domain): Ezagent.Entity.SessionTemplate Kind + git-style hash versioning + tag registry | L | V2.3, V2.5, D7-10 | 37 |
 | 39 | feat(identity): template:read / template:write / template:instantiate cap kinds + parser + Identity Behavior integration | M | V3.1, V3.6 | 38 |
-| 40 | feat(domain): Esr.Entity.Agent.spawn/4 + Agent slice workspace_uri + spawned_by fields + migration | M | V3.3, V2.4 | 37 |
-| 41 | feat(domain): Esr.Entity.Session.spawn_from_template/2 (the Generator) + CapBAC gate | M | V2.1, V2.4 | 38, 39, 40 |
+| 40 | feat(domain): Ezagent.Entity.Agent.spawn/4 + Agent slice workspace_uri + spawned_by fields + migration | M | V3.3, V2.4 | 37 |
+| 41 | feat(domain): Ezagent.Entity.Session.spawn_from_template/2 (the Generator) + CapBAC gate | M | V2.1, V2.4 | 38, 39, 40 |
 
 **7-2 closeout PR**: progress report.
 
@@ -93,7 +93,7 @@ Each row: number, title, sub-step, est. effort (S/M/L), V criteria closed, depen
 | 43 | feat(core): dispatch ctx :session_uri enrichment (derive from target URI) | S | V3.1 | 42 |
 | 44 | feat(domain): Session slice template_working_copy field + persistence flip (:ephemeral → :on_change) + migration | M | V2.6 | 41 |
 | 45 | feat(domain): cc-orchestrator AgentTemplate seed + dev-profile boot install | S | V2.1 | 37 |
-| 46 | feat(orchestrator): 7 MCP tools (add_agent_slot / remove_agent_slot / update_agent_template / write_matcher / update_template / save_template_as / list_templates) + tool handlers dispatch via Esr.Invocation | L | V2.1, V2.5 | 44, 45 |
+| 46 | feat(orchestrator): 7 MCP tools (add_agent_slot / remove_agent_slot / update_agent_template / write_matcher / update_template / save_template_as / list_templates) + tool handlers dispatch via Ezagent.Invocation | L | V2.1, V2.5 | 44, 45 |
 | 47 | feat(orchestrator): Generator grants scoped delegation caps to spawned orchestrator at instantiate time | S | V3.1, V3.3 | 41, 42, 43 |
 | 48 | fix(orchestrator): in-flight template-deletion semantics (return :parent_template_deleted from update_template; save_template_as still works) | S | V2.7 | 46 |
 | 49 | test(orchestrator): full e2e demo flow + agent-browser screenshots + invariant gates | M | V2.* (all), V5.1 | 46, 47, 48 |
@@ -108,7 +108,7 @@ Each row: number, title, sub-step, est. effort (S/M/L), V criteria closed, depen
 | 51 | docs(onboarding): 4 docs — first-30-days, adding-a-plugin, adding-kind-behavior-template, common-failures runbook | M | V1.3, V5.7 | 50 (skill content informs docs) |
 | 52 | test(invariants): add the 8+ Phase 7 invariant tests (those NOT already added inline with 7-1/7-2/7-3 PRs) | M | V5.1 | all prior |
 | 53 | docs(arch): Decision Log #135-#144 + GLOSSARY 16 terms + ROADMAP §9b delivery accounting + ARCHITECTURE §7.3/§7.5/§17.6 v1 delegation updates | M | V3.6, V5.3, V5.4, V5.5 | all prior |
-| 54 | docs(forensic): docs/notes/phase-7-handoff.md (full closeout record + ESR v1 release declaration) + CONTRIBUTING.md SPEC_REVIEW checklist | S | V5.6, V5.8 | 53 |
+| 54 | docs(forensic): docs/notes/phase-7-handoff.md (full closeout record + Ezagent v1 release declaration) + CONTRIBUTING.md SPEC_REVIEW checklist | S | V5.6, V5.8 | 53 |
 
 **Phase 7 closeout PR**: final progress report + tagged release `v1.0.0`.
 
@@ -147,7 +147,7 @@ For each PR N in [31..54]:
 |---|---|
 | 7-3 PR 42 (Capability.matches?/2 tuple extension) introduces regression in existing CapBAC paths | Audit ALL existing `matches?/2` call sites in PR; ensure default behavior when ctx fields absent is "no scope = match anything not scope-tuple"; add regression test for each existing site |
 | 7-1 PR 32 (CC v2 cutover) breaks live dev environment (Allen's `agent://cc-demo`) | Manual e2e test with agent-browser screenshot before push; have Phase 6 v1_prototype branch ready to revert if v2 swap fails; do this PR during a time Allen would notice quickly if regressed (early-batch) |
-| Orchestrator's CC instance + ESR's CC bridge contend on credentials | Use existing operator `~/.claude/` for dev; per Allen "用当前 h2oslabs 的 cc 登录凭证"; per-agent isolation deferred to Phase 8+ if needed |
+| Orchestrator's CC instance + Ezagent's CC bridge contend on credentials | Use existing operator `~/.claude/` for dev; per Allen "用当前 h2oslabs 的 cc 登录凭证"; per-agent isolation deferred to Phase 8+ if needed |
 | SessionTemplate hash determinism issue across BEAM runs | Use `:erlang.term_to_binary(slice, [:deterministic])` per SPEC D7-10; CI test that re-hashing identical content produces identical hash |
 | 7-3 e2e demo flaky (LLM orchestrator non-deterministic) | Use sandboxed CC instance with controlled prompt; assert structural outcomes (DB rows exist, agents bound) not exact LLM text |
 | AFK timing: a PR fails subagent review, I make wrong fix, ship broken code | Each PR's subagent re-review is the gate; if review flags issues, I fix AND re-review before push; never push on a "✗ Wrong" finding without addressing it |

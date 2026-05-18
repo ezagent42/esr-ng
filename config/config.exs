@@ -10,43 +10,43 @@
 import Config
 
 # Configure Mix tasks and generators
-config :esr_core,
-  ecto_repos: [EsrCore.Repo]
+config :ezagent_core,
+  ecto_repos: [EzagentCore.Repo]
 
-config :esr_web,
-  ecto_repos: [EsrCore.Repo],
-  generators: [context_app: :esr_core]
+config :ezagent_web,
+  ecto_repos: [EzagentCore.Repo],
+  generators: [context_app: :ezagent_core]
 
 # Configures the endpoint
-config :esr_web, EsrWeb.Endpoint,
+config :ezagent_web, EzagentWeb.Endpoint,
   url: [host: "localhost"],
   adapter: Bandit.PhoenixAdapter,
   render_errors: [
-    formats: [html: EsrWeb.ErrorHTML, json: EsrWeb.ErrorJSON],
+    formats: [html: EzagentWeb.ErrorHTML, json: EzagentWeb.ErrorJSON],
     layout: false
   ],
-  pubsub_server: EsrCore.PubSub,
+  pubsub_server: EzagentCore.PubSub,
   live_view: [signing_salt: "6S1Jg5/J"]
 
 # Configure esbuild (the version is required)
 config :esbuild,
   version: "0.25.4",
-  esr_web: [
+  ezagent_web: [
     args:
       ~w(js/app.js --bundle --target=es2022 --outdir=../priv/static/assets/js --external:/fonts/* --external:/images/* --alias:@=.),
-    cd: Path.expand("../apps/esr_web/assets", __DIR__),
+    cd: Path.expand("../apps/ezagent_web/assets", __DIR__),
     env: %{"NODE_PATH" => [Path.expand("../deps", __DIR__), Mix.Project.build_path()]}
   ]
 
 # Configure tailwind (the version is required)
 config :tailwind,
   version: "4.1.7",
-  esr_web: [
+  ezagent_web: [
     args: ~w(
       --input=assets/css/app.css
       --output=priv/static/assets/css/app.css
     ),
-    cd: Path.expand("../apps/esr_web", __DIR__)
+    cd: Path.expand("../apps/ezagent_web", __DIR__)
   ]
 
 # Configures Elixir's Logger

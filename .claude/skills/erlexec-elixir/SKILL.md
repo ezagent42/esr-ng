@@ -1,6 +1,6 @@
 ---
 name: erlexec-elixir
-description: Use whenever the task involves running an OS process from Elixir with proper lifecycle management — interactive binaries like `claude`, Python / Node / Ruby sidecars, interactive shells, or any long-running external command that must die when the BEAM dies. Triggers include any code that touches `:exec.run`, `:exec.run_link`, `:exec.send`, `:exec.start`, `:exec.kill`, `:exec.stop`, `:exec.ospid`, `:exec.winsz`, `:exec.pty_opts`, writing or extending `Esr.OSProcess`底座, `Esr.PyProcess`, the esr-ng `pty` / `os-process` Process impls, anything using `Port.open` to spawn an OS child where cleanup matters, reasoning about "stdin + stdout + cleanup" trade-offs, adding PTY support to a peer, streaming a PTY to a browser terminal (xterm.js, web terminal, LiveView terminal), debugging orphaned child processes, or migrating code away from MuonTrap / naked Port.open / tmux. ALWAYS use — even if erlexec is mentioned only briefly. erlexec is the **sole** OS-process and PTY library in esr-ng — there is no ExPTY, no node-pty equivalent, and no tmux. Training data covers erlexec poorly and the library has several easy-to-get-wrong API shapes (os_pid vs pid, monitor vs link, PTY options, `winsz` arg order, sync vs async, SIGKILL timing) that this skill documents from verified hexdocs.
+description: Use whenever the task involves running an OS process from Elixir with proper lifecycle management — interactive binaries like `claude`, Python / Node / Ruby sidecars, interactive shells, or any long-running external command that must die when the BEAM dies. Triggers include any code that touches `:exec.run`, `:exec.run_link`, `:exec.send`, `:exec.start`, `:exec.kill`, `:exec.stop`, `:exec.ospid`, `:exec.winsz`, `:exec.pty_opts`, writing or extending `Ezagent.OSProcess`底座, `Ezagent.PyProcess`, the ezagent `pty` / `os-process` Process impls, anything using `Port.open` to spawn an OS child where cleanup matters, reasoning about "stdin + stdout + cleanup" trade-offs, adding PTY support to a peer, streaming a PTY to a browser terminal (xterm.js, web terminal, LiveView terminal), debugging orphaned child processes, or migrating code away from MuonTrap / naked Port.open / tmux. ALWAYS use — even if erlexec is mentioned only briefly. erlexec is the **sole** OS-process and PTY library in ezagent — there is no ExPTY, no node-pty equivalent, and no tmux. Training data covers erlexec poorly and the library has several easy-to-get-wrong API shapes (os_pid vs pid, monitor vs link, PTY options, `winsz` arg order, sync vs async, SIGKILL timing) that this skill documents from verified hexdocs.
 ---
 
 # erlexec (Elixir) — OS process supervision with PTY + bidirectional I/O + cleanup
@@ -11,16 +11,16 @@ erlexec (Hex: `:erlexec`) is the go-to library for managing OS child processes f
 - **Cleanup on parent death** — if the BEAM is `SIGKILL`-ed, the child must die too, without orphans
 - **Signals** and **process-group** management (SIGTERM → SIGKILL with configurable delay, send arbitrary signals to the child)
 
-ESR's `Esr.OSProcess` 底座 is built on top of erlexec (migrated from MuonTrap + `Port.open` in PR-3, 2026-04-22 — see `docs/notes/erlexec-migration.md`).
+ESR's `Ezagent.OSProcess` 底座 is built on top of erlexec (migrated from MuonTrap + `Port.open` in PR-3, 2026-04-22 — see `docs/notes/erlexec-migration.md`).
 
 ## erlexec is the only OS-process library — no ExPTY, no tmux
 
-This is a deliberate, load-bearing decision for esr-ng. **Do not reach for a second library.**
+This is a deliberate, load-bearing decision for ezagent. **Do not reach for a second library.**
 
-- **No ExPTY / node-pty-style NIF.** A purpose-built PTY NIF buys nicer resize ergonomics and on-the-fly echo toggling, but at a cost esr-ng won't pay: it's a C NIF (a segfault takes down the whole BEAM VM, vs erlexec's `exec-port` being a *separate OS process* that can crash without killing the VM), and the available ones are WIP with incomplete cleanup — exactly the orphan-process problem erlexec was adopted to solve. erlexec already runs `claude` in a PTY in ESR production today (`os_process.ex`, `wrapper: :pty`). Use it.
-- **No tmux.** ESR used to lean on `tmux` as the thing that *held* the PTY, with the BEAM connecting as a tmux client. tmux was removed from `dev` (the `adapters/cc_tmux/` + `handlers/tmux_proxy/` extraction; see the closed issue `docs/issues/closed-01-tmux-vs-erlexec-pty.md`). esr-ng has the BEAM hold the PTY directly via erlexec, and **the BEAM is the multiplexer** — see "PTY → web" below. tmux brought its own server process, socket isolation headaches, and env-propagation bugs (`docs/notes/tmux-*.md`) for a job the BEAM does natively.
+- **No ExPTY / node-pty-style NIF.** A purpose-built PTY NIF buys nicer resize ergonomics and on-the-fly echo toggling, but at a cost ezagent won't pay: it's a C NIF (a segfault takes down the whole BEAM VM, vs erlexec's `exec-port` being a *separate OS process* that can crash without killing the VM), and the available ones are WIP with incomplete cleanup — exactly the orphan-process problem erlexec was adopted to solve. erlexec already runs `claude` in a PTY in Ezagent production today (`os_process.ex`, `wrapper: :pty`). Use it.
+- **No tmux.** Ezagent used to lean on `tmux` as the thing that *held* the PTY, with the BEAM connecting as a tmux client. tmux was removed from `dev` (the `adapters/cc_tmux/` + `handlers/tmux_proxy/` extraction; see the closed issue `docs/issues/closed-01-tmux-vs-erlexec-pty.md`). ezagent has the BEAM hold the PTY directly via erlexec, and **the BEAM is the multiplexer** — see "PTY → web" below. tmux brought its own server process, socket isolation headaches, and env-propagation bugs (`docs/notes/tmux-*.md`) for a job the BEAM does natively.
 
-One library, one mental model: a newcomer learns erlexec and is done. That's the bar (esr-ng architecture §2.1 — "少发明,多装配", fewer things to remember).
+One library, one mental model: a newcomer learns erlexec and is done. That's the bar (ezagent architecture §2.1 — "少发明,多装配", fewer things to remember).
 
 **Target version: 2.2.x** (pinned in `runtime/mix.exs`). Docs: https://hexdocs.pm/erlexec/2.2.3/.
 
@@ -71,7 +71,7 @@ erlexec exposes two distinct identifiers for every child:
 | Caller → child link | none | linked |
 | Caller dies → child | child keeps running (orphan risk) | child dies with caller |
 | Use when | Long-lived services managed via their own monitor | Peer/worker lifetime == caller's lifetime |
-| In ESR | Rare | Default for `Esr.OSProcess` workers |
+| In Ezagent | Rare | Default for `Ezagent.OSProcess` workers |
 
 **The trap**: if you use `run/2` and the caller crashes, the OS process is orphaned until the BEAM exits. `run_link/2` is almost always what you want for peer-like modules. Keep a `Process.monitor/1` (via the `:monitor` opt) for `{'DOWN', ...}` messages if you also want explicit notification.
 
@@ -354,14 +354,14 @@ tmux's appeal was multi-client attach: several windows view one session. With th
 - **tmux model:** N tmux clients attach to the tmux server process.
 - **erlexec model:** N WebSockets subscribe to the same `Phoenix.PubSub` topic; the BEAM broadcasts each `{:stdout, os_pid, bytes}` chunk to all of them.
 
-In esr-ng this is the `Session.CC = pty(peer) + web(proxy)` split (architecture §6.2): the `pty` peer owns the erlexec child and republishes its output on a PubSub topic; each `web` proxy is a LiveView that subscribes to that topic. One CC session, N browsers attached — no tmux server, no socket isolation, no env-propagation bugs.
+In ezagent this is the `Session.CC = pty(peer) + web(proxy)` split (architecture §6.2): the `pty` peer owns the erlexec child and republishes its output on a PubSub topic; each `web` proxy is a LiveView that subscribes to that topic. One CC session, N browsers attached — no tmux server, no socket isolation, no env-propagation bugs.
 
 ### The wiring
 
 ```elixir
 # pty peer — owns the erlexec child, republishes output
 def handle_info({:stdout, os_pid, bytes}, %{os_pid: os_pid} = s) do
-  Phoenix.PubSub.broadcast(Esr.PubSub, "cc:#{s.session_id}", {:pty_out, bytes})
+  Phoenix.PubSub.broadcast(Ezagent.PubSub, "cc:#{s.session_id}", {:pty_out, bytes})
   {:noreply, s}
 end
 
@@ -380,7 +380,7 @@ end
 
 ### Gotchas specific to the web path
 
-- **`winsz` arg order is `(os_pid, rows, cols)` — rows first.** xterm.js and most JS terminal code think in `(cols, rows)`. The mismatch produced a real ESR bug (PR-22) that took three PRs to find: a `(cols, rows)` call against erlexec's `(rows, cols)` signature gives a wrong-but-plausible size, so output wraps subtly wrong instead of failing loudly. Convert at the boundary and comment it.
+- **`winsz` arg order is `(os_pid, rows, cols)` — rows first.** xterm.js and most JS terminal code think in `(cols, rows)`. The mismatch produced a real Ezagent bug (PR-22) that took three PRs to find: a `(cols, rows)` call against erlexec's `(rows, cols)` signature gives a wrong-but-plausible size, so output wraps subtly wrong instead of failing loudly. Convert at the boundary and comment it.
 - **PTY output is CRLF.** Under `:pty`, lines end with `\r\n`. xterm.js *wants* CRLF — forward it raw. But any non-terminal consumer (a log, an AI analyzer, a line-based parser) needs `\r\n` → `\n` normalization first. Normalize per-consumer, not at the source.
 - **Don't normalize input.** xterm.js already sends correct control sequences (arrow keys, Ctrl-C as `\x03`, etc.). Forward browser keystrokes to `:exec.send/2` raw — re-encoding them breaks interactive programs.
 - **WebSocket keepalive.** Idle PTY sessions get dropped by proxies. Send a ping every ~30s from the `web` proxy; this is a transport concern, unrelated to erlexec.
@@ -395,9 +395,9 @@ end
 | Short-lived command, capture output | `:exec.run(cmd, [:sync, :stdout])` — erlexec works but `System.cmd/3` is simpler |
 | Long-lived pure-output daemon (no stdin) | erlexec `run_link` with `:stdout` (or `MuonTrap.Daemon` — both fine) |
 | Long-lived daemon, need to send stdin | erlexec `run_link` + `:stdin` (MuonTrap cannot do this cleanly) |
-| Interactive: `claude`, bash -i, REPL | erlexec `run_link` + `:pty` — **the only library esr-ng uses** |
+| Interactive: `claude`, bash -i, REPL | erlexec `run_link` + `:pty` — **the only library ezagent uses** |
 | Stream a PTY to a browser terminal | erlexec `run_link` + `:pty`, BEAM fans bytes out over Phoenix — see "PTY → web" |
-| Need signals, PTY resize, process groups | erlexec — feature-complete for all of esr-ng's needs |
+| Need signals, PTY resize, process groups | erlexec — feature-complete for all of ezagent's needs |
 
 ---
 
@@ -405,7 +405,7 @@ end
 
 - Official docs: https://hexdocs.pm/erlexec/2.2.3/
 - Source: https://github.com/saleyn/erlexec
-- ESR migration rationale: `docs/notes/erlexec-migration.md`
+- Ezagent migration rationale: `docs/notes/erlexec-migration.md`
 - tmux retirement (why the BEAM holds the PTY now): `docs/issues/closed-01-tmux-vs-erlexec-pty.md`
-- ESR底座 module: `runtime/lib/esr/os_process.ex` (`wrapper: :pty` runs `claude`; `wrapper: :plain` for JSON-line sidecars)
-- ESR peer consumer: `runtime/lib/esr/py_process.ex` (Python sidecar, no `:pty`)
+- Ezagent底座 module: `runtime/lib/esr/os_process.ex` (`wrapper: :pty` runs `claude`; `wrapper: :plain` for JSON-line sidecars)
+- Ezagent peer consumer: `runtime/lib/esr/py_process.ex` (Python sidecar, no `:pty`)

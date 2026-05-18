@@ -1,0 +1,132 @@
+defmodule EzagentCore.Invariants.DemoSmokeTest do
+  @moduledoc """
+  Phase 6 PR 12b → 12c — invariant tests that would have caught the
+  three bugs surfaced by the live demo recording.
+
+  Each test pins the actual surface the demo touched, not just an
+  internal contract. Lesson per memory
+  `feedback_completion_requires_invariant_test`: unit tests that pass
+  on internal shape do NOT prove the user-facing flow works.
+
+  ## Bug 1 — Repo `database:` missing from plain mix tasks
+
+  PR 1 moved Repo `database:` to runtime.exs only. `mix phx.server`
+  worked, but plain mix tasks (ezagent.user.set_password etc.) fail
+  because mix tasks do not always evaluate runtime.exs before
+  Application.ensure_all_started. The hotfix puts a default back in
+  dev.exs; runtime.exs still overrides for releases + phx.server.
+
+  Test: assert `Application.get_env(:ezagent_core, EzagentCore.Repo)[:database]`
+  is set + points inside `Ezagent.Home.path(:db)`.
+
+  ## Bug 2 — Tailwind didn't scan plugin LV sources
+
+  Shadcn-style classes in ezagent_plugin_liveview + ezagent_domain_ui weren't
+  in the compiled CSS bundle because the @source list only covered
+  ezagent_web/lib. Pages rendered unstyled.
+
+  Test: grep priv/static/assets/css/app.css for a class that ONLY
+  appears in the new components (e.g. `bg-zinc-900` from
+  EzagentDomainUi.Components button primary variant).
+
+  ## Bug 3 — AutoDerive list_instances was empty
+
+  Read wrong state field names (`:kind_module` vs actual `:kind`,
+  `:slices` vs actual `:state`) and didn't parse the string URI
+  stored in KindRegistry. Result: empty list for every known Kind.
+
+  Test: AutoDerive.list_instances(:user) must contain user://admin.
+  """
+  use ExUnit.Case, async: false
+
+  describe "Bug 1: Repo database config" do
+    test "EzagentCore.Repo has a non-nil :database setting at runtime" do
+      db = Application.get_env(:ezagent_core, EzagentCore.Repo)[:database]
+      assert is_binary(db) and db != "",
+             """
+             EzagentCore.Repo[:database] is empty. PR 1 regression — plain
+             mix tasks fail because runtime.exs isn't always evaluated.
+             config/dev.exs must keep a compile-time default; runtime.exs
+             still overrides for $EZAGENT_HOME / releases.
+             """
+    end
+
+    test "database path lives under the EZAGENT_HOME db directory" do
+      db = Application.get_env(:ezagent_core, EzagentCore.Repo)[:database]
+      home_db = Ezagent.Home.path(:db)
+
+      # Either the configured path is a subpath of home_db (dev/prod)
+      # OR it's the repo-local test DB (config/test.exs).
+      ok? =
+        String.starts_with?(db, home_db) or
+          String.ends_with?(db, "ezagent_core_test.db")
+
+      assert ok?,
+             "Repo database #{inspect(db)} should be under #{inspect(home_db)} or be the test DB"
+    end
+  end
+
+  describe "Bug 2: Tailwind compiled bundle has shadcn-style classes" do
+    @css_path Path.expand("../priv/static/assets/css/app.css", __DIR__)
+
+    test "compiled app.css exists" do
+      assert File.exists?(@css_path),
+             "Expected compiled tailwind bundle at #{@css_path}. Run `mix tailwind ezagent_web --minify`."
+    end
+
+    test "bundle contains a class that only appears in domain_ui components" do
+      content = File.read!(@css_path)
+
+      # `.bg-zinc-900` is used by EzagentDomainUi.Components button variant
+      # "primary" (apps/ezagent_domain_ui/lib/ezagent_domain_ui/components.ex).
+      # If Tailwind didn't scan domain_ui/lib, this class won't be in
+      # the bundle.
+      assert String.contains?(content, "bg-zinc-900"),
+             """
+             priv/static/assets/css/app.css is missing `bg-zinc-900` —
+             the primary-button color from EzagentDomainUi.Components.
+
+             Tailwind likely didn't @source the plugin/domain LV paths.
+             Check apps/ezagent_web/assets/css/app.css for:
+               @source "../../../ezagent_plugin_liveview/lib"
+               @source "../../../ezagent_domain_ui/lib"
+
+             Then rerun `mix tailwind ezagent_web --minify`.
+             """
+    end
+  end
+
+  describe "Bug 3: AutoDerive returns non-empty for foundational Kinds" do
+    test "list_instances(:user) finds admin user" do
+      instances = EzagentDomainUi.AutoDerive.list_instances(:user)
+
+      assert length(instances) > 0,
+             """
+             EzagentDomainUi.AutoDerive.list_instances(:user) returned []
+             but user://admin should be live in the registry. Check
+             the state-field accessors (:kind vs :kind_module,
+             :state vs :slices) in apps/ezagent_domain_ui/lib/.../auto_derive.ex.
+             """
+
+      uris = Enum.map(instances, &URI.to_string(&1.uri))
+      assert "user://admin" in uris
+    end
+
+    test "list_instances(:session) finds session://main" do
+      instances = EzagentDomainUi.AutoDerive.list_instances(:session)
+      uris = Enum.map(instances, &URI.to_string(&1.uri))
+      assert "session://main" in uris
+    end
+
+    test "instance_detail/1 returns a populated map for user://admin" do
+      {:ok, detail} =
+        EzagentDomainUi.AutoDerive.instance_detail(URI.parse("user://admin"))
+
+      assert detail.kind_module == "Ezagent.Entity.User"
+      assert is_map(detail.slices)
+      # admin User carries the all-cap identity slice + chat slice
+      assert Map.has_key?(detail.slices, :identity) or Map.has_key?(detail.slices, :chat)
+      assert is_list(detail.behaviors)
+    end
+  end
+end

@@ -5,7 +5,7 @@
 # a `git commit` or `git tag`, runs the sub-step gate before allowing it:
 #
 #   Phase 0:  mix format --check-formatted  +  mix test
-#   Phase 1:  + mix esr.check_invariants  (this commit)
+#   Phase 1:  + mix ezagent.check_invariants  (this commit)
 #
 # Gate red  → exit 2 (blocks the tool call; stderr is shown to Claude).
 # Not git   → exit 0 immediately (no-op for the vast majority of Bash calls).
@@ -43,8 +43,8 @@ if ! mix test >&2; then
   exit 2
 fi
 
-echo "[sub-step-gate] → mix esr.check_invariants" >&2
-if ! mix esr.check_invariants >&2; then
+echo "[sub-step-gate] → mix ezagent.check_invariants" >&2
+if ! mix ezagent.check_invariants >&2; then
   echo "[sub-step-gate] BLOCKED: invariant violation (see grep output above)" >&2
   exit 2
 fi

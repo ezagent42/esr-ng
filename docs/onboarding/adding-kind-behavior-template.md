@@ -1,16 +1,16 @@
 # Adding a Kind, Behavior, or Template Class
 
-ESR has three primitives plugin authors compose: **Kind** (process identity + lifecycle), **Behavior** (action interface + slice state), **Template Class** (declarative spawn of one or more Kinds). This doc walks through adding each, with concrete examples.
+Ezagent has three primitives plugin authors compose: **Kind** (process identity + lifecycle), **Behavior** (action interface + slice state), **Template Class** (declarative spawn of one or more Kinds). This doc walks through adding each, with concrete examples.
 
 If you're adding a whole new plugin (not just a Kind inside an existing plugin), read `docs/onboarding/adding-a-plugin.md` first — this doc assumes the plugin scaffolding exists.
 
 ## Concept refresher
 
-- **Kind** = a process *type*. Identified by URI scheme + module. E.g. `:user` Kind, URIs like `user://alice`. Implements `Esr.Kind` behaviour (callbacks `type_name/0`, `behaviors/0`, `persistence/0`).
-- **Behavior** = an action interface + a slice schema. One Behavior module can be attached to many Kinds via `BehaviorRegistry.register(kind, action, behavior)`. E.g. `Esr.Behavior.Chat` provides `:send` / `:join` / `:leave` for Session Kind; `:receive` for User + Agent Kinds.
-- **Template Class** = a spawn-from-config recipe. Implements `Esr.Kind.Template` behaviour with callbacks `template_name/0`, `validate/1`, `instantiate/3`. The Workspace plugin (and now PR 38's SessionTemplate) uses these for declarative session creation.
+- **Kind** = a process *type*. Identified by URI scheme + module. E.g. `:user` Kind, URIs like `user://alice`. Implements `Ezagent.Kind` behaviour (callbacks `type_name/0`, `behaviors/0`, `persistence/0`).
+- **Behavior** = an action interface + a slice schema. One Behavior module can be attached to many Kinds via `BehaviorRegistry.register(kind, action, behavior)`. E.g. `Ezagent.Behavior.Chat` provides `:send` / `:join` / `:leave` for Session Kind; `:receive` for User + Agent Kinds.
+- **Template Class** = a spawn-from-config recipe. Implements `Ezagent.Kind.Template` behaviour with callbacks `template_name/0`, `validate/1`, `instantiate/3`. The Workspace plugin (and now PR 38's SessionTemplate) uses these for declarative session creation.
 
-The composition: a Kind's lifecycle is run by `Esr.Kind.Server` (in core); its `behaviors/0` callback lists which Behaviors initialize slices; per-Kind `BehaviorRegistry.register` decides which actions dispatch to which Behavior.
+The composition: a Kind's lifecycle is run by `Ezagent.Kind.Server` (in core); its `behaviors/0` callback lists which Behaviors initialize slices; per-Kind `BehaviorRegistry.register` decides which actions dispatch to which Behavior.
 
 ## Add a Kind
 
@@ -19,22 +19,22 @@ The composition: a Kind's lifecycle is run by `Esr.Kind.Server` (in core); its `
 `apps/<your_domain>/lib/<your>/entity/<your_kind>.ex`:
 
 ```elixir
-defmodule Esr.Entity.MyKind do
+defmodule Ezagent.Entity.MyKind do
   @moduledoc """
-  MyKind — what it represents in ESR's process model.
+  MyKind — what it represents in Ezagent's process model.
 
   URI scheme: `mykind://<authority>` (or whatever convention).
   """
 
-  @behaviour Esr.Kind
+  @behaviour Ezagent.Kind
 
-  @impl Esr.Kind
+  @impl Ezagent.Kind
   def type_name, do: :my_kind
 
-  @impl Esr.Kind
-  def behaviors, do: [Esr.Behavior.Identity]   # which Behaviors' init_slice run at boot
+  @impl Ezagent.Kind
+  def behaviors, do: [Ezagent.Behavior.Identity]   # which Behaviors' init_slice run at boot
 
-  @impl Esr.Kind
+  @impl Ezagent.Kind
   def persistence, do: {:snapshot, :on_change}   # or :ephemeral / :on_terminate
 end
 ```
@@ -44,15 +44,15 @@ end
 Register a spawn fn for your URI scheme in the plugin's `Application.start/2`:
 
 ```elixir
-:ok = Esr.SpawnRegistry.register("mykind", fn uri ->
+:ok = Ezagent.SpawnRegistry.register("mykind", fn uri ->
   DynamicSupervisor.start_child(
     MyPlugin.MyKindSupervisor,
-    {Esr.Kind.Server, {Esr.Entity.MyKind, %{uri: uri}}}
+    {Ezagent.Kind.Server, {Ezagent.Entity.MyKind, %{uri: uri}}}
   )
 end)
 ```
 
-**Constraint** (Decision #65): spawn fn takes the URI only — no per-Kind init args plumbed through `SpawnRegistry`. If your Kind needs initialization data, the pattern is: spawn it (slice initializes empty), then dispatch a setup action to populate the slice. See `Esr.WorkspaceRegistry.bind` for an analogous lookup-table pattern that avoids spawn-time args.
+**Constraint** (Decision #65): spawn fn takes the URI only — no per-Kind init args plumbed through `SpawnRegistry`. If your Kind needs initialization data, the pattern is: spawn it (slice initializes empty), then dispatch a setup action to populate the slice. See `Ezagent.WorkspaceRegistry.bind` for an analogous lookup-table pattern that avoids spawn-time args.
 
 ### Step 3 — supervisor
 
@@ -68,10 +68,10 @@ children = [
 ### Step 4 — test
 
 ```elixir
-defmodule Esr.Entity.MyKindTest do
+defmodule Ezagent.Entity.MyKindTest do
   use ExUnit.Case, async: true
 
-  alias Esr.Entity.MyKind
+  alias Ezagent.Entity.MyKind
 
   test "type_name/0 returns :my_kind" do
     assert MyKind.type_name() == :my_kind
@@ -81,7 +81,7 @@ defmodule Esr.Entity.MyKindTest do
     assert MyKind.persistence() == {:snapshot, :on_change}
   end
 
-  test "all Esr.Kind callbacks implemented" do
+  test "all Ezagent.Kind callbacks implemented" do
     assert function_exported?(MyKind, :type_name, 0)
     assert function_exported?(MyKind, :behaviors, 0)
     assert function_exported?(MyKind, :persistence, 0)
@@ -89,7 +89,7 @@ defmodule Esr.Entity.MyKindTest do
 end
 ```
 
-Reference: `apps/esr_domain_chat/lib/esr/entity/agent_template.ex` (Phase 7 PR 37, simplest recent example).
+Reference: `apps/ezagent_domain_chat/lib/esr/entity/agent_template.ex` (Phase 7 PR 37, simplest recent example).
 
 ## Add a Behavior
 
@@ -98,13 +98,13 @@ Reference: `apps/esr_domain_chat/lib/esr/entity/agent_template.ex` (Phase 7 PR 3
 `apps/<your_domain>/lib/<your>/behavior/<your_behavior>.ex`:
 
 ```elixir
-defmodule Esr.Behavior.MyBehavior do
-  @behaviour Esr.Behavior
+defmodule Ezagent.Behavior.MyBehavior do
+  @behaviour Ezagent.Behavior
 
-  @impl Esr.Behavior
+  @impl Ezagent.Behavior
   def state_slice, do: :my_slice
 
-  @impl Esr.Behavior
+  @impl Ezagent.Behavior
   def init_slice(_args) do
     %{
       # Whatever shape your Behavior maintains
@@ -112,7 +112,7 @@ defmodule Esr.Behavior.MyBehavior do
     }
   end
 
-  @impl Esr.Behavior
+  @impl Ezagent.Behavior
   def interface do
     %{
       bump: %{
@@ -123,7 +123,7 @@ defmodule Esr.Behavior.MyBehavior do
     }
   end
 
-  @impl Esr.Behavior
+  @impl Ezagent.Behavior
   def invoke(:bump, slice, %{by: n}, _ctx) do
     new_slice = %{slice | counter: slice.counter + n}
     {:ok, new_slice, %{new_value: new_slice.counter}}
@@ -136,18 +136,18 @@ end
 In your plugin's `register_behaviors`:
 
 ```elixir
-:ok = Esr.BehaviorRegistry.register(Esr.Entity.MyKind, :bump, Esr.Behavior.MyBehavior)
+:ok = Ezagent.BehaviorRegistry.register(Ezagent.Entity.MyKind, :bump, Ezagent.Behavior.MyBehavior)
 ```
 
-A Behavior can be registered on multiple Kinds with different action subsets per Kind. `Esr.Behavior.Chat` does this — Session gets `:send / :join / :leave`, User + Agent get `:receive`.
+A Behavior can be registered on multiple Kinds with different action subsets per Kind. `Ezagent.Behavior.Chat` does this — Session gets `:send / :join / :leave`, User + Agent get `:receive`.
 
 ### Step 3 — test
 
 ```elixir
-defmodule Esr.Behavior.MyBehaviorTest do
+defmodule Ezagent.Behavior.MyBehaviorTest do
   use ExUnit.Case, async: true
 
-  alias Esr.Behavior.MyBehavior
+  alias Ezagent.Behavior.MyBehavior
 
   test "init_slice/1 returns expected shape" do
     assert %{counter: 0} = MyBehavior.init_slice(%{})
@@ -167,7 +167,7 @@ defmodule Esr.Behavior.MyBehaviorTest do
 end
 ```
 
-Reference: `apps/esr_domain_chat/lib/esr/behavior/chat.ex` (most complex Behavior, well-commented).
+Reference: `apps/ezagent_domain_chat/lib/esr/behavior/chat.ex` (most complex Behavior, well-commented).
 
 ## Add a Template Class
 
@@ -178,17 +178,17 @@ Template Classes are for declarative spawn. Workspace stores `session_templates`
 `apps/<your_domain>/lib/<your>/template/<your_class>.ex`:
 
 ```elixir
-defmodule Esr.Template.MyClass do
+defmodule Ezagent.Template.MyClass do
   @moduledoc """
   Template Class for spawning a <whatever> from configuration data.
   """
 
-  @behaviour Esr.Kind.Template
+  @behaviour Ezagent.Kind.Template
 
-  @impl Esr.Kind.Template
+  @impl Ezagent.Kind.Template
   def template_name, do: "myplugin.myclass.standard"
 
-  @impl Esr.Kind.Template
+  @impl Ezagent.Kind.Template
   def validate(template_data) do
     # Pre-persist schema check. Return :ok or {:error, _}.
     case Map.get(template_data, "name") do
@@ -197,12 +197,12 @@ defmodule Esr.Template.MyClass do
     end
   end
 
-  @impl Esr.Kind.Template
+  @impl Ezagent.Kind.Template
   def instantiate(template_name, template_data, workspace_uri) do
     # Effectful spawn. MUST be idempotent (re-call returns same URIs).
     uri = URI.new!("mykind://#{template_data["name"]}")
 
-    case Esr.SpawnRegistry.spawn(uri) do
+    case Ezagent.SpawnRegistry.spawn(uri) do
       {:ok, _pid} ->
         # IMPORTANT (invariant 4): if you spawned sessions, bind them.
         # Not relevant for non-session URIs.
@@ -218,7 +218,7 @@ end
 ### Step 2 — register in plugin Application.start
 
 ```elixir
-:ok = Esr.TemplateRegistry.register(Esr.Template.MyClass)
+:ok = Ezagent.TemplateRegistry.register(Ezagent.Template.MyClass)
 ```
 
 `TemplateRegistry.register/1` reads `template_name/0` itself. Strict-duplicate: if another plugin already registered the same name, returns `{:error, {:duplicate, existing, attempted}}`. Pick a unique name (prefix with your plugin name).
@@ -226,10 +226,10 @@ end
 ### Step 3 — test
 
 ```elixir
-defmodule Esr.Template.MyClassTest do
+defmodule Ezagent.Template.MyClassTest do
   use ExUnit.Case, async: false
 
-  alias Esr.Template.MyClass
+  alias Ezagent.Template.MyClass
 
   test "template_name/0 stable id" do
     assert MyClass.template_name() == "myplugin.myclass.standard"
@@ -262,17 +262,17 @@ defmodule Esr.Template.MyClassTest do
 end
 ```
 
-Reference: `apps/esr_domain_chat/lib/esr/template/generic_session.ex`.
+Reference: `apps/ezagent_domain_chat/lib/esr/template/generic_session.ex`.
 
 ## How to write an invariant test
 
 Invariant tests are CI gates for architectural rules — they FAIL when a future PR re-introduces a violation. They drive the production code path (not direct function calls) and assert via observable side-effects (audit log, message_routings, PubSub broadcast received).
 
-**Canonical pattern** (from `apps/esr_domain_chat/test/integration/workspace_isolation_test.exs`):
+**Canonical pattern** (from `apps/ezagent_domain_chat/test/integration/workspace_isolation_test.exs`):
 
-1. `use EsrCore.DataCase, async: false` (persistence + dispatch + sandbox)
-2. Spawn the production setup: `Esr.SpawnRegistry.spawn(uri)`, `WorkspaceRegistry.bind`, `RuleStore.add` — NOT mock objects
-3. Drive `Esr.Invocation.dispatch` — NOT direct module calls
+1. `use EzagentCore.DataCase, async: false` (persistence + dispatch + sandbox)
+2. Spawn the production setup: `Ezagent.SpawnRegistry.spawn(uri)`, `WorkspaceRegistry.bind`, `RuleStore.add` — NOT mock objects
+3. Drive `Ezagent.Invocation.dispatch` — NOT direct module calls
 4. Assert via audit log (`invocations` table), message store, or message_routings — NOT internal slice state
 5. Name the file `<invariant>_test.exs` (discoverable)
 6. Tag `:slow` if it spawns OS subprocesses (CI runs `--include slow`)

@@ -2,7 +2,7 @@ defmodule EzagentPluginLiveview.UsersLive do
   @moduledoc """
   /admin/users — list + create + disable Users (Phase 5 PR 2).
 
-  Admin-only surface (route gate via RequireUser). Backed by `Esr.Users`
+  Admin-only surface (route gate via RequireUser). Backed by `Ezagent.Users`
   (Phase 4-completion PR 4) — separate from User-Kind snapshot per
   Q-MU-2.
   """
@@ -25,7 +25,7 @@ defmodule EzagentPluginLiveview.UsersLive do
   end
 
   defp list_users do
-    Esr.Users.list_all()
+    Ezagent.Users.list_all()
     |> Enum.map(fn u ->
       Map.merge(u, %{
         has_password: not is_nil(u.password_hash),
@@ -53,9 +53,9 @@ defmodule EzagentPluginLiveview.UsersLive do
       true ->
         with {:ok, _uri} <- parse_user_uri(uri),
              {:ok, caps} <-
-               Esr.Capability.Parser.parse(caps_str, Esr.Entity.User.admin_uri()),
+               Ezagent.Capability.Parser.parse(caps_str, Ezagent.Entity.User.admin_uri()),
              pw = if(password == "", do: nil, else: password),
-             {:ok, _decoded} <- Esr.Users.create(uri, pw, caps) do
+             {:ok, _decoded} <- Ezagent.Users.create(uri, pw, caps) do
           _ = maybe_spawn_kind(uri)
 
           {:noreply,
@@ -73,7 +73,7 @@ defmodule EzagentPluginLiveview.UsersLive do
 
   def handle_event("set_password", %{"uri" => uri, "password" => password}, socket)
       when is_binary(password) and password != "" do
-    case Esr.Users.set_password(uri, password) do
+    case Ezagent.Users.set_password(uri, password) do
       {:ok, _} ->
         {:noreply,
          socket
@@ -103,8 +103,8 @@ defmodule EzagentPluginLiveview.UsersLive do
   defp maybe_spawn_kind(uri_str) do
     uri = URI.parse(uri_str)
 
-    if Code.ensure_loaded?(Esr.SpawnRegistry) do
-      _ = Esr.SpawnRegistry.spawn(uri)
+    if Code.ensure_loaded?(Ezagent.SpawnRegistry) do
+      _ = Ezagent.SpawnRegistry.spawn(uri)
     end
 
     :ok

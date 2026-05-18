@@ -21,8 +21,8 @@ defmodule EzagentPluginLiveview.AgentsLive do
   end
 
   defp list_live_agents do
-    if Code.ensure_loaded?(Esr.PluginCcPty.PtyServer) do
-      Esr.PluginCcPty.PtyServer.list_agents()
+    if Code.ensure_loaded?(Ezagent.PluginCcPty.PtyServer) do
+      Ezagent.PluginCcPty.PtyServer.list_agents()
     else
       []
     end

@@ -5,7 +5,7 @@ Tester: Claude (autonomous, AFK-authorized by Allen on 2026-05-16)
 Worktree: `.claude/worktrees/phase-2/` on branch `phase-3`
 Server: `mix phx.server` on port 4002
 
-## Automated demo (agent-browser + mix esr.routing.add_rule + sqlite)
+## Automated demo (agent-browser + mix ezagent.routing.add_rule + sqlite)
 
 ### Setup
 
@@ -19,7 +19,7 @@ curl -X POST localhost:4002/api/cc-bridge/announce \
 → {"ok":true,"bridge_id":"phase3d-demo"}
 
 # Admin adds routing rule via mix task
-mix esr.routing.add_rule EsrPluginChat.Routing.MentionRouting \
+mix ezagent.routing.add_rule EsrPluginChat.Routing.MentionRouting \
     text_contains:urgent receivers:session://oncall
 → added rule id=1 to MentionRouting: {:text_contains, "urgent"} → ["session://oncall"]
 ```
@@ -53,7 +53,7 @@ mix esr.routing.add_rule EsrPluginChat.Routing.MentionRouting \
 ### SQLite evidence
 
 ```
-$ sqlite3 esr_core_dev.db \
+$ sqlite3 ezagent_core_dev.db \
     "SELECT session_uri, message_uri FROM message_routings ORDER BY inserted_at DESC LIMIT 5"
 session://main|message://967d34534ca9ec63
 session://oncall|message://967d34534ca9ec63   ← SAME message_uri, different session
@@ -66,7 +66,7 @@ sessions per identity invariant.
 
 ### CapBAC hard flip evidence (runtime test)
 
-`apps/esr_core/test/esr/kind/runtime_phase3d_test.exs`:
+`apps/ezagent_core/test/esr/kind/runtime_phase3d_test.exs`:
 - "dispatch with empty caps → {:error, :unauthorized} + :denied telemetry"
   — passing
 - "dispatch with admin caps → success + :granted telemetry" — passing
@@ -76,7 +76,7 @@ sessions per identity invariant.
 
 Invocations table after demo runs:
 ```
-$ sqlite3 esr_core_dev.db \
+$ sqlite3 ezagent_core_dev.db \
     "SELECT authz, target FROM invocations ORDER BY id DESC LIMIT 5"
 granted|session://oncall/behavior/chat/send  ← cross-session routed send
 granted|session://main/behavior/chat/send     ← admin's original
@@ -91,9 +91,9 @@ No `stub_grant` rows — Phase 3d hard flip enforced.
 $ mix test
 241 umbrella tests, 0 failures
 
-$ mix esr.check_invariants
+$ mix ezagent.check_invariants
 ✓ #1 inbound via dispatch (no bare PubSub.broadcast)
-✓ #2 use Esr.Kind lifecycle (only Kind.Server has def init)
+✓ #2 use Ezagent.Kind lifecycle (only Kind.Server has def init)
 ✓ #3 :call to not-ready fail-fast (clause present)
 ✓ #4 put_new for unique-key (no bare Registry.register)
 ✓ #6 audit handler async (no direct Repo writes)
@@ -108,7 +108,7 @@ $ mix esr.check_invariants
 - [x] SQLite `routing_rules` table populated (1 admin rule + boot reload)
 - [x] SQLite `messages` + `message_routings`: same message landing in 2
       sessions (cross-session routing visible)
-- [x] mix esr.check_invariants 8 of 8 invariants pass (Phase 1+2 + #9 #10)
+- [x] mix ezagent.check_invariants 8 of 8 invariants pass (Phase 1+2 + #9 #10)
 - [x] Phase 2 functionality preserved (Echo button + Manual Dispatch +
       Audit Log all reachable via Debug area; tests green)
 - [x] `:stub_grant` atom GONE from runtime code (grep #9 enforcement)
@@ -121,7 +121,7 @@ $ mix esr.check_invariants
 The simulated e2e covers the cap deny + multi-session routing flows
 end-to-end. Real-claude validation flow:
 
-1. `bash scripts/cc-bridge-attach.sh` (with `ESR_AGENT_URI=agent://cc-builder`
+1. `bash scripts/cc-bridge-attach.sh` (with `EZAGENT_AGENT_URI=agent://cc-builder`
    in `.local.sh`)
 2. Open `http://100.64.0.27:4002/admin`
 3. Click cc-builder's "Add to session" → main

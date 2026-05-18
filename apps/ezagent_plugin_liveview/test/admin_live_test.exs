@@ -3,20 +3,20 @@ defmodule EzagentPluginLiveview.AdminLiveTest do
   import Phoenix.ConnTest
   import Phoenix.LiveViewTest
 
-  @endpoint EsrWeb.Endpoint
+  @endpoint EzagentWeb.Endpoint
 
   setup do
     # Sandbox shared mode so Audit.Writer's batch flush can reach the
     # test DB connection — used by the round-trip assertions below.
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(EsrCore.Repo)
-    Ecto.Adapters.SQL.Sandbox.mode(EsrCore.Repo, {:shared, self()})
+    :ok = Ecto.Adapters.SQL.Sandbox.checkout(EzagentCore.Repo)
+    Ecto.Adapters.SQL.Sandbox.mode(EzagentCore.Repo, {:shared, self()})
 
     # Phase 4-completion Spec 05: /admin requires login. Pre-set the
     # session cookie so tests skip the /login redirect.
     conn =
       Phoenix.ConnTest.build_conn()
       |> Plug.Test.init_test_session(%{
-        "current_user_uri" => URI.to_string(Esr.Entity.User.admin_uri())
+        "current_user_uri" => URI.to_string(Ezagent.Entity.User.admin_uri())
       })
 
     {:ok, conn: conn}
@@ -116,11 +116,11 @@ defmodule EzagentPluginLiveview.AdminLiveTest do
 
     # Simulate an agent reply landing via the chat_message broadcast.
     agent_uri = URI.new!("agent://test-#{System.unique_integer([:positive])}")
-    agent_msg = Esr.Message.new(agent_uri, %{text: "agent reply test", attachments: []})
+    agent_msg = Ezagent.Message.new(agent_uri, %{text: "agent reply test", attachments: []})
 
     Phoenix.PubSub.broadcast(
-      EsrCore.PubSub,
-      Esr.Behavior.Chat.session_events_topic(URI.new!("session://main")),
+      EzagentCore.PubSub,
+      Ezagent.Behavior.Chat.session_events_topic(URI.new!("session://main")),
       {:chat_message, URI.new!("session://main"), agent_msg}
     )
 
@@ -153,13 +153,13 @@ defmodule EzagentPluginLiveview.AdminLiveTest do
 
     for i <- 1..100 do
       msg =
-        Esr.Message.new(
+        Ezagent.Message.new(
           URI.new!("user://admin"),
           %{text: "histmsg-#{i}", attachments: []},
           inserted_at: DateTime.add(base, i, :second)
         )
 
-      {:ok, _} = Esr.MessageStore.write(msg, session_uri)
+      {:ok, _} = Ezagent.MessageStore.write(msg, session_uri)
     end
 
     {:ok, lv, html} = live(conn, "/admin")

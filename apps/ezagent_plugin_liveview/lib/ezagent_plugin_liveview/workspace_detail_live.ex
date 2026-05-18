@@ -8,7 +8,7 @@ defmodule EzagentPluginLiveview.WorkspaceDetailLive do
   3. Session templates (Phase 4d: read-only; Phase 5 editor)
   4. Routing rules (Phase 4d: read-only; Phase 5 editor)
 
-  Member mutations go through `Esr.Workspace.add_member/2` and
+  Member mutations go through `Ezagent.Workspace.add_member/2` and
   `remove_member/2` — both persist (Store) + dispatch (live Kind) so
   the UI shows the new state immediately AND restart-safe.
   """
@@ -18,7 +18,7 @@ defmodule EzagentPluginLiveview.WorkspaceDetailLive do
 
   @impl true
   def mount(%{"name" => name}, _session, socket) do
-    case Esr.Workspace.Store.get_by_name(name) do
+    case Ezagent.Workspace.Store.get_by_name(name) do
       nil ->
         {:ok,
          socket
@@ -33,18 +33,18 @@ defmodule EzagentPluginLiveview.WorkspaceDetailLive do
          |> assign(:workspace, ws)
          |> assign(:flash_error, nil)
          # Phase 5 PR 2: selected_class is "<template_name>" for any
-         # registered Class implementing Esr.UI.Form, or "__json__"
+         # registered Class implementing Ezagent.UI.Form, or "__json__"
          # for the JSON escape hatch. Default is first registered Class.
          |> assign(:selected_class, default_selected_class())
-         |> assign(:form_classes, Esr.UI.Form.list_form_classes())
+         |> assign(:form_classes, Ezagent.UI.Form.list_form_classes())
          |> assign(:add_form, to_form(%{"member_uri" => ""}, as: "add_member"))
          |> assign(:add_template_form, to_form(%{"tmpl_name" => ""}, as: "add_template"))
-         |> assign(:registered_template_classes, Esr.TemplateRegistry.registered_template_names())}
+         |> assign(:registered_template_classes, Ezagent.TemplateRegistry.registered_template_names())}
     end
   end
 
   defp default_selected_class do
-    case Esr.UI.Form.list_form_classes() do
+    case Ezagent.UI.Form.list_form_classes() do
       [{name, _, _} | _] -> name
       [] -> "__json__"
     end
@@ -57,7 +57,7 @@ defmodule EzagentPluginLiveview.WorkspaceDetailLive do
   defp template_member_count(_), do: 0
 
   defp template_status(%{"class" => name}) when is_binary(name) do
-    case Esr.TemplateRegistry.lookup(name) do
+    case Ezagent.TemplateRegistry.lookup(name) do
       {:ok, _module} -> :class_registered
       :error -> :no_class
     end
@@ -95,11 +95,11 @@ defmodule EzagentPluginLiveview.WorkspaceDetailLive do
       when is_binary(uri_str) and uri_str != "" do
     case URI.new(String.trim(uri_str)) do
       {:ok, %URI{scheme: scheme} = uri} when is_binary(scheme) ->
-        case Esr.Workspace.add_member(socket.assigns.name, uri) do
+        case Ezagent.Workspace.add_member(socket.assigns.name, uri) do
           :ok ->
             {:noreply,
              socket
-             |> assign(:workspace, Esr.Workspace.Store.get_by_name(socket.assigns.name))
+             |> assign(:workspace, Ezagent.Workspace.Store.get_by_name(socket.assigns.name))
              |> assign(:add_form, to_form(%{"member_uri" => ""}, as: "add_member"))
              |> assign(:flash_error, nil)}
 
@@ -159,13 +159,13 @@ defmodule EzagentPluginLiveview.WorkspaceDetailLive do
         {:noreply, assign(socket, :flash_error, "template name required")}
 
       true ->
-        case Esr.TemplateRegistry.lookup(class_name) do
+        case Ezagent.TemplateRegistry.lookup(class_name) do
           {:ok, class_module} ->
             tmpl =
               if function_exported?(class_module, :form_to_args, 1) do
                 class_module.form_to_args(params)
               else
-                Esr.UI.Form.default_form_to_args(class_module, Map.drop(params, ["tmpl_name"]))
+                Ezagent.UI.Form.default_form_to_args(class_module, Map.drop(params, ["tmpl_name"]))
               end
 
             do_add_template(socket, tmpl_name, tmpl)
@@ -177,7 +177,7 @@ defmodule EzagentPluginLiveview.WorkspaceDetailLive do
   end
 
   defp do_add_template(socket, tmpl_name, tmpl) do
-    case Esr.Workspace.add_template(socket.assigns.name, tmpl_name, tmpl) do
+    case Ezagent.Workspace.add_template(socket.assigns.name, tmpl_name, tmpl) do
       :ok ->
         # Trigger Class.instantiate so the Session goes live immediately
         # (Loader path runs on boot; this is the runtime path).
@@ -185,7 +185,7 @@ defmodule EzagentPluginLiveview.WorkspaceDetailLive do
 
         {:noreply,
          socket
-         |> assign(:workspace, Esr.Workspace.Store.get_by_name(socket.assigns.name))
+         |> assign(:workspace, Ezagent.Workspace.Store.get_by_name(socket.assigns.name))
          |> assign(:add_template_form, to_form(%{"tmpl_name" => ""}, as: "add_template"))
          |> assign(:flash_error, nil)}
 
@@ -195,11 +195,11 @@ defmodule EzagentPluginLiveview.WorkspaceDetailLive do
   end
 
   defp trigger_instantiate(workspace_name, tmpl_name, tmpl) do
-    workspace_uri = Esr.Entity.Workspace.uri_for(workspace_name)
+    workspace_uri = Ezagent.Entity.Workspace.uri_for(workspace_name)
 
     case tmpl["class"] do
       class_name when is_binary(class_name) ->
-        case Esr.TemplateRegistry.lookup(class_name) do
+        case Ezagent.TemplateRegistry.lookup(class_name) do
           {:ok, class_module} ->
             class_module.instantiate(tmpl_name, tmpl, workspace_uri)
 
@@ -213,11 +213,11 @@ defmodule EzagentPluginLiveview.WorkspaceDetailLive do
   end
 
   def handle_event("remove_template", %{"name" => tmpl_name}, socket) do
-    case Esr.Workspace.remove_template(socket.assigns.name, tmpl_name) do
+    case Ezagent.Workspace.remove_template(socket.assigns.name, tmpl_name) do
       :ok ->
         {:noreply,
          socket
-         |> assign(:workspace, Esr.Workspace.Store.get_by_name(socket.assigns.name))
+         |> assign(:workspace, Ezagent.Workspace.Store.get_by_name(socket.assigns.name))
          |> assign(:flash_error, nil)}
 
       {:error, reason} ->
@@ -228,11 +228,11 @@ defmodule EzagentPluginLiveview.WorkspaceDetailLive do
   def handle_event("remove_member", %{"member_uri" => uri_str}, socket) do
     case URI.new(uri_str) do
       {:ok, uri} ->
-        case Esr.Workspace.remove_member(socket.assigns.name, uri) do
+        case Ezagent.Workspace.remove_member(socket.assigns.name, uri) do
           :ok ->
             {:noreply,
              socket
-             |> assign(:workspace, Esr.Workspace.Store.get_by_name(socket.assigns.name))
+             |> assign(:workspace, Ezagent.Workspace.Store.get_by_name(socket.assigns.name))
              |> assign(:flash_error, nil)}
 
           {:error, reason} ->
@@ -353,7 +353,7 @@ defmodule EzagentPluginLiveview.WorkspaceDetailLive do
 
           <p style="font-size: 11px; color: #57606a; margin: 0 0 8px 0;">
             Class picker drives the form below — each registered Template Class self-describes its
-            fields via <code>Esr.UI.Form.form_fields/0</code>. JSON mode is the escape hatch for
+            fields via <code>Ezagent.UI.Form.form_fields/0</code>. JSON mode is the escape hatch for
             custom Classes that don't implement the form behaviour.
           </p>
 

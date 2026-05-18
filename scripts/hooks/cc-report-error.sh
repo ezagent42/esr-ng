@@ -27,8 +27,8 @@
 #   }
 #
 # Environment variables:
-#   ESR_URL          — base URL of the ESR LV server (default: http://localhost:4000)
-#   ESR_BRIDGE_ID    — identifier for this CC instance (default: hostname)
+#   EZAGENT_URL          — base URL of the ESR LV server (default: http://localhost:4000)
+#   EZAGENT_BRIDGE_ID    — identifier for this CC instance (default: hostname)
 #
 # Input: CC passes hook payload as JSON on stdin (CLAUDE_HOOK_INPUT).
 # Output: silent on success; stderr on failure (non-fatal — never blocks CC).
@@ -37,8 +37,8 @@
 
 set -u  # explicit unset = bug; missing data is fine, will fall back
 
-ESR_URL="${ESR_URL:-http://localhost:4000}"
-ESR_BRIDGE_ID="${ESR_BRIDGE_ID:-$(hostname -s 2>/dev/null || echo unknown)}"
+EZAGENT_URL="${EZAGENT_URL:-http://localhost:4000}"
+EZAGENT_BRIDGE_ID="${EZAGENT_BRIDGE_ID:-$(hostname -s 2>/dev/null || echo unknown)}"
 
 # Read hook payload from stdin (CC convention). If absent, we still
 # report a generic notification — the existence of a Notification event
@@ -78,7 +78,7 @@ escape_json() {
 }
 
 body=$(printf '{"bridge_id":"%s","level":"%s","type":"%s","text":"%s"}' \
-  "$(escape_json "$ESR_BRIDGE_ID")" \
+  "$(escape_json "$EZAGENT_BRIDGE_ID")" \
   "$(escape_json "$level")" \
   "$(escape_json "$type")" \
   "$(escape_json "$text")")
@@ -88,9 +88,9 @@ curl --max-time 3 --silent --show-error \
      -X POST \
      -H "Content-Type: application/json" \
      -d "$body" \
-     "$ESR_URL/api/cc-events" \
+     "$EZAGENT_URL/api/cc-events" \
      >/dev/null 2>&1 || {
-  echo "cc-report-error: failed to POST to $ESR_URL/api/cc-events" >&2
+  echo "cc-report-error: failed to POST to $EZAGENT_URL/api/cc-events" >&2
   exit 0   # never fail the hook chain
 }
 

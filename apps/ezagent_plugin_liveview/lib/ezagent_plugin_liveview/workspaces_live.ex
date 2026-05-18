@@ -2,8 +2,8 @@ defmodule EzagentPluginLiveview.WorkspacesLive do
   @moduledoc """
   /admin/workspaces — list every persisted Workspace + form to create.
 
-  Reads `Esr.Workspace.list_persisted/0` (which hits SQLite via
-  `Esr.Workspace.Store`) — the persisted set, not the live-Kind set.
+  Reads `Ezagent.Workspace.list_persisted/0` (which hits SQLite via
+  `Ezagent.Workspace.Store`) — the persisted set, not the live-Kind set.
   Phase 4d separates "what's declared to exist" (Store) from "what's
   currently spawned" (KindRegistry); a healthy system has them equal,
   but during transient errors the Store row exists even when the live
@@ -17,7 +17,7 @@ defmodule EzagentPluginLiveview.WorkspacesLive do
   """
 
   use Phoenix.LiveView
-  use EsrDomainUi.Components
+  use EzagentDomainUi.Components
   import Phoenix.Component
 
   @impl true
@@ -30,10 +30,10 @@ defmodule EzagentPluginLiveview.WorkspacesLive do
   end
 
   defp list_workspaces do
-    Esr.Workspace.list_persisted()
+    Ezagent.Workspace.list_persisted()
     |> Enum.map(fn ws ->
       live_pid =
-        case Esr.KindRegistry.lookup(ws.uri) do
+        case Ezagent.KindRegistry.lookup(ws.uri) do
           {:ok, pid} -> pid
           :error -> nil
         end
@@ -45,7 +45,7 @@ defmodule EzagentPluginLiveview.WorkspacesLive do
   @impl true
   def handle_event("create_workspace", %{"new_workspace" => %{"name" => name}}, socket)
       when is_binary(name) and name != "" do
-    case Esr.Workspace.create(String.trim(name), %{}) do
+    case Ezagent.Workspace.create(String.trim(name), %{}) do
       {:ok, _pid} ->
         {:noreply,
          socket

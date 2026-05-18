@@ -1,0 +1,120 @@
+defmodule Ezagent.Bridge.V1Prototype.McpConfigWriter do
+  @moduledoc """
+  Writes the `.mcp.json` that Claude Code consumes via `--mcp-config`.
+
+  Output path: `~/.ezagent/bridge.mcp.json` by default
+  (configurable via `Application.get_env(:ezagent_plugin_cc_bridge_v1_prototype,
+  :mcp_config_path)`). When Claude starts with `--mcp-config <path>` it
+  reads this file, then spawns each declared MCP server as a stdio
+  subprocess. The "esr-bridge" server is our v1 Python module
+  (`esr_mcp_bridge_v1_prototype.py`).
+
+  ## What `write!/0` does
+
+  1. Computes absolute path of `esr_mcp_bridge_v1_prototype.py`
+  2. Resolves esrd URL (env `EZAGENT_BRIDGE_EZAGENT_BRIDGE_URL` or config or
+     `http://127.0.0.1:4000`)
+  3. Writes JSON pointing claude at `uv run python3 <abs script>` with
+     the env var injected
+  4. Returns `{:ok, path}` so the attach script can `--mcp-config <path>`
+
+  ## Phase 5 replacement
+
+  In Phase 5 the OSProcess Behavior generates this config dynamically
+  per-session inside ESR. v1_prototype writes it once to a shared path
+  because we only spawn one CC instance for the demo.
+  """
+
+  @default_dir Path.expand("~/.ezagent")
+  @config_filename "bridge.mcp.json"
+
+  @doc """
+  Write the bridge mcp.json. Returns `{:ok, abs_path}`.
+
+  Also writes a copy to the project root `.mcp.json` (a "drop file"
+  for Claude Code). Without the project-level file, Claude prints a
+  startup warning `server:esr-bridge · no MCP server configured with
+  that name` because `--dangerously-load-development-channels` looks
+  up the server name in project/user MCP configs **before** reading
+  `--mcp-config <abs>`. The project-level file makes the lookup
+  succeed at the right moment, suppressing the warning. The session-
+  level `--mcp-config <abs>` flag remains too so explicit pathing is
+  preserved.
+  """
+  @spec write!() :: {:ok, String.t()}
+  @spec write!(keyword()) :: {:ok, String.t()}
+  def write!(opts \\ []) do
+    dir = Application.get_env(:ezagent_plugin_cc_bridge_v1_prototype, :mcp_config_dir, @default_dir)
+    File.mkdir_p!(dir)
+
+    # Allen 2026-05-17: agent_uri should ride in mcp.json (deterministic
+    # — PtyServer knows it at spawn time) instead of relying on env var
+    # passthrough through erlexec → claude → Python bridge.
+    #
+    # Lookup order in env map:
+    # 1. caller-passed `:agent_uri` opt (PtyServer.spawn_claude_directly)
+    # 2. EZAGENT_AGENT_URI env (legacy operator-shell path)
+    # 3. omit (bare-bridge mode)
+    env = %{"EZAGENT_BRIDGE_URL" => esrd_url()}
+
+    agent_uri =
+      Keyword.get(opts, :agent_uri) ||
+        case System.get_env("EZAGENT_AGENT_URI") do
+          nil -> nil
+          "" -> nil
+          s -> s
+        end
+
+    env =
+      case agent_uri do
+        nil -> env
+        s -> Map.put(env, "EZAGENT_AGENT_URI", s)
+      end
+
+    config = %{
+      "mcpServers" => %{
+        "esr-bridge" => %{
+          "command" => "uv",
+          "args" => ["run", "python3", bridge_script_path()],
+          "env" => env
+        }
+      }
+    }
+
+    encoded = Jason.encode!(config, pretty: true)
+
+    path = Path.join(dir, @config_filename)
+    File.write!(path, encoded)
+
+    # Also write to project root so claude's startup lookup matches.
+    # Use git toplevel as anchor so this works regardless of cwd.
+    case System.cmd("git", ["rev-parse", "--show-toplevel"], stderr_to_stdout: true) do
+      {root, 0} ->
+        root = String.trim(root)
+        project_mcp = Path.join(root, ".mcp.json")
+        File.write!(project_mcp, encoded)
+
+      _ ->
+        :ok
+    end
+
+    {:ok, path}
+  end
+
+  @doc "Absolute path of the Python bridge script."
+  @spec bridge_script_path() :: String.t()
+  def bridge_script_path do
+    Path.expand(
+      "../../../../python/esr_mcp_bridge_v1_prototype.py",
+      __DIR__
+    )
+  end
+
+  @doc "Configured esrd URL (env or config or default)."
+  @spec esrd_url() :: String.t()
+  def esrd_url do
+    System.get_env("EZAGENT_BRIDGE_EZAGENT_BRIDGE_URL") ||
+      Application.get_env(:ezagent_plugin_cc_bridge_v1_prototype, :esrd_url) ||
+      "http://127.0.0.1:4000"
+  end
+end

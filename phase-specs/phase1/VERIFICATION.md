@@ -22,26 +22,26 @@
 
 ### 1a-G1 · 结构 + 编译 + 单元测试
 
-- [ ] `apps/esr_core/` 含 SPEC §3 列的 18 个 core 模块(`mix.exs` deps 不变,仍无 `:phoenix` 框架)
-- [ ] `apps/esr_plugin_echo/` 存在,定义 `Esr.Entity.Echo` Kind + `Esr.Behavior.Echo`
-- [ ] `apps/esr_web_liveview/` 存在,有 `EsrWebLiveview.AdminLive` LiveView module
-- [ ] `Esr.Entity.User`(stub Kind)存在,导出 `admin_uri/0` + `admin_caps/0`
+- [ ] `apps/ezagent_core/` 含 SPEC §3 列的 18 个 core 模块(`mix.exs` deps 不变,仍无 `:phoenix` 框架)
+- [ ] `apps/ezagent_plugin_echo/` 存在,定义 `Ezagent.Entity.Echo` Kind + `Ezagent.Behavior.Echo`
+- [ ] `apps/ezagent_web_liveview/` 存在,有 `EzagentWebLiveview.AdminLive` LiveView module
+- [ ] `Ezagent.Entity.User`(stub Kind)存在,导出 `admin_uri/0` + `admin_caps/0`
 - [ ] `mix compile --warnings-as-errors` clean
-- [ ] `mix test` 全绿(esr_core 单元测试 + Phase 0 已有 + 新增 LiveView test)
+- [ ] `mix test` 全绿(ezagent_core 单元测试 + Phase 0 已有 + 新增 LiveView test)
 - [ ] `mix format --check-formatted` 通过
 
 ### 1a-G2 · 8 不变式 grep checklist(Phase 1 适用 6 条)
 
-- [ ] **#1 inbound 走 dispatch**: `grep -rn "PubSub.broadcast" apps/esr_core apps/esr_plugin_echo apps/esr_web_liveview --include='*.ex' | grep -v ":events" | grep -v "esr:audit:stream"` 无 inbound 路径残留(audit:stream + :events 这两个 view-fanout 是合法的,§5.7.6)
-- [ ] **#2 use Esr.Kind 生命周期**: `grep -rn "def init(" apps/esr_core apps/esr_plugin_echo --include='*.ex' | grep -v "kind/server.ex" | grep -v "_test.exs"` 应为空(plugin Kind 模块不该手写 init,共享 `Esr.Kind.Server` 是唯一 init)
-- [ ] **#3 :call to not-ready fail-fast**: `Esr.Invocation.dispatch/1` 的 case 分支里 `{:not_ready, mode}` when mode in [:call, :call_stream] → `{:error, :not_ready}` 存在,unit test 覆盖
-- [ ] **#4 put_new for unique-key**: `Esr.KindRegistry.put_new` 是唯一注册路径;无裸 `Registry.register` 在 Kind 注册场景
-- [ ] **#6 audit 异步 cast**: `Esr.Audit` telemetry handler 内只调 `GenServer.cast` + `PubSub.broadcast`,**不直接写 SQLite**(SQLite 写在 `Esr.Audit.Writer.handle_info` 的 batch flush)
+- [ ] **#1 inbound 走 dispatch**: `grep -rn "PubSub.broadcast" apps/ezagent_core apps/ezagent_plugin_echo apps/ezagent_web_liveview --include='*.ex' | grep -v ":events" | grep -v "esr:audit:stream"` 无 inbound 路径残留(audit:stream + :events 这两个 view-fanout 是合法的,§5.7.6)
+- [ ] **#2 use Ezagent.Kind 生命周期**: `grep -rn "def init(" apps/ezagent_core apps/ezagent_plugin_echo --include='*.ex' | grep -v "kind/server.ex" | grep -v "_test.exs"` 应为空(plugin Kind 模块不该手写 init,共享 `Ezagent.Kind.Server` 是唯一 init)
+- [ ] **#3 :call to not-ready fail-fast**: `Ezagent.Invocation.dispatch/1` 的 case 分支里 `{:not_ready, mode}` when mode in [:call, :call_stream] → `{:error, :not_ready}` 存在,unit test 覆盖
+- [ ] **#4 put_new for unique-key**: `Ezagent.KindRegistry.put_new` 是唯一注册路径;无裸 `Registry.register` 在 Kind 注册场景
+- [ ] **#6 audit 异步 cast**: `Ezagent.Audit` telemetry handler 内只调 `GenServer.cast` + `PubSub.broadcast`,**不直接写 SQLite**(SQLite 写在 `Ezagent.Audit.Writer.handle_info` 的 batch flush)
 - [ ] **#7 零匹配 → DLQ unroutable**: Phase 1 还没 routing,但 dispatch 路径里 `{:error, :no_such_actor}` 须有 telemetry + DLQ 落库
 
 不适用 Phase 1(标 N/A,Phase 2+ 适用):#5 snapshot on slice change(Echo 是 ephemeral)、#8 CC channel stdio(Phase 1 是 bridge 原型,Phase 5 才有正式 channel)
 
-### 1a-G3 · `mix esr.check_invariants`
+### 1a-G3 · `mix ezagent.check_invariants`
 
 - [ ] Phase 1 期,task 应该 grep 上面 5 条不变式(从 Phase 0 的 no-op skeleton 升级为有实际 grep);exit 0 表示干净,exit 非 0 表示发现违反
 
@@ -56,7 +56,7 @@
 agent-browser open http://100.64.0.27:4000/admin
 agent-browser snapshot -i
 ```
-- [ ] snapshot 里看到:`heading "Admin"`(或 ESR-specific 标题)、`button "Echo 测试"`、manual dispatch form(target / args 输入框)、audit log table(空表头)
+- [ ] snapshot 里看到:`heading "Admin"`(或 Ezagent-specific 标题)、`button "Echo 测试"`、manual dispatch form(target / args 输入框)、audit log table(空表头)
 
 **Step 2 · 点 Echo button**
 ```bash
@@ -90,7 +90,7 @@ agent-browser snapshot -i
 
 **Step 4 · 重启 BEAM,audit history 不丢(F8 audit-子集预览,不是完整 F8)**
 
-> 本步**不在 F1(文本往返)范围**;它是 F8(重启恢复)的 audit 子集预览,验证 `Esr.Audit.Writer` 的 SQLite 持久化在 Phase 1 期已可工作。完整 F8(Workspace state / Kind state snapshot 都恢复)由 Phase 3 验。Phase 1 验完不等于 F8 通过 — 架构师 review P3-4 显式化此边界。
+> 本步**不在 F1(文本往返)范围**;它是 F8(重启恢复)的 audit 子集预览,验证 `Ezagent.Audit.Writer` 的 SQLite 持久化在 Phase 1 期已可工作。完整 F8(Workspace state / Kind state snapshot 都恢复)由 Phase 3 验。Phase 1 验完不等于 F8 通过 — 架构师 review P3-4 显式化此边界。
 
 
 ```bash
@@ -124,13 +124,13 @@ ORDER BY id DESC LIMIT 10;
 
 ### 1b-G1 · 结构 + 编译
 
-- [ ] `apps/esr_plugin_cc_bridge_v1_prototype/` 存在(目录名 + 内部模块名都带 `_v1_prototype` 后缀)
-- [ ] `apps/esr_plugin_cc_bridge_v1_prototype/python/esr_mcp_bridge_v1_prototype.py`(~225 LOC,MCP stdio + `claude/channel` capability + `reply` tool + SSE subscriber)
-- [ ] `apps/esr_plugin_cc_bridge_v1_prototype/lib/esr/bridge/v1_prototype/mcp_config_writer.ex`(写 mcp.json)
-- [ ] `apps/esr_plugin_cc_bridge_v1_prototype/lib/esr/bridge/v1_prototype/server.ex`(rewrite,只跟踪 connected state)
-- [ ] `apps/esr_web/lib/esr_web/controllers/cc_bridge_announce_controller.ex` + router POST `/api/cc-bridge/announce`
+- [ ] `apps/ezagent_plugin_cc_bridge_v1_prototype/` 存在(目录名 + 内部模块名都带 `_v1_prototype` 后缀)
+- [ ] `apps/ezagent_plugin_cc_bridge_v1_prototype/python/esr_mcp_bridge_v1_prototype.py`(~225 LOC,MCP stdio + `claude/channel` capability + `reply` tool + SSE subscriber)
+- [ ] `apps/ezagent_plugin_cc_bridge_v1_prototype/lib/esr/bridge/v1_prototype/mcp_config_writer.ex`(写 mcp.json)
+- [ ] `apps/ezagent_plugin_cc_bridge_v1_prototype/lib/esr/bridge/v1_prototype/server.ex`(rewrite,只跟踪 connected state)
+- [ ] `apps/ezagent_web/lib/ezagent_web/controllers/cc_bridge_announce_controller.ex` + router POST `/api/cc-bridge/announce`
 - [ ] `scripts/cc-bridge-attach.sh`(PTY 包装 + 写 mcp.json + exec claude)
-- [ ] `EsrWebLiveview.AdminLive` 增量:CC bridge 状态显示(connected list)
+- [ ] `EzagentWebLiveview.AdminLive` 增量:CC bridge 状态显示(connected list)
 - [ ] `mix compile --warnings-as-errors` clean
 - [ ] `mix test` 全绿
 
@@ -138,7 +138,7 @@ ORDER BY id DESC LIMIT 10;
 
 **Architecture pattern**: cc-openclaw MCP-stdio(就是这个 chat 用的 openclaw-channel 走的路径)。**不是**老 esr `--dangerously-load-development-channels` Phoenix Channel WebSocket。
 
-**前置:** ESR `mix phx.server` 跑,绑 `100.64.0.27:4000`。`claude` binary 在 PATH(`which claude` 有输出)。
+**前置:** Ezagent `mix phx.server` 跑,绑 `100.64.0.27:4000`。`claude` binary 在 PATH(`which claude` 有输出)。
 
 **USER ACTIONS / AGENT ACTIONS**:
 - v1_prototype 阶段:**agent 自己跑 `bash scripts/cc-bridge-attach.sh`** 后台启动真 claude session
@@ -182,7 +182,7 @@ agent-browser screenshot /tmp/phase1b-final.png
 - [ ] `git tag phase1a` 和 `git tag phase1b` 都在
 - [ ] `sub-step-gate.sh` 在 commit `phase1b` 时实际跑过且通过(`mix test` + `mix format --check` + 8 不变式 grep)
 - [ ] `phase-specs/phase1/VERIFICATION.md` 全部 checkbox 打勾(执行记录)
-- [ ] `mix esr.check_invariants` 输出干净(exit 0)
+- [ ] `mix ezagent.check_invariants` 输出干净(exit 0)
 - [ ] `/tmp/phase1a-final.png` 和 `/tmp/phase1b-final.png` 两个 screenshot 都生成且 Allen 看过
 
 ---
@@ -191,7 +191,7 @@ agent-browser screenshot /tmp/phase1b-final.png
 
 - 1a screenshot 真的显示 audit log + Echo button 工作?
 - 1b screenshot 真的显示从 LV 发到远程 CC 的 reply 回来?
-- 老 esr 借鉴的 6 处 pattern 真用上了(grep `Esr.KindRegistry` 类似老 `Esr.Entity.Registry` 形态)?
+- 老 esr 借鉴的 6 处 pattern 真用上了(grep `Ezagent.KindRegistry` 类似老 `Ezagent.Entity.Registry` 形态)?
 - 老 esr 反例的 6 处真的没复刻(grep 不到 `dedup_keys: MapSet` / `HandlerRouter` / per-actor MapSet 等模式)?
 - 8 不变式 5 条 grep 全干净?
 - bridge 文件名带 `_v1_prototype` 后缀(Phase 5 替换路径清晰)?
@@ -202,31 +202,31 @@ agent-browser screenshot /tmp/phase1b-final.png
 
 ```bash
 # #1 inbound via dispatch(allowlist: :events suffix + audit:stream 这两个 view-fanout)
-grep -rn "PubSub.broadcast" apps/esr_core apps/esr_plugin_echo apps/esr_web_liveview \
+grep -rn "PubSub.broadcast" apps/ezagent_core apps/ezagent_plugin_echo apps/ezagent_web_liveview \
   --include='*.ex' | grep -v ":events" | grep -v "esr:audit:stream" \
   && echo "✗ inbound broadcast found" || echo "✓ clean"
 
-# #2 use Esr.Kind 生命周期(只有 kind/server.ex 应该有 def init)
-grep -rn "^\s*def init(" apps/esr_core apps/esr_plugin_echo --include='*.ex' \
+# #2 use Ezagent.Kind 生命周期(只有 kind/server.ex 应该有 def init)
+grep -rn "^\s*def init(" apps/ezagent_core apps/ezagent_plugin_echo --include='*.ex' \
   | grep -v "kind/server.ex" | grep -v "_test.exs" \
   && echo "✗ stray init found" || echo "✓ clean"
 
 # #3 :call to not-ready fail-fast(检查 dispatch.ex 有对应 case)
-grep -E '\{:not_ready, mode\} when mode in \[:call' apps/esr_core/lib/esr/invocation.ex \
+grep -E '\{:not_ready, mode\} when mode in \[:call' apps/ezagent_core/lib/esr/invocation.ex \
   && echo "✓ present" || echo "✗ missing"
 
 # #4 put_new for unique-key(KindRegistry 用 put_new)
-grep -rn "Registry.register" apps/esr_core --include='*.ex' | grep -v put_new | grep -v "_test.exs" \
+grep -rn "Registry.register" apps/ezagent_core --include='*.ex' | grep -v put_new | grep -v "_test.exs" \
   && echo "✗ bare Registry.register found" || echo "✓ clean(only via put_new)"
 
-# #6 audit 异步:Esr.Audit 内不直接写 SQLite
-grep -rn "Esr.Repo\|Repo.insert\|exqlite" apps/esr_core/lib/esr/audit.ex \
+# #6 audit 异步:Ezagent.Audit 内不直接写 SQLite
+grep -rn "Ezagent.Repo\|Repo.insert\|exqlite" apps/ezagent_core/lib/esr/audit.ex \
   && echo "✗ audit handler writes SQLite directly" || echo "✓ clean(only cast)"
 
 # #7 零匹配 → DLQ unroutable(dispatch 的 no_such_actor 路径有 DLQ.put + telemetry)
-grep -E '(:no_such_actor|:unroutable)' apps/esr_core/lib/esr/invocation.ex apps/esr_core/lib/esr/dlq.ex \
+grep -E '(:no_such_actor|:unroutable)' apps/ezagent_core/lib/esr/invocation.ex apps/ezagent_core/lib/esr/dlq.ex \
   | grep -E '(DLQ\.put|telemetry)' \
   && echo "✓ no_such_actor → DLQ + telemetry present" || echo "✗ missing DLQ/telemetry on no_such_actor"
 ```
 
-(以上 grep 命令也写进 `mix esr.check_invariants` 的 1a 完成版,自动化跑)
+(以上 grep 命令也写进 `mix ezagent.check_invariants` 的 1a 完成版,自动化跑)

@@ -5,14 +5,14 @@ import Config
 # The MIX_TEST_PARTITION environment variable can be used
 # to provide built-in test partitioning in CI environment.
 # Run `mix help test` for more information.
-config :esr_core, EsrCore.Repo,
-  database: Path.expand("../esr_core_test.db", __DIR__),
+config :ezagent_core, EzagentCore.Repo,
+  database: Path.expand("../ezagent_core_test.db", __DIR__),
   pool_size: 5,
   pool: Ecto.Adapters.SQL.Sandbox
 
 # We don't run a server during test. If one is required,
 # you can enable the server option below.
-config :esr_web, EsrWeb.Endpoint,
+config :ezagent_web, EzagentWeb.Endpoint,
   http: [ip: {127, 0, 0, 1}, port: 4002],
   secret_key_base: "3v32NqyJT1oDLVf9Qcg2pz9caQu68+W737xqtaGSUPsaw6dDqwqXIC8VCQCSGLpy",
   server: false

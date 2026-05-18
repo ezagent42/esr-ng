@@ -17,7 +17,7 @@
 
 Allen 应该能跑通这条流(顺序敏感):
 
-1. ESR 启动(`mix phx.server`)
+1. Ezagent 启动(`mix phx.server`)
 2. 第二个终端启动真 claude session(`bash scripts/cc-bridge-attach.sh`)
 3. agent-browser 打开 `http://100.64.0.27:4000/admin`
 4. LV 显示 **session://main** 里有两个成员:`user://admin`(自己 boot 即存在)和 `agent://cc-builder`(claude 上线后加入)
@@ -27,7 +27,7 @@ Allen 应该能跑通这条流(顺序敏感):
 8. **LV 的 audit/message stream 现在显示两条形状一样的 chat row**:
    - `[user://admin]: 你好`
    - `[agent://cc-builder]: 你好,我能帮你...`
-   两条都是 `%Esr.Message{}`,不再有"主消息流 vs ← from claude 独立面板"区分
+   两条都是 `%Ezagent.Message{}`,不再有"主消息流 vs ← from claude 独立面板"区分
 9. 浏览器刷新 → 所有历史消息仍可见(MessageStore 持久)
 
 **offline / rejoin 测试**(F1.5,Phase 2 新增的"真双向 + 状态机"验证):
@@ -56,21 +56,21 @@ Phase 2 切 3 个 sub-step,每个有自己的 gate:
 
 ### 2a Gate · data 层 + 抽象
 
-- [ ] `Esr.Message` struct 6 字段 + `new/3` + `Jason.Encoder`
-- [ ] `Esr.MessageStore` 4 函数(`write/2`, `in_session_since/2`, `recent_in_session/2`, `by_uri/1`),Ecto 实现 + custom URI type
-- [ ] `Esr.Behavior.Chat` 行为契约定义(4 actions menu + interface schema for `%Message{}` 作 args)
+- [ ] `Ezagent.Message` struct 6 字段 + `new/3` + `Jason.Encoder`
+- [ ] `Ezagent.MessageStore` 4 函数(`write/2`, `in_session_since/2`, `recent_in_session/2`, `by_uri/1`),Ecto 实现 + custom URI type
+- [ ] `Ezagent.Behavior.Chat` 行为契约定义(4 actions menu + interface schema for `%Message{}` 作 args)
 - [ ] SQLite migration:`messages` 表 + 2 索引(per §10.4)
 - [ ] 单元测试覆盖:Message 构造 / MessageStore 4 函数读写 / Chat Behavior @interface schema
 - [ ] `mix compile --warnings-as-errors` clean
 - [ ] `mix test` 全绿
 - [ ] `mix format --check-formatted` clean
-- [ ] `mix esr.check_invariants` exit 0(继承 Phase 1 + Phase 2 不引入新不变式)
+- [ ] `mix ezagent.check_invariants` exit 0(继承 Phase 1 + Phase 2 不引入新不变式)
 
 ### 2b Gate · router 接线
 
-- [ ] `Esr.Entity.Session` Kind 模块 + Application boot 时 spawn `session://main`
-- [ ] `Esr.Entity.User` 升级为真 Kind(Phase 1 stub callbacks 去掉,加 Chat Behavior :receive 实现)+ boot spawn `user://admin`
-- [ ] `Esr.Entity.Agent` Kind 模块 + DynamicSupervisor wiring + bridge announce 时由 controller 触发 spawn
+- [ ] `Ezagent.Entity.Session` Kind 模块 + Application boot 时 spawn `session://main`
+- [ ] `Ezagent.Entity.User` 升级为真 Kind(Phase 1 stub callbacks 去掉,加 Chat Behavior :receive 实现)+ boot spawn `user://admin`
+- [ ] `Ezagent.Entity.Agent` Kind 模块 + DynamicSupervisor wiring + bridge announce 时由 controller 触发 spawn
 - [ ] Chat Behavior 4 invoke clauses 实现(`:send` / `:receive` / `:join` / `:leave`),Process.monitor + `:DOWN` 处理
 - [ ] BehaviorRegistry per-Kind subset 注册(Session 接 send/join/leave,Agent/User 接 receive)
 - [ ] LV `/admin` 加 "Session" 区域显示 session://main 成员列表(在线/离线状态)
@@ -81,7 +81,7 @@ Phase 2 切 3 个 sub-step,每个有自己的 gate:
 ### 2c Gate · bridge 切换 + 真 e2e(强制最终 gate)
 
 - [ ] CcBridgeAnnounceController.reply/2 改为通知对应 Agent Kind(不再写 `Server.record_reply`)
-- [ ] Agent Kind 收到 reply 通知 → 构造 `%Esr.Message{sender: self_uri, body, mentions: ...}` → dispatch `session://main/behavior/chat/send`
+- [ ] Agent Kind 收到 reply 通知 → 构造 `%Ezagent.Message{sender: self_uri, body, mentions: ...}` → dispatch `session://main/behavior/chat/send`
 - [ ] LV `/admin` 老的 "← from claude" 独立面板**删除**;reply 在主 message stream 显示
 - [ ] **LV chat-window UI 重建**:垂直 message stream + 成员侧栏(在线/离线状态)+ 底部 compose 区(bridge dropdown + 文本 + 发送)。Allen 输入和 claude 回复**视觉模板一致**(同一种 chat row component,只 sender / 颜色微差)。Phase 1 老的 Echo button / Manual Dispatch form / Audit Log 仍可达但**移到 "Debug" 区**(折叠或独立 tab),不占主视野
 - [ ] LV 主 message stream 用 MessageStore.recent_in_session(50) on mount 加载历史
@@ -89,7 +89,7 @@ Phase 2 切 3 个 sub-step,每个有自己的 gate:
 - [ ] **USER ACTION REQUIRED 显式列**:
 
   > **Allen 操作步骤**(无法 agent 自动化):
-  > 1. 在 ESR 的一个终端跑 `mix phx.server`(esrd)
+  > 1. 在 Ezagent 的一个终端跑 `mix phx.server`(esrd)
   > 2. 在第二个终端跑 `bash scripts/cc-bridge-attach.sh`(启动真 claude session, interactive 模式)
   > 3. 第三个终端 / 浏览器打开 `http://100.64.0.27:4000/admin`
 
@@ -128,7 +128,7 @@ Phase 2 切 3 个 sub-step,每个有自己的 gate:
 - [ ] `git tag phase2` 存在并 push origin
 - [ ] `sub-step-gate.sh` 在 commit `phase2` 时实际跑过且通过
 - [ ] `phase-specs/phase2/VERIFICATION.md` 全部 checkbox 打勾(执行记录)
-- [ ] `mix esr.check_invariants` 输出干净
+- [ ] `mix ezagent.check_invariants` 输出干净
 - [ ] `/tmp/phase2-final.png` screenshot 生成并拷贝进 `phase-specs/phase2/artifacts/`
 - [ ] Phase 1 所有 functionality 不退化(回归):Echo button / Manual Dispatch / audit log 仍工作
 
@@ -140,15 +140,15 @@ Phase 2 切 3 个 sub-step,每个有自己的 gate:
 - offline 时 LV 是否清晰显示成员离线状态 + pending 消息数?
 - rejoin 后 claude 是否真看到了离线期间发的消息?
 - BEAM 重启后 LV 仍能看到旧 session 历史(MessageStore 持久)?
-- 多个 bridge 同时连(假设用不同 ESR_AGENT_URI)是否各自独立工作?(Phase 2 boundary 测试)
+- 多个 bridge 同时连(假设用不同 EZAGENT_AGENT_URI)是否各自独立工作?(Phase 2 boundary 测试)
 
 ---
 
 ## 不变式 grep(继承 Phase 1)
 
 ```bash
-# Phase 1 不变式 #1-#7 继续 grep(实际命令在 mix esr.check_invariants 已自动化)
-mix esr.check_invariants
+# Phase 1 不变式 #1-#7 继续 grep(实际命令在 mix ezagent.check_invariants 已自动化)
+mix ezagent.check_invariants
 ```
 
 Phase 2 不引入新硬不变式 — Chat / Message / MessageStore 的 invariants 通过单元 + 集成测试覆盖,不走 grep 路径。
