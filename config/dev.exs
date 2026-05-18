@@ -2,24 +2,24 @@ import Config
 
 # Configure your database
 #
-# Path follows the same env-var logic as `Esr.Home` (which lives in
-# esr_core/lib and isn't loadable at config-time, so we inline the
-# logic here): `$ESR_HOME / $ESR_PROFILE / db / esr_core.db`,
-# defaulting to `~/.esr-ng / default / db / esr_core.db`.
+# Path follows the same env-var logic as `Ezagent.Home` (which lives in
+# ezagent_core/lib and isn't loadable at config-time, so we inline the
+# logic here): `$EZAGENT_HOME / $EZAGENT_PROFILE / db / ezagent_core.db`,
+# defaulting to `~/.ezagent / default / db / ezagent_core.db`.
 #
 # Two evaluation points:
 #   compile-time (this file) — pinned at the moment `mix compile` runs;
-#     used by plain mix tasks (esr.user.set_password etc.) that don't
+#     used by plain mix tasks (ezagent.user.set_password etc.) that don't
 #     evaluate runtime.exs.
 #   runtime — config/runtime.exs re-evaluates the same path so
-#     `ESR_HOME=/other mix phx.server` picks up the override.
+#     `EZAGENT_HOME=/other mix phx.server` picks up the override.
 #
-# Phase 6 PR 1 — see `mix esr.home.adopt_db` for one-time migration.
-esr_home_dev = System.get_env("ESR_HOME", "~/.esr-ng") |> Path.expand()
-esr_profile_dev = System.get_env("ESR_PROFILE", "default")
+# Phase 6 PR 1 — see `mix ezagent.home.adopt_db` for one-time migration.
+esr_home_dev = System.get_env("EZAGENT_HOME", "~/.ezagent") |> Path.expand()
+esr_profile_dev = System.get_env("EZAGENT_PROFILE", "default")
 
-config :esr_core, EsrCore.Repo,
-  database: Path.join([esr_home_dev, esr_profile_dev, "db", "esr_core.db"]),
+config :ezagent_core, EzagentCore.Repo,
+  database: Path.join([esr_home_dev, esr_profile_dev, "db", "ezagent_core.db"]),
   pool_size: 5,
   stacktrace: true,
   show_sensitive_data_on_connection_error: true
@@ -30,19 +30,19 @@ config :esr_core, EsrCore.Repo,
 # The watchers configuration can be used to run external
 # watchers to your application. For example, we can use it
 # to bundle .js and .css sources.
-config :esr_web, EsrWeb.Endpoint,
+config :ezagent_web, EzagentWeb.Endpoint,
   # Bound to 0.0.0.0 so the dev server is reachable over the tailnet — Allen
   # accesses esr-ng from a tailnet IP (100.x.x.x), not localhost (P0-D8).
   # `check_origin: false` below is required for the same reason: a LiveView WS
   # connection from a 100.x origin would otherwise be rejected. dev-only.
-  http: [ip: {0, 0, 0, 0}, port: String.to_integer(System.get_env("PORT") || "4000")],
+  http: [ip: {0, 0, 0, 0}, port: String.to_integer(System.get_env("PORT") || "10042")],
   check_origin: false,
   code_reloader: true,
   debug_errors: true,
   secret_key_base: "LB/r5X+0G50lTmGaZonOO8PxwMhtOxdS3J308T7s+w3fBI0R8fkZbABhqZxjOFqO",
   watchers: [
-    esbuild: {Esbuild, :install_and_run, [:esr_web, ~w(--sourcemap=inline --watch)]},
-    tailwind: {Tailwind, :install_and_run, [:esr_web, ~w(--watch)]}
+    esbuild: {Esbuild, :install_and_run, [:ezagent_web, ~w(--sourcemap=inline --watch)]},
+    tailwind: {Tailwind, :install_and_run, [:ezagent_web, ~w(--watch)]}
   ]
 
 # ## SSL Support
@@ -69,18 +69,18 @@ config :esr_web, EsrWeb.Endpoint,
 # different ports.
 
 # Watch static and templates for browser reloading.
-config :esr_web, EsrWeb.Endpoint,
+config :ezagent_web, EzagentWeb.Endpoint,
   live_reload: [
     web_console_logger: true,
     patterns: [
       ~r"priv/static/(?!uploads/).*(js|css|png|jpeg|jpg|gif|svg)$",
       ~r"priv/gettext/.*(po)$",
-      ~r"lib/esr_web/(?:controllers|live|components|router)/?.*\.(ex|heex)$"
+      ~r"lib/ezagent_web/(?:controllers|live|components|router)/?.*\.(ex|heex)$"
     ]
   ]
 
 # Enable dev routes for dashboard and mailbox
-config :esr_web, dev_routes: true
+config :ezagent_web, dev_routes: true
 
 # Do not include metadata nor timestamps in development logs
 config :logger, :default_formatter, format: "[$level] $message\n"

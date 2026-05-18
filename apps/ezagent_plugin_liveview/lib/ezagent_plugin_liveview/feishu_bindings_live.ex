@@ -3,17 +3,17 @@ defmodule EzagentPluginLiveview.FeishuBindingsLive do
   Phase 6 PR 15 — /admin/feishu/bindings.
 
   Lists all `feishu_user_bindings` rows + a bind form. The unbind
-  button on each row deletes via `EsrPluginFeishu.UserBinding.unbind/1`.
+  button on each row deletes via `EzagentPluginFeishu.UserBinding.unbind/1`.
 
   The bind form goes through `BindingPolicy.apply/2` so the cap-grant
-  side effect fires the same way `mix esr.feishu.bind` does.
+  side effect fires the same way `mix ezagent.feishu.bind` does.
   """
 
   use Phoenix.LiveView
-  use EsrDomainUi.Components
+  use EzagentDomainUi.Components
   import Phoenix.Component
 
-  alias EsrPluginFeishu.{BindingPolicy, UserBinding}
+  alias EzagentPluginFeishu.{BindingPolicy, UserBinding}
 
   @impl true
   def mount(_params, session, socket) do

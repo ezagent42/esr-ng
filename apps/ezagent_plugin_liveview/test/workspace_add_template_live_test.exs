@@ -10,16 +10,16 @@ defmodule EzagentPluginLiveview.WorkspaceAddTemplateLiveTest do
   import Phoenix.ConnTest
   import Phoenix.LiveViewTest
 
-  @endpoint EsrWeb.Endpoint
+  @endpoint EzagentWeb.Endpoint
 
   setup do
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(EsrCore.Repo)
-    Ecto.Adapters.SQL.Sandbox.mode(EsrCore.Repo, {:shared, self()})
+    :ok = Ecto.Adapters.SQL.Sandbox.checkout(EzagentCore.Repo)
+    Ecto.Adapters.SQL.Sandbox.mode(EzagentCore.Repo, {:shared, self()})
 
     conn =
       Phoenix.ConnTest.build_conn()
       |> Plug.Test.init_test_session(%{
-        "current_user_uri" => URI.to_string(Esr.Entity.User.admin_uri())
+        "current_user_uri" => URI.to_string(Ezagent.Entity.User.admin_uri())
       })
 
     {:ok, conn: conn}
@@ -27,7 +27,7 @@ defmodule EzagentPluginLiveview.WorkspaceAddTemplateLiveTest do
 
   test "add-template form mode → GenericSession Class spawns Session live", %{conn: conn} do
     ws_name = "add-tmpl-test-#{System.unique_integer([:positive])}"
-    {:ok, _} = Esr.Workspace.create(ws_name)
+    {:ok, _} = Ezagent.Workspace.create(ws_name)
 
     session_name = "test-#{System.unique_integer([:positive])}"
 
@@ -51,7 +51,7 @@ defmodule EzagentPluginLiveview.WorkspaceAddTemplateLiveTest do
 
     # Verify persistence
     assert %{session_templates: %{"main" => tmpl}} =
-             Esr.Workspace.Store.get_by_name(ws_name)
+             Ezagent.Workspace.Store.get_by_name(ws_name)
 
     assert tmpl["class"] == "session.generic"
     assert tmpl["session_name"] == session_name
@@ -59,15 +59,15 @@ defmodule EzagentPluginLiveview.WorkspaceAddTemplateLiveTest do
     # Wait for the Session Kind to be alive in KindRegistry
     session_uri = URI.parse("session://#{session_name}")
     Process.sleep(100)
-    assert {:ok, _pid} = Esr.KindRegistry.lookup(session_uri)
+    assert {:ok, _pid} = Ezagent.KindRegistry.lookup(session_uri)
   end
 
   test "remove_template drops the entry from persisted Workspace", %{conn: conn} do
     ws_name = "rm-tmpl-test-#{System.unique_integer([:positive])}"
-    {:ok, _} = Esr.Workspace.create(ws_name)
+    {:ok, _} = Ezagent.Workspace.create(ws_name)
 
     :ok =
-      Esr.Workspace.add_template(ws_name, "foo", %{
+      Ezagent.Workspace.add_template(ws_name, "foo", %{
         "class" => "session.generic",
         "session_name" => "foosession-#{System.unique_integer([:positive])}",
         "members" => []
@@ -79,7 +79,7 @@ defmodule EzagentPluginLiveview.WorkspaceAddTemplateLiveTest do
     |> element("button[phx-click='remove_template'][phx-value-name='foo']")
     |> render_click()
 
-    assert %{session_templates: tmpls} = Esr.Workspace.Store.get_by_name(ws_name)
+    assert %{session_templates: tmpls} = Ezagent.Workspace.Store.get_by_name(ws_name)
     refute Map.has_key?(tmpls, "foo")
   end
 end

@@ -3,7 +3,7 @@ defmodule EzagentPluginLiveview.RoutingLive do
   /admin/routing — global RoutingRegistry rules editor.
 
   Per Phase 4-completion Spec 05 Part B B.2 — replaces the
-  `mix esr.routing.add_rule` CLI workflow for admin operators.
+  `mix ezagent.routing.add_rule` CLI workflow for admin operators.
   Workspace.routing_rules per Workspace stays config-only metadata
   (Q-RT-1 default γ); this LV manages the **global** RoutingRegistry
   tables (MentionRouting + SessionRouting from chat plugin).
@@ -11,7 +11,7 @@ defmodule EzagentPluginLiveview.RoutingLive do
   ## Form shape
 
   - **Table** select — registered table modules
-    (`EsrDomainChat.Routing.MentionRouting` / `SessionRouting`)
+    (`EzagentDomainChat.Routing.MentionRouting` / `SessionRouting`)
   - **Matcher** — two modes via toggle:
     - **Form mode** (default): pick leaf type (mention / from /
       text_contains / text_matches / always) + arg input
@@ -31,16 +31,16 @@ defmodule EzagentPluginLiveview.RoutingLive do
   use Phoenix.LiveView
   import Phoenix.Component
 
-  alias Esr.Routing.{Matcher, RuleStore}
+  alias Ezagent.Routing.{Matcher, RuleStore}
 
   # Phase 5 PR 4: dispatch routing mutations through RoutingAdmin Kind
   # so CapBAC check fires at dispatch step 5.5. Admin's all-cap passes;
   # non-admin without explicit routing_admin cap gets :unauthorized.
-  @routing_admin_uri Esr.Entity.RoutingAdmin.default_uri()
+  @routing_admin_uri Ezagent.Entity.RoutingAdmin.default_uri()
 
   @tables [
-    {"MentionRouting", EsrDomainChat.Routing.MentionRouting},
-    {"SessionRouting", EsrDomainChat.Routing.SessionRouting}
+    {"MentionRouting", EzagentDomainChat.Routing.MentionRouting},
+    {"SessionRouting", EzagentDomainChat.Routing.SessionRouting}
   ]
 
   @matcher_types [
@@ -58,15 +58,15 @@ defmodule EzagentPluginLiveview.RoutingLive do
     # Phase 5 PR 4: derive caller from session for CapBAC dispatch
     caller_uri =
       case Map.get(session || %{}, "current_user_uri") do
-        nil -> Esr.Entity.User.admin_uri()
+        nil -> Ezagent.Entity.User.admin_uri()
         uri_str -> URI.parse(uri_str)
       end
 
     caller_caps =
-      if URI.to_string(caller_uri) == URI.to_string(Esr.Entity.User.admin_uri()) do
-        Esr.Entity.User.admin_caps()
+      if URI.to_string(caller_uri) == URI.to_string(Ezagent.Entity.User.admin_uri()) do
+        Ezagent.Entity.User.admin_caps()
       else
-        Esr.Identity.list_caps_for(caller_uri)
+        Ezagent.Identity.list_caps_for(caller_uri)
       end
 
     {:ok,
@@ -167,7 +167,7 @@ defmodule EzagentPluginLiveview.RoutingLive do
       {:error, :unauthorized} ->
         {:noreply,
          assign(socket, :flash_error,
-           "You don't have routing_admin cap. Ask admin to grant via mix esr.user.create."
+           "You don't have routing_admin cap. Ask admin to grant via mix ezagent.user.create."
          )}
 
       {:error, reason} ->
@@ -222,7 +222,7 @@ defmodule EzagentPluginLiveview.RoutingLive do
         "#{URI.to_string(@routing_admin_uri)}/behavior/routing_admin/#{Atom.to_string(action)}"
       )
 
-    Esr.Invocation.dispatch(%Esr.Invocation{
+    Ezagent.Invocation.dispatch(%Ezagent.Invocation{
       target: target,
       mode: :call,
       args: args,

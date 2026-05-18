@@ -86,7 +86,7 @@ LV members re-shows `agent://cc-builder online` after reconnect.
 ### 6. SQLite MessageStore
 
 ```
-$ sqlite3 esr_core_dev.db "SELECT count(*), sender FROM messages GROUP BY sender"
+$ sqlite3 ezagent_core_dev.db "SELECT count(*), sender FROM messages GROUP BY sender"
 2|agent://cc-builder
 2|user://admin
 ```
@@ -108,7 +108,7 @@ process vs `curl`). For a final human-eyes verification with the real
 claude TUI:
 
 1. `cp scripts/cc-bridge-attach.local.sh.example scripts/cc-bridge-attach.local.sh`
-   (the example now exports `ESR_AGENT_URI="agent://cc-builder"`)
+   (the example now exports `EZAGENT_AGENT_URI="agent://cc-builder"`)
 2. Open `http://100.64.0.27:4000/admin` in browser (use port 4000 if
    Phase 1 server is down, or 4002 with the server started here)
 3. Run `bash scripts/cc-bridge-attach.sh` interactively

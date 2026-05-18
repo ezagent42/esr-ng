@@ -10,16 +10,16 @@ defmodule EzagentPluginLiveview.AgentsLiveTest do
   import Phoenix.ConnTest
   import Phoenix.LiveViewTest
 
-  @endpoint EsrWeb.Endpoint
+  @endpoint EzagentWeb.Endpoint
 
   setup do
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(EsrCore.Repo)
-    Ecto.Adapters.SQL.Sandbox.mode(EsrCore.Repo, {:shared, self()})
+    :ok = Ecto.Adapters.SQL.Sandbox.checkout(EzagentCore.Repo)
+    Ecto.Adapters.SQL.Sandbox.mode(EzagentCore.Repo, {:shared, self()})
 
     conn =
       Phoenix.ConnTest.build_conn()
       |> Plug.Test.init_test_session(%{
-        "current_user_uri" => URI.to_string(Esr.Entity.User.admin_uri())
+        "current_user_uri" => URI.to_string(Ezagent.Entity.User.admin_uri())
       })
 
     {:ok, conn: conn}
@@ -37,12 +37,12 @@ defmodule EzagentPluginLiveview.AgentsLiveTest do
 
   test "list_agents returns empty list when supervisor has no children", %{conn: _conn} do
     # Direct assertion — no PtyServers spawned in test env unless explicitly started.
-    agents = Esr.PluginCcPty.PtyServer.list_agents()
+    agents = Ezagent.PluginCcPty.PtyServer.list_agents()
     assert is_list(agents)
   end
 
   test "find_by_agent_uri returns :error for unknown URI", %{conn: _conn} do
-    assert :error = Esr.PluginCcPty.PtyServer.find_by_agent_uri(URI.parse("agent://nonexistent"))
+    assert :error = Ezagent.PluginCcPty.PtyServer.find_by_agent_uri(URI.parse("agent://nonexistent"))
   end
 
   test "find_by_agent_uri + status work for a spawned PtyServer (test_mode)", %{conn: conn} do
@@ -50,14 +50,14 @@ defmodule EzagentPluginLiveview.AgentsLiveTest do
 
     {:ok, _pid} =
       DynamicSupervisor.start_child(
-        EsrPluginCcPty.PtyServerSupervisor,
-        {Esr.PluginCcPty.PtyServer, %{agent_uri: agent_uri, cwd: File.cwd!(), test_mode: true}}
+        EzagentPluginCcPty.PtyServerSupervisor,
+        {Ezagent.PluginCcPty.PtyServer, %{agent_uri: agent_uri, cwd: File.cwd!(), test_mode: true}}
       )
 
     Process.sleep(50)
 
-    assert {:ok, pid} = Esr.PluginCcPty.PtyServer.find_by_agent_uri(agent_uri)
-    status = Esr.PluginCcPty.PtyServer.status(pid)
+    assert {:ok, pid} = Ezagent.PluginCcPty.PtyServer.find_by_agent_uri(agent_uri)
+    status = Ezagent.PluginCcPty.PtyServer.status(pid)
     assert status.agent_uri == agent_uri
     assert status.test_mode == true
     assert status.running == true

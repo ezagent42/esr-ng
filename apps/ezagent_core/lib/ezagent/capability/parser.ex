@@ -1,0 +1,143 @@
+defmodule Ezagent.Capability.Parser do
+  @moduledoc """
+  String → `[Ezagent.Capability.t()]` parser for the `mix ezagent.user.create`
+  CLI per Phase 4-completion Spec 05 §A.2.1.
+
+  ## Grammar
+
+  Comma-separated list of cap specs:
+
+      "chat.send,workspace.read"
+      "*"                                       # admin-equivalent triple-:any
+      "workspace.workspace@workspace://main"    # instance-scoped
+      "chat.*"                                  # kind-scoped (Decision #19)
+
+  ## Validation
+
+  - Kind atoms must be `String.to_existing_atom` resolvable (rejects
+    typos at user-action time per `feedback_let_it_crash_no_workarounds`)
+  - Behavior strings must resolve to a registered Behavior in
+    `BehaviorRegistry` (best-effort — passes if not yet registered)
+  - `*` requires the `--allow-allcaps` flag at the CLI layer (parser
+    accepts `*` but task layer enforces the flag)
+  """
+
+  @doc """
+  Parse a caps string into a list of Capability structs.
+
+  `granter` is the URI of who is granting (e.g. `user://admin` when
+  admin runs `mix ezagent.user.create`). `now` defaults to current UTC.
+  """
+  @spec parse(String.t(), URI.t(), DateTime.t()) ::
+          {:ok, [Ezagent.Capability.t()]} | {:error, term()}
+  def parse(caps_str, granter, now \\ DateTime.utc_now()) when is_binary(caps_str) do
+    caps_str
+    |> String.trim()
+    |> case do
+      "" ->
+        {:ok, []}
+
+      str ->
+        str
+        |> String.split(",", trim: true)
+        |> Enum.map(&String.trim/1)
+        |> parse_specs([], granter, now)
+    end
+  end
+
+  defp parse_specs([], acc, _granter, _now), do: {:ok, Enum.reverse(acc)}
+
+  defp parse_specs([spec | rest], acc, granter, now) do
+    case parse_one(spec, granter, now) do
+      {:ok, cap} -> parse_specs(rest, [cap | acc], granter, now)
+      {:error, _} = err -> err
+    end
+  end
+
+  defp parse_one("*", granter, now) do
+    {:ok,
+     %Ezagent.Capability{
+       kind: :any,
+       behavior: :any,
+       instance: :any,
+       granted_by: granter,
+       granted_at: now
+     }}
+  end
+
+  defp parse_one(spec, granter, now) when is_binary(spec) do
+    {body, instance_uri} = split_instance(spec)
+
+    case String.split(body, ".", parts: 2) do
+      [kind_str, behavior_str] ->
+        with {:ok, kind_atom} <- safe_atom(kind_str),
+             {:ok, behavior} <- resolve_behavior(behavior_str) do
+          {:ok,
+           %Ezagent.Capability{
+             kind: kind_atom,
+             behavior: behavior,
+             instance: instance_uri,
+             granted_by: granter,
+             granted_at: now
+           }}
+        end
+
+      _ ->
+        {:error, {:bad_cap_spec, spec}}
+    end
+  end
+
+  defp split_instance(spec) do
+    case String.split(spec, "@", parts: 2) do
+      [body, instance_str] ->
+        case URI.new(instance_str) do
+          {:ok, %URI{scheme: scheme} = uri} when is_binary(scheme) ->
+            {body, uri}
+
+          _ ->
+            {body, :any}
+        end
+
+      [body] ->
+        {body, :any}
+    end
+  end
+
+  defp safe_atom("*"), do: {:ok, :any}
+
+  defp safe_atom(s) when is_binary(s) do
+    try do
+      {:ok, String.to_existing_atom(s)}
+    rescue
+      ArgumentError -> {:error, {:unknown_kind, s}}
+    end
+  end
+
+  defp resolve_behavior("*"), do: {:ok, :any}
+
+  defp resolve_behavior(name) when is_binary(name) do
+    # Resolve to behavior module via convention: kind name + "Behavior"
+    # OR look up in BehaviorRegistry by state_slice match
+    # For Phase 4 v1: accept the literal string as an atom (e.g. "chat" → :chat),
+    # which matches state_slice values; downstream cap matching is by module.
+    # Convert to module via convention: "chat" → Ezagent.Behavior.Chat
+    capitalized =
+      name
+      |> String.split("_")
+      |> Enum.map(&String.capitalize/1)
+      |> Enum.join("")
+
+    module_str = "Elixir.Ezagent.Behavior." <> capitalized
+
+    try do
+      module = String.to_existing_atom(module_str)
+      {:ok, module}
+    rescue
+      ArgumentError ->
+        # Module not loaded yet (plugin Application hasn't started)
+        # — fall back to :any so the cap parses; runtime check will
+        # validate.
+        {:ok, :any}
+    end
+  end
+end

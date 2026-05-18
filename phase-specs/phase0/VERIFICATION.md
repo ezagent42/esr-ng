@@ -12,9 +12,9 @@
 > Allen 已 sign-off。下方 `[x]` 是 agent 可验证项的执行勾;「人 review 关键点」一节归 Allen。
 
 ### 结构
-- [x] esr-ng 是 Mix umbrella;`apps/esr_core/` + `apps/esr_web/` 存在
-- [x] `esr_core` app 的 `mix.exs` deps **不含 `:phoenix`(框架)** 也不含 `:phoenix_live_view` / `:bandit` / `:plug` 这些 web-transport 依赖。**允许**含 `:phoenix_pubsub` / `:telemetry*` / `:ecto_sql` / `:ecto_sqlite3` / `:jason` 等独立 OTP 生态库(它们不需要 Phoenix 框架)
-- [x] phx.new 默认的 `esr_core_web` 已重命名为 `esr_web`(目录 + mix.exs app name + `EsrWeb` 模块前缀 + config 引用全部同步)
+- [x] ezagent 是 Mix umbrella;`apps/ezagent_core/` + `apps/ezagent_web/` 存在
+- [x] `ezagent_core` app 的 `mix.exs` deps **不含 `:phoenix`(框架)** 也不含 `:phoenix_live_view` / `:bandit` / `:plug` 这些 web-transport 依赖。**允许**含 `:phoenix_pubsub` / `:telemetry*` / `:ecto_sql` / `:ecto_sqlite3` / `:jason` 等独立 OTP 生态库(它们不需要 Phoenix 框架)
+- [x] phx.new 默认的 `ezagent_core_web` 已重命名为 `ezagent_web`(目录 + mix.exs app name + `EzagentWeb` 模块前缀 + config 引用全部同步)
 - [x] 奠基提交的 5 个文档在根:`ARCHITECTURE.md` / `GLOSSARY.md` / `IMPLEMENTATION_ROADMAP.md` / `CLAUDE.md` / `ARCHITECTURE_GRILL_v0.3.md`
 - [x] `AGENTS.md` 存在(phx.new 生成,未被重写)
 - [x] `phase-specs/phase0/` 4 文件在版本控制里
@@ -39,15 +39,15 @@
 > §1.2 同构 track / e2e flow track 的执行机制)。
 
 - [x] `agent-browser open http://<tailnet-ip>:4000/` —— 用真实 headless Chrome 打开,不是 curl
-- [x] `agent-browser snapshot -i` —— 快照里有 `heading "ESR v0.4 — phase 0 complete"`
+- [x] `agent-browser snapshot -i` —— 快照里有 `heading "Ezagent v0.4 — phase 0 complete"`
 - [x] `agent-browser screenshot` —— 截图人眼确认页面真正渲染(不是静态死页 / 不是错误页)
 - [x] LiveView WS 真连上:`home_live_test.exs` 用 `live/2` 通过(测试层证明)+ 截图页面是活的(浏览器层证明)
 - [x] **明确**:`/` 是唯一的首页路由。`/<任何不存在的路径>`(含 `/dev/dashboard**` 这类带 `**` 的)返回 404 是**正确行为**,不是 bug —— 404 页会列出可用路由,那是 Phoenix dev 模式在帮忙
 
 ### 工具链
 - [x] `.claude/skills/` 有迁移过来的 5 个 skill(elixir-phoenix-helper / erlexec-elixir / commit-work / grill-me / grill-with-docs),spot-check 一个能正常 invoke
-- [x] `.claude/settings.json` 是 esr-ng **全新写**的 —— 没有指向不存在的老 esr 脚本(grep 确认无 `pre-merge-dev-gate.sh` / `openclaw-channel-postcheck.sh` / `replay-guide-reminder.sh` 死引用)
-- [x] `mix esr.check_invariants` 能跑,输出「Phase 0: no invariants apply yet」,exit 0
+- [x] `.claude/settings.json` 是 ezagent **全新写**的 —— 没有指向不存在的老 esr 脚本(grep 确认无 `pre-merge-dev-gate.sh` / `openclaw-channel-postcheck.sh` / `replay-guide-reminder.sh` 死引用)
+- [x] `mix ezagent.check_invariants` 能跑,输出「Phase 0: no invariants apply yet」,exit 0
 - [x] B git-hook:`scripts/hooks/sub-step-gate.sh` 存在 + 可执行;`.claude/settings.json` 的 PreToolUse hook 配好;手动触发能跑 `mix test` + `mix format --check-formatted`
 
 ### 不变式 grep checklist
@@ -62,10 +62,10 @@ Phase 0 **无 e2e flow**(没有 dispatch,`FLOWS.md` 的 F1-F8 一条都跑不了
 - 空首页从 tailnet IP 可访问?LiveView WS 连得上?
 - `mix test` 绿?
 - 迁过来的 5 个 skill 在新 repo 工作?
-- esr-ng 的 `settings.json` 没有残留 esr-specific 的死引用?
-- `esr_core` 的 `mix.exs` 没有 `:phoenix`(框架)依赖?(架构纯度的第一道关 —— 见下)
+- ezagent 的 `settings.json` 没有残留 esr-specific 的死引用?
+- `ezagent_core` 的 `mix.exs` 没有 `:phoenix`(框架)依赖?(架构纯度的第一道关 —— 见下)
 
-## 为什么「esr_core 不依赖 `:phoenix` 框架」是第一道关
+## 为什么「ezagent_core 不依赖 `:phoenix` 框架」是第一道关
 
 1. **依赖方向**:ARCHITECTURE.md §2.3/§12 把 Phoenix 定为 **transport**,transport 可插拔(Feishu/CC/CLI/LiveView 都是 adapter)。依赖箭头必须 `transport → core`,绝不 `core → transport`。core 一旦依赖 `:phoenix`,箭头就反了。
 2. **结构性强制**:依赖物理上不在,就**不可能**手滑把 transport 代码塞进 core —— 编译器替你守架构,比纪律可靠。
@@ -75,4 +75,4 @@ Phase 0 **无 e2e flow**(没有 dispatch,`FLOWS.md` 的 F1-F8 一条都跑不了
 
 **为什么是「第一道」**:这是最容易手滑犯(phx.new umbrella 脚手架可能把 `:phoenix` 接到错的 app)、又最难回头的违规 —— Phase 0 没接住,后面每个 phase 都建在错的依赖图上。Phase 0 验收接住 = 在任何上层代码写之前接住。
 
-**精度**:守的是不依赖 `:phoenix`(**框架**),不是「不沾 Phoenix 任何东西」。`:phoenix_pubsub` 是独立 hex 包(无 `:phoenix` 依赖),esr_core 的 `:subscribe` mode 合法用它;`:telemetry` / `:ecto` 同理。
+**精度**:守的是不依赖 `:phoenix`(**框架**),不是「不沾 Phoenix 任何东西」。`:phoenix_pubsub` 是独立 hex 包(无 `:phoenix` 依赖),ezagent_core 的 `:subscribe` mode 合法用它;`:telemetry` / `:ecto` 同理。

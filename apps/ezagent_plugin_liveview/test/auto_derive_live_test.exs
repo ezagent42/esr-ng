@@ -10,16 +10,16 @@ defmodule EzagentPluginLiveview.AutoDeriveLiveTest do
   import Phoenix.ConnTest
   import Phoenix.LiveViewTest
 
-  @endpoint EsrWeb.Endpoint
+  @endpoint EzagentWeb.Endpoint
 
   setup do
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(EsrCore.Repo)
-    Ecto.Adapters.SQL.Sandbox.mode(EsrCore.Repo, {:shared, self()})
+    :ok = Ecto.Adapters.SQL.Sandbox.checkout(EzagentCore.Repo)
+    Ecto.Adapters.SQL.Sandbox.mode(EzagentCore.Repo, {:shared, self()})
 
     conn =
       build_conn()
       |> Plug.Test.init_test_session(%{
-        "current_user_uri" => URI.to_string(Esr.Entity.User.admin_uri())
+        "current_user_uri" => URI.to_string(Ezagent.Entity.User.admin_uri())
       })
 
     {:ok, conn: conn}

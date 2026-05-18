@@ -1,6 +1,6 @@
 # Common failures runbook
 
-Symptom-first list of known failure modes in ESR. For each, an actionable fix and a pointer to the forensic record / Decision Log entry / CI gate test.
+Symptom-first list of known failure modes in Ezagent. For each, an actionable fix and a pointer to the forensic record / Decision Log entry / CI gate test.
 
 Your Claude Code agent's `esr-developer` skill has a condensed version of this; this doc is the detailed reference.
 
@@ -8,7 +8,7 @@ Your Claude Code agent's `esr-developer` skill has a condensed version of this; 
 
 ## Symptom: message appears to send but recipient never sees it (silent drop)
 
-By far the most common class of bug in ESR. Causes, in order of likelihood:
+By far the most common class of bug in Ezagent. Causes, in order of likelihood:
 
 ### Cause 1: Channel notification meta has a non-string value
 
@@ -17,7 +17,7 @@ By far the most common class of bug in ESR. Causes, in order of likelihood:
 **Diagnose:**
 ```bash
 # In your bridge log:
-grep "meta_keys=" ~/.esr-ng/<profile>/logs/cc-bridge-*.log | tail
+grep "meta_keys=" ~/.ezagent/<profile>/logs/cc-bridge-*.log | tail
 ```
 
 If meta_keys includes anything other than known string keys, that's likely the bug.
@@ -25,43 +25,43 @@ If meta_keys includes anything other than known string keys, that's likely the b
 **Fix:** strip non-string values from meta. Structured data goes in `content` text or via `tools/call` round-trip. The only allowed non-trivial value is the single optional `meta.file_path` string (mirroring cc-openclaw convention).
 
 **Forensic:** `docs/notes/phase-6-architecture-closeout.md` §2.3, Phase 6 PR 26.
-**CI gate:** `apps/esr_domain_chat/test/esr/behavior/chat_test.exs` "to_claude payload meta values are all strings".
+**CI gate:** `apps/ezagent_domain_chat/test/esr/behavior/chat_test.exs` "to_claude payload meta values are all strings".
 
 ### Cause 2: Cap shape mismatch on `behavior` field (atom vs module)
 
-`Capability.matches?/2` requires exact equality on `behavior`. The atom `:chat` is structurally different from `Esr.Behavior.Chat` (a module reference). Atom-shorthand cap silently denies.
+`Capability.matches?/2` requires exact equality on `behavior`. The atom `:chat` is structurally different from `Ezagent.Behavior.Chat` (a module reference). Atom-shorthand cap silently denies.
 
 **Diagnose:**
 ```elixir
 # In iex shell connected to the runtime:
-caps = Esr.Identity.list_caps_for(URI.parse("user://someone"))
+caps = Ezagent.Identity.list_caps_for(URI.parse("user://someone"))
 caps |> MapSet.to_list() |> Enum.each(fn c ->
   IO.puts("kind=#{inspect(c.kind)} behavior=#{inspect(c.behavior)} instance=#{inspect(c.instance)}")
 end)
 ```
 
-If `behavior` shows an atom like `:chat` (not `Esr.Behavior.Chat`), that's the bug.
+If `behavior` shows an atom like `:chat` (not `Ezagent.Behavior.Chat`), that's the bug.
 
 **Fix:** revoke + re-grant the cap with the module reference. Or if your code constructed it with `:any` and a narrow `:kind` (the documented workaround per `docs/notes/phase-7-handoff.md` §"Three trade-offs"), verify the kind matches.
 
 **Forensic:** Phase 6 PR 27 — `feedback_let_it_crash_no_workarounds` debugging session.
-**CI gate:** `apps/esr_core/test/esr/capability_test.exs` indirectly enforces via the existing tests.
+**CI gate:** `apps/ezagent_core/test/esr/capability_test.exs` indirectly enforces via the existing tests.
 
 ### Cause 3: Workspace scope not plumbed
 
-`Esr.Behavior.Chat.invoke(:send)` at chat.ex:116 must call `Esr.Routing.Resolver.resolve/4` with `workspace_uri:` opt — derived from `Esr.WorkspaceRegistry.lookup(session_uri)`. If the session is unbound (custom Template Class spawned it without `WorkspaceRegistry.bind`), workspace-scoped routing rules never fire.
+`Ezagent.Behavior.Chat.invoke(:send)` at chat.ex:116 must call `Ezagent.Routing.Resolver.resolve/4` with `workspace_uri:` opt — derived from `Ezagent.WorkspaceRegistry.lookup(session_uri)`. If the session is unbound (custom Template Class spawned it without `WorkspaceRegistry.bind`), workspace-scoped routing rules never fire.
 
 **Diagnose:**
 ```elixir
-Esr.WorkspaceRegistry.lookup(URI.parse("session://your-session"))
+Ezagent.WorkspaceRegistry.lookup(URI.parse("session://your-session"))
 # {:ok, %URI{...}} = bound
 # :error = unbound (fallback to nil scope = pre-PR-31 global behavior)
 ```
 
-**Fix:** in your plugin's spawn-session code path, call `Esr.WorkspaceRegistry.bind(session_uri, workspace_uri)` after `Esr.SpawnRegistry.spawn`. `Esr.Workspace.Loader.invoke_template` does this for the canonical session classes; custom Template Classes follow the same pattern.
+**Fix:** in your plugin's spawn-session code path, call `Ezagent.WorkspaceRegistry.bind(session_uri, workspace_uri)` after `Ezagent.SpawnRegistry.spawn`. `Ezagent.Workspace.Loader.invoke_template` does this for the canonical session classes; custom Template Classes follow the same pattern.
 
 **Forensic:** `phase-specs/phase7/DECISIONS.md` IMPL-7-1, Decision #135.
-**CI gate:** `apps/esr_domain_chat/test/integration/workspace_isolation_test.exs`.
+**CI gate:** `apps/ezagent_domain_chat/test/integration/workspace_isolation_test.exs`.
 
 ### Cause 4: Inbound transport using `:cast` instead of `:call`
 
@@ -78,18 +78,18 @@ For human-facing inbound transports (Feishu, future Slack/Discord/email), dispat
 
 ### Cause 1: User Kind isn't alive (in-memory)
 
-`Esr.Identity.list_caps_for/1` returns `MapSet.new()` if the User Kind isn't currently spawned. The DB has the cap row, but the in-memory slice is empty until the Kind starts.
+`Ezagent.Identity.list_caps_for/1` returns `MapSet.new()` if the User Kind isn't currently spawned. The DB has the cap row, but the in-memory slice is empty until the Kind starts.
 
 **Diagnose:**
 ```elixir
-Esr.KindRegistry.lookup(URI.parse("user://alice"))
+Ezagent.KindRegistry.lookup(URI.parse("user://alice"))
 # {:ok, pid} = alive
 # :error = not spawned
 ```
 
 **Fix:**
 ```elixir
-Esr.SpawnRegistry.spawn(URI.parse("user://alice"))
+Ezagent.SpawnRegistry.spawn(URI.parse("user://alice"))
 # Then list_caps_for again
 ```
 
@@ -104,7 +104,7 @@ If the user holds `{:within_session, session://main}` but the action targets `se
 **Fix:** verify the scope dimension matches. Use a broader (less scoped) cap if appropriate, or re-grant with the correct scope.
 
 **Decision:** #137 (scope-tuple cap shapes).
-**CI gate:** `apps/esr_core/test/esr/capability_test.exs` "scope-bounded instance tuples".
+**CI gate:** `apps/ezagent_core/test/esr/capability_test.exs` "scope-bounded instance tuples".
 
 ### Cause 4: `{:spawned_by, _}` cap relying on PR-40-not-yet-shipped data
 
@@ -118,7 +118,7 @@ PR 42 ships `{:spawned_by, _}` as a deny-by-default placeholder. Until PR 40 shi
 
 ### Cause: Sidecar's stdin EOF handler missing or broken
 
-`apps/esr_plugin_feishu/priv/ws_sidecar/main.js` must call `process.stdin.on('end', () => process.exit(0))` + `process.stdin.resume()`. When the Elixir Port closes (parent dies / Port.close called / VM exits), stdin sees EOF and the handler fires.
+`apps/ezagent_plugin_feishu/priv/ws_sidecar/main.js` must call `process.stdin.on('end', () => process.exit(0))` + `process.stdin.resume()`. When the Elixir Port closes (parent dies / Port.close called / VM exits), stdin sees EOF and the handler fires.
 
 **Diagnose:**
 ```bash
@@ -129,12 +129,12 @@ pgrep -fla "node.*ws_sidecar"
 
 **Fix:** restore the EOF handler in main.js. Verify via:
 ```bash
-mix test apps/esr_plugin_feishu/test/sidecar_orphan_reap_test.exs --include slow
+mix test apps/ezagent_plugin_feishu/test/sidecar_orphan_reap_test.exs --include slow
 ```
 
 **Forensic:** Phase 6 PR 27 debug session (3 orphans accumulated, stealing inbound events).
 **Decision:** #144 cross-PR invariant table.
-**CI gate:** `apps/esr_plugin_feishu/test/sidecar_orphan_reap_test.exs` (`:slow` integration test spawns + kills + asserts pid dies in 3s).
+**CI gate:** `apps/ezagent_plugin_feishu/test/sidecar_orphan_reap_test.exs` (`:slow` integration test spawns + kills + asserts pid dies in 3s).
 
 ---
 
@@ -148,15 +148,15 @@ See "silent drop" cause 3 above. The rule's `workspace_uri` field is non-nil but
 
 ### Cause: `parent_template_uri` field not set
 
-`Esr.Entity.SessionTemplate.fork(parent_uri@hash, new_name)` MUST set `parent_template_uri = parent_uri@hash` (the specific source hash, not just the parent name).
+`Ezagent.Entity.SessionTemplate.fork(parent_uri@hash, new_name)` MUST set `parent_template_uri = parent_uri@hash` (the specific source hash, not just the parent name).
 
 **Diagnose:**
 ```bash
-mix esr.session_template.show <forked-name>
+mix ezagent.session_template.show <forked-name>
 # Inspect parent_template_uri field — should not be nil
 ```
 
-**Fix:** verify the fork code path sets the field. The instantiated session also references this — `Esr.Entity.Session.spawn_from_template/2` reads it to track lineage.
+**Fix:** verify the fork code path sets the field. The instantiated session also references this — `Ezagent.Entity.Session.spawn_from_template/2` reads it to track lineage.
 
 **CI gate:** `template_fork_lineage_test.exs` (Phase 7 PR 38+ deliverable).
 **Decision:** #141 (Fork unit = config only).
@@ -195,13 +195,13 @@ Phase 6 PR 27: every user should have `User.default_caps()` (currently `kind=:se
 
 **Diagnose:**
 ```elixir
-caps = Esr.Identity.list_caps_for(URI.parse("user://linyilun"))
+caps = Ezagent.Identity.list_caps_for(URI.parse("user://linyilun"))
 caps |> MapSet.to_list() |> Enum.any?(fn c -> c.kind == :session and c.behavior == :any end)
 # false = needs backfill
 ```
 
 **Fix:**
-- Forward: BindingPolicy.apply/2 idempotently grants defaults on (re-)bind. Run `mix esr.feishu.bind` for the user.
+- Forward: BindingPolicy.apply/2 idempotently grants defaults on (re-)bind. Run `mix ezagent.feishu.bind` for the user.
 - One-off: dispatch `identity/grant_cap` directly.
 
 **Forensic:** `docs/notes/phase-6-architecture-closeout.md` §2.1.
@@ -222,11 +222,11 @@ ESR's Feishu plugin binds specific chat IDs via routing rules. If the user is in
 SELECT * FROM routing_rules WHERE receivers LIKE '%oc_xxxxxxx%';
 ```
 
-**Fix:** add a routing rule binding the chat_id to a session via `mix esr.routing.add_rule` or `/admin/routing` LV form.
+**Fix:** add a routing rule binding the chat_id to a session via `mix ezagent.routing.add_rule` or `/admin/routing` LV form.
 
 ---
 
-## Symptom: CC bridge can't reach ESR / `agent://cc-demo` shows offline
+## Symptom: CC bridge can't reach Ezagent / `agent://cc-demo` shows offline
 
 ### Cause 1: Bridge process died
 
@@ -234,8 +234,8 @@ Each agent has a Python MCP bridge running. If it died, the agent's bridge isn't
 
 **Diagnose:**
 ```bash
-ls -lt ~/.esr-ng/<profile>/logs/cc-bridge-*.log
-tail ~/.esr-ng/<profile>/logs/cc-bridge-<bridge_id>.log
+ls -lt ~/.ezagent/<profile>/logs/cc-bridge-*.log
+tail ~/.ezagent/<profile>/logs/cc-bridge-<bridge_id>.log
 ```
 
 **Fix:** restart claude in the PTY (it'll respawn the bridge), or `mix phx.server` restart if the PTY itself died.
@@ -246,7 +246,7 @@ If your build is post-PR-32 (CC v1→v2 cutover), no agent should bind via v1 pr
 
 **Diagnose:** grep the codebase:
 ```bash
-git grep "Esr.Bridge.V1Prototype" apps/
+git grep "Ezagent.Bridge.V1Prototype" apps/
 # Post-PR-32, this should return ZERO matches.
 ```
 

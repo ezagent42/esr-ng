@@ -18,10 +18,10 @@ defmodule EzagentPluginLiveview.UserCapsLive do
   """
 
   use Phoenix.LiveView
-  use EsrDomainUi.Components
+  use EzagentDomainUi.Components
   import Phoenix.Component
 
-  alias Esr.{Capability, Invocation, KindRegistry}
+  alias Ezagent.{Capability, Invocation, KindRegistry}
 
   @impl true
   def mount(%{"uri" => encoded}, session, socket) do
@@ -32,7 +32,7 @@ defmodule EzagentPluginLiveview.UserCapsLive do
      socket
      |> assign(:user_uri, user_uri)
      |> assign(:caller_uri, caller_uri)
-     |> assign(:caller_caps, Esr.Entity.User.admin_caps())
+     |> assign(:caller_caps, Ezagent.Entity.User.admin_caps())
      |> assign(:flash_error, nil)
      |> assign(:flash_info, nil)
      |> assign(:grant_form, to_form(%{"kind" => "", "behavior" => "any", "instance" => "any"}, as: "grant"))
@@ -41,7 +41,7 @@ defmodule EzagentPluginLiveview.UserCapsLive do
 
   defp caller_from_session(session) do
     case Map.get(session || %{}, "current_user_uri") do
-      nil -> Esr.Entity.User.admin_uri()
+      nil -> Ezagent.Entity.User.admin_uri()
       str -> URI.parse(str)
     end
   end

@@ -6,15 +6,15 @@ import Config
 # and secrets from environment variables or elsewhere. Do not define
 # any compile-time configuration in here, as it won't be applied.
 
-# Dev DB path comes from ESR_HOME so the working tree stays clean
+# Dev DB path comes from EZAGENT_HOME so the working tree stays clean
 # (Phase 6 PR 1). Test keeps its own ephemeral DB in repo root via
 # config/test.exs (Sandbox pool, gitignored). Prod still requires
 # DATABASE_PATH env.
 if config_env() == :dev do
-  File.mkdir_p!(Esr.Home.path(:db))
+  File.mkdir_p!(Ezagent.Home.path(:db))
 
-  config :esr_core, EsrCore.Repo,
-    database: Path.join(Esr.Home.path(:db), "esr_core.db")
+  config :ezagent_core, EzagentCore.Repo,
+    database: Path.join(Ezagent.Home.path(:db), "ezagent_core.db")
 end
 
 # The block below contains prod specific runtime configuration.
@@ -23,10 +23,10 @@ if config_env() == :prod do
     System.get_env("DATABASE_PATH") ||
       raise """
       environment variable DATABASE_PATH is missing.
-      For example: /etc/esr_core/esr_core.db
+      For example: /etc/ezagent_core/ezagent_core.db
       """
 
-  config :esr_core, EsrCore.Repo,
+  config :ezagent_core, EzagentCore.Repo,
     database: database_path,
     pool_size: String.to_integer(System.get_env("POOL_SIZE") || "5")
 
@@ -42,12 +42,12 @@ if config_env() == :prod do
       You can generate one by calling: mix phx.gen.secret
       """
 
-  config :esr_web, EsrWeb.Endpoint,
+  config :ezagent_web, EzagentWeb.Endpoint,
     http: [
       # Enable IPv6 and bind on all interfaces.
       # Set it to  {0, 0, 0, 0, 0, 0, 0, 1} for local network only access.
       ip: {0, 0, 0, 0, 0, 0, 0, 0},
-      port: String.to_integer(System.get_env("PORT") || "4000")
+      port: String.to_integer(System.get_env("PORT") || "10042")
     ],
     secret_key_base: secret_key_base
 
@@ -56,7 +56,7 @@ if config_env() == :prod do
   # If you are doing OTP releases, you need to instruct Phoenix
   # to start each relevant endpoint:
   #
-  #     config :esr_web, EsrWeb.Endpoint, server: true
+  #     config :ezagent_web, EzagentWeb.Endpoint, server: true
   #
   # Then you can assemble a release by calling `mix release`.
   # See `mix help release` for more information.
@@ -66,7 +66,7 @@ if config_env() == :prod do
   # To get SSL working, you will need to add the `https` key
   # to your endpoint configuration:
   #
-  #     config :esr_web, EsrWeb.Endpoint,
+  #     config :ezagent_web, EzagentWeb.Endpoint,
   #       https: [
   #         ...,
   #         port: 443,
@@ -88,10 +88,10 @@ if config_env() == :prod do
   # We also recommend setting `force_ssl` in your config/prod.exs,
   # ensuring no data is ever sent via http, always redirecting to https:
   #
-  #     config :esr_web, EsrWeb.Endpoint,
+  #     config :ezagent_web, EzagentWeb.Endpoint,
   #       force_ssl: [hsts: true]
   #
   # Check `Plug.SSL` for all available options in `force_ssl`.
 
-  config :esr_core, :dns_cluster_query, System.get_env("DNS_CLUSTER_QUERY")
+  config :ezagent_core, :dns_cluster_query, System.get_env("DNS_CLUSTER_QUERY")
 end

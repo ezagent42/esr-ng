@@ -4,29 +4,29 @@
 
 ## The rule
 
-Any plugin that sends messages OUT of ESR to an external system (Feishu, Slack, Discord, email, webhook, ...) MUST model the external destination as a **Receiver Kind** with a `:receive` action Behavior, routed by a routing rule.
+Any plugin that sends messages OUT of Ezagent to an external system (Feishu, Slack, Discord, email, webhook, ...) MUST model the external destination as a **Receiver Kind** with a `:receive` action Behavior, routed by a routing rule.
 
 ## What "Receiver Kind" means
 
-1. **Kind module** — defines URI scheme + `Esr.Kind` callbacks
+1. **Kind module** — defines URI scheme + `Ezagent.Kind` callbacks
    - `type_name/0` → atom identifier (e.g. `:feishu_chat`)
    - `behaviors/0` → `[YourBehaviorModule]`
    - `persistence/0` → typically `:ephemeral`
    - `uri_from_args/1` → extracts URI from spawn args
    - Optional helper: `uri_for(external_id) :: URI.t()` and `<external_id>_from_uri(uri) :: String.t()`
 
-2. **Behavior module** — implements `Esr.Behavior` with at least `:receive`
-   - Same shape as `Esr.Behavior.Chat.invoke(:receive, ...)` so the existing dispatch path in chat plugin reaches it transparently
+2. **Behavior module** — implements `Ezagent.Behavior` with at least `:receive`
+   - Same shape as `Ezagent.Behavior.Chat.invoke(:receive, ...)` so the existing dispatch path in chat plugin reaches it transparently
    - External API call happens inside `invoke(:receive, ...)`
    - Self-echo prevention: skip if `msg.sender` is a URI scheme this plugin owns (e.g. `user://feishu/*` for Feishu inbound)
 
 3. **Application.start registers** in this order:
-   - `Esr.SpawnRegistry.register("<scheme>", fn uri -> DynamicSupervisor.start_child(your_sup, {Esr.Kind.Server, {YourKind, %{uri: uri}}}) end)`
-   - For each Behavior action: `Esr.BehaviorRegistry.register(YourKind, action, YourBehavior)`
+   - `Ezagent.SpawnRegistry.register("<scheme>", fn uri -> DynamicSupervisor.start_child(your_sup, {Ezagent.Kind.Server, {YourKind, %{uri: uri}}}) end)`
+   - For each Behavior action: `Ezagent.BehaviorRegistry.register(YourKind, action, YourBehavior)`
 
 4. **Routing rule** — binds external destinations to sessions
-   - Use `Esr.Routing.Matcher.in_session(session_uri)` to scope rules per-session (otherwise rules fire globally)
-   - Add via `Esr.Routing.RuleStore.add(MentionRouting, matcher, [receiver_uri], nil, source: admin_source())`
+   - Use `Ezagent.Routing.Matcher.in_session(session_uri)` to scope rules per-session (otherwise rules fire globally)
+   - Add via `Ezagent.Routing.RuleStore.add(MentionRouting, matcher, [receiver_uri], nil, source: admin_source())`
    - Re-load registry: `RuleStore.load_into_registry(MentionRouting)`
 
 ## What is FORBIDDEN
@@ -37,7 +37,7 @@ Any plugin that sends messages OUT of ESR to an external system (Feishu, Slack, 
 # ❌ FORBIDDEN
 defmodule MyPlugin.OutboundSubscriber do
   def init(_) do
-    Phoenix.PubSub.subscribe(EsrCore.PubSub, "esr:session:" <> sess <> ":events")
+    Phoenix.PubSub.subscribe(EzagentCore.PubSub, "esr:session:" <> sess <> ":events")
     {:ok, %{}}
   end
 
@@ -49,7 +49,7 @@ end
 ```
 
 Why forbidden:
-- Bypasses `Esr.Invocation.dispatch` — no CapBAC check, no audit row
+- Bypasses `Ezagent.Invocation.dispatch` — no CapBAC check, no audit row
 - Bypasses Resolver — routing logic is invisible in `routing_rules` table
 - Bypasses idempotency / ready-gate
 - Same-name users in different sessions cannot be disambiguated downstream
@@ -66,11 +66,11 @@ Test for "is this subscribing OK?": *if I disconnect the subscriber, does an ext
 
 ## Reference implementation
 
-`apps/esr_plugin_feishu/` — the canonical Receiver Kind plugin:
-- `Esr.Entity.FeishuChat` (Kind, `feishu://oc_xxx`)
-- `EsrPluginFeishu.Behavior.FeishuReceive` (Behavior, `:receive` calls lark)
-- `EsrPluginFeishu.Application` (registers SpawnRegistry + BehaviorRegistry)
-- `Esr.Template.FeishuChatBinding` (Template Class — operator-facing entry point that spawns the Kind + adds the routing rule)
+`apps/ezagent_plugin_feishu/` — the canonical Receiver Kind plugin:
+- `Ezagent.Entity.FeishuChat` (Kind, `feishu://oc_xxx`)
+- `EzagentPluginFeishu.Behavior.FeishuReceive` (Behavior, `:receive` calls lark)
+- `EzagentPluginFeishu.Application` (registers SpawnRegistry + BehaviorRegistry)
+- `Ezagent.Template.FeishuChatBinding` (Template Class — operator-facing entry point that spawns the Kind + adds the routing rule)
 
 ## CI invariant (planned, Layer 2)
 

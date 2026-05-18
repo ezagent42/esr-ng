@@ -18,29 +18,29 @@ The three-layer model (core / domain / plugin) makes this concrete:
 
 ```
 apps/
-  esr_core/                          ← mechanisms
-  esr_domain_chat/                   ← Chat behavior, Session/Agent Kinds
-  esr_domain_identity/               ← User Kind, Identity Behavior, bcrypt
-  esr_domain_workspace/              ← Workspace Kind/Behavior/Loader/Store
-  esr_domain_ui/                     ← shadcn-like HEEx primitives
-  esr_domain_python/                 ← Python plugin contract (placeholder)
-  esr_plugin_ezagent/                ← default admin LV pages (was esr_web_liveview)
-  esr_plugin_cc_channel/             ← CC channel registry + tokens
-  esr_plugin_cc_pty/                 ← PTY-managed claude processes
-  esr_plugin_cc_bridge_v1_prototype/ ← legacy (still wired; v2 cut-over deferred)
-  esr_plugin_feishu/                 ← Feishu/Lark adapter
-  esr_plugin_echo/                   ← demo plugin
-  esr_web/                           ← Phoenix endpoint / router / controllers
-  esr_cli/                           ← `mix esr` CLI (RPC to runtime BEAM)
+  ezagent_core/                          ← mechanisms
+  ezagent_domain_chat/                   ← Chat behavior, Session/Agent Kinds
+  ezagent_domain_identity/               ← User Kind, Identity Behavior, bcrypt
+  ezagent_domain_workspace/              ← Workspace Kind/Behavior/Loader/Store
+  ezagent_domain_ui/                     ← shadcn-like HEEx primitives
+  ezagent_domain_python/                 ← Python plugin contract (placeholder)
+  esr_plugin_ezagent/                ← default admin LV pages (was ezagent_web_liveview)
+  ezagent_plugin_cc_channel/             ← CC channel registry + tokens
+  ezagent_plugin_cc_pty/                 ← PTY-managed claude processes
+  ezagent_plugin_cc_bridge_v1_prototype/ ← legacy (still wired; v2 cut-over deferred)
+  ezagent_plugin_feishu/                 ← Feishu/Lark adapter
+  ezagent_plugin_echo/                   ← demo plugin
+  ezagent_web/                           ← Phoenix endpoint / router / controllers
+  ezagent_cli/                           ← `mix esr` CLI (RPC to runtime BEAM)
 ```
 
 ## What changed
 
 | PR | Scope | What it bought |
 |----|-------|----------------|
-| 1 | ESR_HOME DB migration | Dev SQLite leaves the repo working tree (`mix esr.home.adopt_db`). |
+| 1 | EZAGENT_HOME DB migration | Dev SQLite leaves the repo working tree (`mix ezagent.home.adopt_db`). |
 | 2 | Domain extraction | Three new apps from chat plugin + identity/workspace slices of core. Bcrypt + DataCase relocated. |
-| 3 | LV extraction + shadcn-like | `esr_plugin_ezagent` replaces `esr_web_liveview`. `EsrDomainUi.Components` library lands (button/card/badge/page_header/stat). Layer-purity invariant test. |
+| 3 | LV extraction + shadcn-like | `esr_plugin_ezagent` replaces `ezagent_web_liveview`. `EzagentDomainUi.Components` library lands (button/card/badge/page_header/stat). Layer-purity invariant test. |
 | 5 | `applies_to_users` | Per-rule sender filter — same matcher, different receivers per user, without scheme bloat. |
 | 11 | Domain.Python placeholder | JSON-RPC stdio contract for the future Python plugin ecosystem. |
 | 12 | Closeout | Phase 5 regression invariant test, this doc, ROADMAP update. |
@@ -62,17 +62,17 @@ These move into a Phase 7 SPEC.
 
 ## Invariant tests (the closeout gates)
 
-- `apps/esr_core/test/invariants/receiver_kind_pattern_test.exs` — Plan B drift defense (Phase 5).
-- `apps/esr_core/test/invariants/repo_root_clean_test.exs` — Phase 6 PR 1.
-- `apps/esr_core/test/invariants/layer_purity_test.exs` — Phase 6 PR 3.
-- `apps/esr_core/test/invariants/phase5_no_regression_test.exs` — Phase 6 PR 12.
+- `apps/ezagent_core/test/invariants/receiver_kind_pattern_test.exs` — Plan B drift defense (Phase 5).
+- `apps/ezagent_core/test/invariants/repo_root_clean_test.exs` — Phase 6 PR 1.
+- `apps/ezagent_core/test/invariants/layer_purity_test.exs` — Phase 6 PR 3.
+- `apps/ezagent_core/test/invariants/phase5_no_regression_test.exs` — Phase 6 PR 12.
 
 ## Demo
 
 After PR 12 merges, run:
 
 ```
-mix esr.home.adopt_db       # one-time migration (idempotent if already done)
+mix ezagent.home.adopt_db       # one-time migration (idempotent if already done)
 mix phx.server              # boots at http://0.0.0.0:4000 (tailnet: 100.64.0.27:4000)
 ```
 

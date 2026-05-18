@@ -24,15 +24,15 @@ A3. **Does this SPEC list relevant Decision Log entries?**
 B1. **For external-integration plugins (Feishu, Slack, Discord, email, webhook, ...): is the external destination modeled as a Receiver Kind?**
 - See `docs/notes/plugin-receiver-kind-contract.md`
 - If SPEC includes "subscribe to `chat_message` PubSub" + "make HTTP call in handler" → STOP. Rewrite as Kind + Behavior + routing rule
-- Failed example: Phase 5 PR 6 first impl (`EsrPluginFeishu.OutboundSubscriber`). Cost a Plan B refactor PR (2026-05-17, memory `feedback_plugin_external_integration_is_receiver_kind`)
+- Failed example: Phase 5 PR 6 first impl (`EzagentPluginFeishu.OutboundSubscriber`). Cost a Plan B refactor PR (2026-05-17, memory `feedback_plugin_external_integration_is_receiver_kind`)
 
 B2. **Does the plugin Application.start register everything in the right order?**
-- Per Decision #112: `SpawnRegistry.register("<scheme>")` + `BehaviorRegistry.register(Kind, action, Behavior)` + Template.register + `Esr.Workspace.Loader.load_all/0` at the tail
+- Per Decision #112: `SpawnRegistry.register("<scheme>")` + `BehaviorRegistry.register(Kind, action, Behavior)` + Template.register + `Ezagent.Workspace.Loader.load_all/0` at the tail
 - If plugin's Templates depend on other plugins (e.g. Feishu depends on chat's MentionRouting table), ensure the load_all re-run picks them up
 
 B3. **Does the SPEC declare what's stored where?**
 - SQLite (durable, queryable, runtime state)
-- ESR_HOME files (credentials, boot-time-only config)
+- EZAGENT_HOME files (credentials, boot-time-only config)
 - ETS (RoutingRegistry tables, snapshots)
 - GenServer state (ephemeral runtime)
 - Conflating these wastes review time and invites data-loss bugs later

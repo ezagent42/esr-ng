@@ -3,16 +3,16 @@ defmodule EzagentPluginLiveview.UsersLiveTest do
   import Phoenix.ConnTest
   import Phoenix.LiveViewTest
 
-  @endpoint EsrWeb.Endpoint
+  @endpoint EzagentWeb.Endpoint
 
   setup do
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(EsrCore.Repo)
-    Ecto.Adapters.SQL.Sandbox.mode(EsrCore.Repo, {:shared, self()})
+    :ok = Ecto.Adapters.SQL.Sandbox.checkout(EzagentCore.Repo)
+    Ecto.Adapters.SQL.Sandbox.mode(EzagentCore.Repo, {:shared, self()})
 
     conn =
       Phoenix.ConnTest.build_conn()
       |> Plug.Test.init_test_session(%{
-        "current_user_uri" => URI.to_string(Esr.Entity.User.admin_uri())
+        "current_user_uri" => URI.to_string(Ezagent.Entity.User.admin_uri())
       })
 
     {:ok, conn: conn}
@@ -41,7 +41,7 @@ defmodule EzagentPluginLiveview.UsersLiveTest do
 
     html = render(lv)
     assert html =~ uri
-    assert %{} = Esr.Users.get_by_uri(uri)
+    assert %{} = Ezagent.Users.get_by_uri(uri)
   end
 
   test "create_user refuses '*' caps via UI (must use mix --allow-allcaps)", %{conn: conn} do
@@ -60,7 +60,7 @@ defmodule EzagentPluginLiveview.UsersLiveTest do
 
     html = render(lv)
     assert html =~ "allow-allcaps"
-    assert nil == Esr.Users.get_by_uri(uri)
+    assert nil == Ezagent.Users.get_by_uri(uri)
   end
 
   test "set_password updates an existing user (PR 4 path)" do
@@ -68,10 +68,10 @@ defmodule EzagentPluginLiveview.UsersLiveTest do
     # awkward in Phoenix.LiveViewTest; the facade is exercised in
     # PR 4 unit tests + the LV button is plain HTML POST.
     uri = "user://lv-setpw-#{System.unique_integer([:positive])}"
-    {:ok, _} = Esr.Users.create(uri, nil, [])
-    refute Esr.Users.verify_password(uri, "anything")
+    {:ok, _} = Ezagent.Users.create(uri, nil, [])
+    refute Ezagent.Users.verify_password(uri, "anything")
 
-    assert {:ok, _} = Esr.Users.set_password(uri, "new-pw")
-    assert Esr.Users.verify_password(uri, "new-pw")
+    assert {:ok, _} = Ezagent.Users.set_password(uri, "new-pw")
+    assert Ezagent.Users.verify_password(uri, "new-pw")
   end
 end

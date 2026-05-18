@@ -13,26 +13,26 @@ VERIFICATION is the **contract** that lets the implementer (and a future Allen) 
 
 Each must be observably true with **no Allen involvement**.
 
-1. **5-minute onboarding.** A fresh repo clone + `mix esr.bootstrap` produces a running ESR (admin LV reachable on http://localhost:4000, CC bridge connected, Feishu sidecar alive) within 5 minutes on a typical dev laptop.
-2. **Skill-guided contributions.** When a new dev's Claude Code agent opens any `.ex` file in the ESR repo or types `/esr-help`, the `esr-developer` skill activates and supplies:
+1. **5-minute onboarding.** A fresh repo clone + `mix ezagent.bootstrap` produces a running Ezagent (admin LV reachable on http://localhost:4000, CC bridge connected, Feishu sidecar alive) within 5 minutes on a typical dev laptop.
+2. **Skill-guided contributions.** When a new dev's Claude Code agent opens any `.ex` file in the Ezagent repo or types `/esr-help`, the `esr-developer` skill activates and supplies:
    - The architectural invariants relevant to that area
    - The anti-patterns it will refuse (with reason)
    - The how-to recipe for the most likely task (add plugin / Kind / Behavior / Template Class / routing rule / invariant test)
 3. **Self-service error resolution.** A dev hitting one of the documented common failures (silent drop, orphan sidecar, `:unauthorized` despite cap granted, fork-without-lineage) finds an actionable answer in `docs/runbook/common-failures.md` or the linked forensic note in ≤2 minutes of searching.
-4. **Hot plugin install.** A dev writes a minimal plugin in a fresh OTP app, runs `mix esr.plugin.install /path/to/plugin`, and observes its Kinds + Behaviors registered + reachable via dispatch — **without restarting phx.server**.
+4. **Hot plugin install.** A dev writes a minimal plugin in a fresh OTP app, runs `mix ezagent.plugin.install /path/to/plugin`, and observes its Kinds + Behaviors registered + reachable via dispatch — **without restarting phx.server**.
 
 ### e2e flow — "first day as new dev"
 
 ```
-1. git clone esr-ng && cd esr-ng
-2. mix deps.get && mix esr.bootstrap
-   → ESR_HOME created at ~/.esr-ng/default/
+1. git clone ezagent && cd ezagent
+2. mix deps.get && mix ezagent.bootstrap
+   → EZAGENT_HOME created at ~/.ezagent/default/
    → DB migrated
    → phx.server starts
 3. Open http://localhost:4000/admin → admin LV loads (logged in as admin)
 4. cd .. && mix new esr_plugin_hello --module EsrPluginHello
    (toy plugin that registers a Kind named "hello" with one action)
-5. From esr-ng/: mix esr.plugin.install ../esr_plugin_hello
+5. From ezagent/: mix ezagent.plugin.install ../esr_plugin_hello
    → "✓ Registered: Kind=:hello, Behaviors=[..]"
 6. mix esr hello greet --name world
    → "hello, world" (dispatch reaches new Kind, no restart needed)
@@ -41,7 +41,7 @@ Each must be observably true with **no Allen involvement**.
 ### Gating tests
 
 - `esr_developer_skill_activates_on_repo_open_test.exs` — opening any `.ex` in the repo (via test harness simulating Claude Code skill invocation) returns the esr-developer skill body within 100ms.
-- `bootstrap_to_serving_test.exs` — CI runs `mix esr.bootstrap` on a fresh checkout + `curl /admin` returns HTTP 302 (auth redirect = LV reachable) within 60s.
+- `bootstrap_to_serving_test.exs` — CI runs `mix ezagent.bootstrap` on a fresh checkout + `curl /admin` returns HTTP 302 (auth redirect = LV reachable) within 60s.
 - `plugin_hot_install_test.exs` — see V4.
 
 ---
@@ -52,7 +52,7 @@ Each must be observably true with **no Allen involvement**.
 
 1. **Orchestrator stands up a team from natural-language prompt.** Human → @cc-orchestrator "build me a code review team" → orchestrator picks AgentTemplates, calls `add_agent_slot` × N + `write_matcher` × M → 3 worker agents alive and mention-routed within 30 seconds.
 2. **Mention routing isolates worker agents.** Human → @backend-dev "what's the file structure" → only backend-dev receives + responds; frontend-dev / reviewer do not get the message (routing rule honors @-mention).
-3. **`save_template_as` creates a reusable template.** Orchestrator's `save_template_as("code-review-team")` produces `template://session/code-review-team@<hash>` with `parent_template_uri` pointing at the originating template; the new template is listable via `mix esr.session_template.list`.
+3. **`save_template_as` creates a reusable template.** Orchestrator's `save_template_as("code-review-team")` produces `template://session/code-review-team@<hash>` with `parent_template_uri` pointing at the originating template; the new template is listable via `mix ezagent.session_template.list`.
 4. **Re-instantiation produces identical team.** Second human instantiates `template://session/code-review-team:latest` (tag) → new session with the same 3 worker agents + same routing rules. The two sessions can be active concurrently and do not see each other's messages (workspace isolation).
 5. **Refinement + version-bump.** Orchestrator in session A calls `update_template()` → new `version_hash` row exists; session A continues on its working copy; session B (instantiated from the new hash) starts with the refined config; older sessions on prior hashes are unaffected.
 6. **Persistence survives restart.** Orchestrator adds a slot, phx.server is killed + restarted, the same session restored has the same agent_slot in its working copy.
@@ -78,7 +78,7 @@ Each must be observably true with **no Allen involvement**.
 4. Human → @cc-orchestrator "save this as code-review-team"
    → orchestrator calls save_template_as("code-review-team")
    → orchestrator reports: "Saved as template://session/code-review-team@<hash>"
-5. From terminal: mix esr.session_template.list
+5. From terminal: mix ezagent.session_template.list
    → includes "code-review-team@<hash>"
 6. Second human → create new session from template://session/code-review-team:latest
    → fresh session with the same 3 agents.
@@ -94,7 +94,7 @@ Each must be observably true with **no Allen involvement**.
 
 ---
 
-## V3 — ESR v1 delegation model (Phase 7 closes v0 → v1)
+## V3 — Ezagent v1 delegation model (Phase 7 closes v0 → v1)
 
 ### Success criteria
 
@@ -133,24 +133,24 @@ Each must be observably true with **no Allen involvement**.
 ### Success criteria
 
 1. **Repo tree has no DB.** `find . -name "*.db" -not -path "./_build/*" -not -path "./node_modules/*"` returns zero files. CI gate fails on regression.
-2. **No v1 prototype references.** `git grep -l "Esr.Bridge.V1Prototype" apps/` returns empty. The `apps/esr_plugin_cc_bridge_v1_prototype/` directory is deleted. CI gate fails on regression.
+2. **No v1 prototype references.** `git grep -l "Ezagent.Bridge.V1Prototype" apps/` returns empty. The `apps/ezagent_plugin_cc_bridge_v1_prototype/` directory is deleted. CI gate fails on regression.
 3. **Zero orphan sidecar processes.** After `mix phx.server` → `kill -TERM <phx_pid>` → wait 5s, `pgrep -fla "node.*ws_sidecar"` returns nothing (or only sidecars from sibling phx instances).
 4. **Workspace isolation in routing.** A routing rule scoped to `workspace://A` is never invoked for messages in `workspace://B`. CI test asserts.
-5. **`mix esr.bootstrap` one-command setup.** Fresh clone + 1 command → ready-to-serve ESR. CI gate runs the bootstrap on a clean checkout.
-6. **CC channel v2 is the only path.** All currently-bound agents use `EsrPluginCcChannel.BridgeRegistry`; the v1 `Esr.Bridge.V1Prototype.Server` lookup is unreachable (returns `:error` always — module deleted).
-7. **CLI uses per-user token auth.** `mix esr <cmd>` requires `~/.esr-ng/<profile>/credentials/cli-token`; admin shortcut only for admin-owned tokens.
-8. **Session persistence flip.** `Esr.Entity.Session.persistence/0 == {:snapshot, :on_change}`. Pre-Phase-7 ephemeral sessions migrate cleanly (existing snapshot tests pass).
+5. **`mix ezagent.bootstrap` one-command setup.** Fresh clone + 1 command → ready-to-serve Ezagent. CI gate runs the bootstrap on a clean checkout.
+6. **CC channel v2 is the only path.** All currently-bound agents use `EzagentPluginCcChannel.BridgeRegistry`; the v1 `Ezagent.Bridge.V1Prototype.Server` lookup is unreachable (returns `:error` always — module deleted).
+7. **CLI uses per-user token auth.** `mix esr <cmd>` requires `~/.ezagent/<profile>/credentials/cli-token`; admin shortcut only for admin-owned tokens.
+8. **Session persistence flip.** `Ezagent.Entity.Session.persistence/0 == {:snapshot, :on_change}`. Pre-Phase-7 ephemeral sessions migrate cleanly (existing snapshot tests pass).
 
 ### e2e flow — "fresh laptop production deploy"
 
 ```
-1. New machine, no ESR installed
+1. New machine, no Ezagent installed
 2. git clone https://github.com/ezagent42/esr-ng.git
-3. cd esr-ng && mix deps.get
-4. mix esr.bootstrap
-   → ESR_HOME ~/.esr-ng/default/{db, credentials, logs, ...} created
-   → DB at ~/.esr-ng/default/db/esr_core_dev.db (not in repo!)
-   → CLI token minted at ~/.esr-ng/default/credentials/cli-token
+3. cd ezagent && mix deps.get
+4. mix ezagent.bootstrap
+   → EZAGENT_HOME ~/.ezagent/default/{db, credentials, logs, ...} created
+   → DB at ~/.ezagent/default/db/ezagent_core_dev.db (not in repo!)
+   → CLI token minted at ~/.ezagent/default/credentials/cli-token
    → phx.server starts; admin LV reachable
 5. find . -name "*.db" -not -path "./_build/*"
    → (empty — no repo pollution)
@@ -161,7 +161,7 @@ Each must be observably true with **no Allen involvement**.
 ### Gating tests
 
 - `repo_root_clean_test.exs` — already exists from Phase 6 PR 1; assert no `*.db` in repo tree.
-- `no_v1_bridge_after_cutover_test.exs` — grep apps/ for `Esr.Bridge.V1Prototype` returns 0 lines.
+- `no_v1_bridge_after_cutover_test.exs` — grep apps/ for `Ezagent.Bridge.V1Prototype` returns 0 lines.
 - `sidecar_orphan_reap_test.exs` — programmatic spawn + kill phx + assert no orphans.
 - `workspace_isolation_test.exs` — routing rule in A doesn't fire for B.
 - `bootstrap_to_serving_test.exs` — already listed under V1; same test gates V4.
@@ -197,14 +197,14 @@ Each must be observably true with **no Allen involvement**.
 3. **Every D7-* decision has a numbered Decision Log row.** ARCHITECTURE.md Appendix B contains rows #135 through #144 (one per D7-1..D7-10).
 4. **GLOSSARY has all 16 new Phase 7 terms.** (Listed in SPEC §7-4 Decision Log + GLOSSARY + ROADMAP final state section.)
 5. **ROADMAP §9b updated with delivery accounting.** Same format as §9 Phase 6 closeout, listing what shipped vs what deferred.
-6. **Forensic note `docs/notes/phase-7-handoff.md` exists and declares ESR v1 release.**
+6. **Forensic note `docs/notes/phase-7-handoff.md` exists and declares Ezagent v1 release.**
 7. **4 onboarding docs published** at `docs/onboarding/` and `docs/runbook/`.
 8. **SPEC_REVIEW 8-item checklist documented** and referenced from CONTRIBUTING.md (or equivalent).
 
 ### e2e flow — "dev attempts an anti-pattern"
 
 ```
-1. New dev opens a Claude Code session in the ESR repo
+1. New dev opens a Claude Code session in the Ezagent repo
 2. esr-developer skill auto-activates (per V1)
 3. Dev's LLM proposes:
    "I'll have my new plugin's GenServer subscribe to PubSub topic
@@ -252,4 +252,4 @@ Verifying these is NOT a Phase 7 acceptance criterion. They're either Phase 8+ w
 - [ ] PLAN.md sequences PRs to close each V
 - [ ] DECISIONS.md initialized for implementation-time judgment calls
 - [ ] All gating tests above are present and passing in CI before Phase 7 closes
-- [ ] Forensic note `docs/notes/phase-7-handoff.md` declares ESR v1 release
+- [ ] Forensic note `docs/notes/phase-7-handoff.md` declares Ezagent v1 release

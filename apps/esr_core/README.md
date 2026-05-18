@@ -1,3 +1,0 @@
-# EsrCore
-
-**TODO: Add description**

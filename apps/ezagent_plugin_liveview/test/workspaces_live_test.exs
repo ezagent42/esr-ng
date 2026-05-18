@@ -3,15 +3,15 @@ defmodule EzagentPluginLiveview.WorkspacesLiveTest do
   import Phoenix.ConnTest
   import Phoenix.LiveViewTest
 
-  @endpoint EsrWeb.Endpoint
+  @endpoint EzagentWeb.Endpoint
 
   setup do
-    :ok = Ecto.Adapters.SQL.Sandbox.checkout(EsrCore.Repo)
-    Ecto.Adapters.SQL.Sandbox.mode(EsrCore.Repo, {:shared, self()})
+    :ok = Ecto.Adapters.SQL.Sandbox.checkout(EzagentCore.Repo)
+    Ecto.Adapters.SQL.Sandbox.mode(EzagentCore.Repo, {:shared, self()})
     conn =
       Phoenix.ConnTest.build_conn()
       |> Plug.Test.init_test_session(%{
-        "current_user_uri" => URI.to_string(Esr.Entity.User.admin_uri())
+        "current_user_uri" => URI.to_string(Ezagent.Entity.User.admin_uri())
       })
 
     {:ok, conn: conn}
@@ -38,8 +38,8 @@ defmodule EzagentPluginLiveview.WorkspacesLiveTest do
     assert html =~ "workspace://#{name}"
 
     # And it's persisted (Store) + live (KindRegistry)
-    assert %{name: ^name} = Esr.Workspace.Store.get_by_name(name)
-    assert {:ok, _pid} = Esr.KindRegistry.lookup(Esr.Entity.Workspace.uri_for(name))
+    assert %{name: ^name} = Ezagent.Workspace.Store.get_by_name(name)
+    assert {:ok, _pid} = Ezagent.KindRegistry.lookup(Ezagent.Entity.Workspace.uri_for(name))
   end
 
   test "detail page for non-existent workspace shows 'not found'", %{conn: conn} do
@@ -49,7 +49,7 @@ defmodule EzagentPluginLiveview.WorkspacesLiveTest do
 
   test "detail page shows existing workspace + members section", %{conn: conn} do
     name = "lv-detail-#{System.unique_integer([:positive])}"
-    {:ok, _} = Esr.Workspace.create(name)
+    {:ok, _} = Ezagent.Workspace.create(name)
 
     {:ok, _lv, html} = live(conn, "/admin/workspaces/#{name}")
     assert html =~ "Workspace: <code>#{name}</code>"
@@ -59,7 +59,7 @@ defmodule EzagentPluginLiveview.WorkspacesLiveTest do
 
   test "add_member from detail page persists + appears in list", %{conn: conn} do
     name = "lv-add-#{System.unique_integer([:positive])}"
-    {:ok, _} = Esr.Workspace.create(name)
+    {:ok, _} = Ezagent.Workspace.create(name)
 
     {:ok, lv, _html} = live(conn, "/admin/workspaces/#{name}")
 

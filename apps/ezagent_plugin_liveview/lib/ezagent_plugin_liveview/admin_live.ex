@@ -47,15 +47,15 @@ defmodule EzagentPluginLiveview.AdminLive do
     current_session_uri = @main_session_uri
 
     if connected?(socket) do
-      Phoenix.PubSub.subscribe(EsrCore.PubSub, Esr.Audit.stream_topic())
-      Phoenix.PubSub.subscribe(EsrCore.PubSub, bridge_topic_safely())
+      Phoenix.PubSub.subscribe(EzagentCore.PubSub, Ezagent.Audit.stream_topic())
+      Phoenix.PubSub.subscribe(EzagentCore.PubSub, bridge_topic_safely())
       # Phase 4-plus follow-up: CC hook errors push here (no agent dep).
-      Phoenix.PubSub.subscribe(EsrCore.PubSub, Esr.CCEvents.topic())
+      Phoenix.PubSub.subscribe(EzagentCore.PubSub, Ezagent.CCEvents.topic())
       # Phase 3b: subscribe to ALL known sessions so floating/member updates
       # land for any session (not just current). Per-session message filtering
       # is done in handle_info for {:chat_message, session_uri, msg}.
-      for session_uri <- EsrDomainChat.list_sessions() do
-        Phoenix.PubSub.subscribe(EsrCore.PubSub, session_events_topic(session_uri))
+      for session_uri <- EzagentDomainChat.list_sessions() do
+        Phoenix.PubSub.subscribe(EzagentCore.PubSub, session_events_topic(session_uri))
       end
     end
 
@@ -64,15 +64,15 @@ defmodule EzagentPluginLiveview.AdminLive do
     # paths that bypass login).
     caller_uri =
       case Map.get(session || %{}, "current_user_uri") do
-        nil -> Esr.Entity.User.admin_uri()
+        nil -> Ezagent.Entity.User.admin_uri()
         uri_str -> URI.parse(uri_str)
       end
 
     caller_caps =
-      if URI.to_string(caller_uri) == URI.to_string(Esr.Entity.User.admin_uri()) do
-        Esr.Entity.User.admin_caps()
+      if URI.to_string(caller_uri) == URI.to_string(Ezagent.Entity.User.admin_uri()) do
+        Ezagent.Entity.User.admin_caps()
       else
-        Esr.Identity.list_caps_for(caller_uri)
+        Ezagent.Identity.list_caps_for(caller_uri)
       end
 
     initial_messages = load_session_messages(current_session_uri)
@@ -92,7 +92,7 @@ defmodule EzagentPluginLiveview.AdminLive do
       |> assign(:flash_error, nil)
       |> assign(:connected_bridges, connected_bridges)
       |> assign(:current_session_uri, current_session_uri)
-      |> assign(:sessions, EsrDomainChat.list_sessions())
+      |> assign(:sessions, EzagentDomainChat.list_sessions())
       |> assign(:session_members, read_session_members(current_session_uri))
       |> assign(:agent_options, list_session_agent_uris(current_session_uri))
       |> assign(:floating_agents, list_floating_agents())
@@ -159,7 +159,7 @@ defmodule EzagentPluginLiveview.AdminLive do
 
   # Phase 3: chat_message carries the source session_uri; filter to
   # current_session_uri before inserting to the stream.
-  def handle_info({:chat_message, source_session_uri, %Esr.Message{} = msg}, socket) do
+  def handle_info({:chat_message, source_session_uri, %Ezagent.Message{} = msg}, socket) do
     if URI.to_string(source_session_uri) == URI.to_string(socket.assigns.current_session_uri) do
       {:noreply, stream_insert(socket, :messages, message_to_row(msg), at: -1)}
     else
@@ -168,7 +168,7 @@ defmodule EzagentPluginLiveview.AdminLive do
   end
 
   # Phase 2 backward-compat (in case any code still emits the old shape)
-  def handle_info({:chat_message, %Esr.Message{} = msg}, socket) do
+  def handle_info({:chat_message, %Ezagent.Message{} = msg}, socket) do
     {:noreply, stream_insert(socket, :messages, message_to_row(msg), at: -1)}
   end
 
@@ -176,14 +176,14 @@ defmodule EzagentPluginLiveview.AdminLive do
 
   @impl true
   def handle_event("echo_test", _params, socket) do
-    inv = %Esr.Invocation{
+    inv = %Ezagent.Invocation{
       target: @echo_target,
       mode: :call,
       args: %{msg: "hello"},
       ctx: ctx(socket)
     }
 
-    case Esr.Invocation.dispatch(inv) do
+    case Ezagent.Invocation.dispatch(inv) do
       {:ok, _result} ->
         {:noreply, assign(socket, :flash_error, nil)}
 
@@ -201,20 +201,20 @@ defmodule EzagentPluginLiveview.AdminLive do
       end
 
     msg =
-      Esr.Message.new(socket.assigns.caller_uri, %{text: text, attachments: []},
+      Ezagent.Message.new(socket.assigns.caller_uri, %{text: text, attachments: []},
         mentions: mentions
       )
 
     target = URI.new!("#{URI.to_string(socket.assigns.current_session_uri)}/behavior/chat/send")
 
-    inv = %Esr.Invocation{
+    inv = %Ezagent.Invocation{
       target: target,
       mode: :cast,
       args: %{message: msg},
       ctx: ctx(socket)
     }
 
-    case Esr.Invocation.dispatch(inv) do
+    case Ezagent.Invocation.dispatch(inv) do
       :ok ->
         {:noreply,
          socket
@@ -263,15 +263,15 @@ defmodule EzagentPluginLiveview.AdminLive do
 
   def handle_event("create_session", %{"new_session" => %{"short_name" => name}}, socket)
       when is_binary(name) and name != "" do
-    case EsrDomainChat.create_session(String.trim(name), Esr.Entity.User.admin_uri()) do
+    case EzagentDomainChat.create_session(String.trim(name), Ezagent.Entity.User.admin_uri()) do
       {:ok, session_uri} ->
         if connected?(socket) do
-          Phoenix.PubSub.subscribe(EsrCore.PubSub, session_events_topic(session_uri))
+          Phoenix.PubSub.subscribe(EzagentCore.PubSub, session_events_topic(session_uri))
         end
 
         {:noreply,
          socket
-         |> assign(:sessions, EsrDomainChat.list_sessions())
+         |> assign(:sessions, EzagentDomainChat.list_sessions())
          |> assign(:new_session_form, to_form(%{"short_name" => ""}, as: "new_session"))
          |> assign(:flash_error, nil)}
 
@@ -295,7 +295,7 @@ defmodule EzagentPluginLiveview.AdminLive do
       target = URI.new!("#{URI.to_string(session_uri)}/behavior/chat/join")
 
       _ =
-        Esr.Invocation.dispatch(%Esr.Invocation{
+        Ezagent.Invocation.dispatch(%Ezagent.Invocation{
           target: target,
           mode: :cast,
           args: %{member: agent_uri},
@@ -325,7 +325,7 @@ defmodule EzagentPluginLiveview.AdminLive do
       %DateTime{} = cursor ->
         older =
           socket.assigns.current_session_uri
-          |> Esr.MessageStore.older_than(cursor, @message_limit)
+          |> Ezagent.MessageStore.older_than(cursor, @message_limit)
           |> Enum.reverse()
           |> Enum.map(&message_to_row/1)
 
@@ -346,14 +346,14 @@ defmodule EzagentPluginLiveview.AdminLive do
     with {:ok, target_uri} <- safe_uri(target),
          {:ok, args_map} <- safe_args(args_json),
          {:ok, mode_atom} <- safe_mode(mode) do
-      inv = %Esr.Invocation{
+      inv = %Ezagent.Invocation{
         target: target_uri,
         mode: mode_atom,
         args: args_map,
         ctx: ctx(socket)
       }
 
-      case Esr.Invocation.dispatch(inv) do
+      case Ezagent.Invocation.dispatch(inv) do
         {:ok, _} -> {:noreply, assign(socket, :flash_error, nil)}
         :ok -> {:noreply, assign(socket, :flash_error, nil)}
         {:error, reason} -> {:noreply, assign(socket, :flash_error, "Dispatch failed: #{inspect(reason)}")}
@@ -415,12 +415,12 @@ defmodule EzagentPluginLiveview.AdminLive do
   # --- Helpers ----------------------------------------------------------
 
   defp session_events_topic(%URI{} = uri) do
-    Esr.Behavior.Chat.session_events_topic(uri)
+    Ezagent.Behavior.Chat.session_events_topic(uri)
   end
 
   defp load_session_messages(%URI{} = session_uri) do
     session_uri
-    |> Esr.MessageStore.recent_in_session(@message_limit)
+    |> Ezagent.MessageStore.recent_in_session(@message_limit)
     |> Enum.reverse()
     |> Enum.map(&message_to_row/1)
   end
@@ -435,7 +435,7 @@ defmodule EzagentPluginLiveview.AdminLive do
   end
 
   defp read_session_members(%URI{} = session_uri) do
-    case Esr.KindRegistry.lookup(session_uri) do
+    case Ezagent.KindRegistry.lookup(session_uri) do
       {:ok, pid} ->
         try do
           %{state: %{chat: slice}} = :sys.get_state(pid, 1_000)
@@ -458,7 +458,7 @@ defmodule EzagentPluginLiveview.AdminLive do
   end
 
   defp list_agent_uris do
-    Esr.KindRegistry.list_all()
+    Ezagent.KindRegistry.list_all()
     |> Enum.filter(fn {uri_str, _pid} -> String.starts_with?(uri_str, "agent://") end)
     |> Enum.map(fn {uri_str, _pid} -> uri_str end)
     |> Enum.sort()
@@ -480,7 +480,7 @@ defmodule EzagentPluginLiveview.AdminLive do
     all_agents = list_agent_uris() |> MapSet.new()
 
     joined =
-      EsrDomainChat.list_sessions()
+      EzagentDomainChat.list_sessions()
       |> Enum.flat_map(fn session_uri ->
         read_session_members(session_uri)
         |> Enum.map(& &1.uri)
@@ -492,16 +492,16 @@ defmodule EzagentPluginLiveview.AdminLive do
   end
 
   defp bridge_topic_safely do
-    if Code.ensure_loaded?(Esr.Bridge.V1Prototype.Server) do
-      Esr.Bridge.V1Prototype.Server.topic()
+    if Code.ensure_loaded?(Ezagent.Bridge.V1Prototype.Server) do
+      Ezagent.Bridge.V1Prototype.Server.topic()
     else
       "esr:bridge_v1:unavailable"
     end
   end
 
   defp list_bridges_safely do
-    if Code.ensure_loaded?(Esr.Bridge.V1Prototype.Server) do
-      Esr.Bridge.V1Prototype.Server.list_connected()
+    if Code.ensure_loaded?(Ezagent.Bridge.V1Prototype.Server) do
+      Ezagent.Bridge.V1Prototype.Server.list_connected()
     else
       []
     end
@@ -509,7 +509,7 @@ defmodule EzagentPluginLiveview.AdminLive do
 
   defp load_recent_invocations(n) do
     %{rows: rows} =
-      EsrCore.Repo.query!(
+      EzagentCore.Repo.query!(
         "SELECT target, action, authz, duration_us, inserted_at " <>
           "FROM invocations ORDER BY id DESC LIMIT ?",
         [n]
@@ -532,7 +532,7 @@ defmodule EzagentPluginLiveview.AdminLive do
   defp format_inserted_at(s) when is_binary(s), do: s
   defp format_inserted_at(other), do: inspect(other)
 
-  defp message_to_row(%Esr.Message{} = msg) do
+  defp message_to_row(%Ezagent.Message{} = msg) do
     sender_str = URI.to_string(msg.sender)
 
     %{
@@ -578,21 +578,21 @@ defmodule EzagentPluginLiveview.AdminLive do
   end
 
   # Phase 3d: :stub_grant gone. Real cap path emits :granted / :denied.
-  defp authz_label([:esr, :authz, :granted]), do: "granted"
-  defp authz_label([:esr, :authz, :denied]), do: "denied"
-  defp authz_label([:esr, :invoke, :stop]), do: "granted"
-  defp authz_label([:esr, :invoke, :error]), do: "—"
+  defp authz_label([:ezagent, :authz, :granted]), do: "granted"
+  defp authz_label([:ezagent, :authz, :denied]), do: "denied"
+  defp authz_label([:ezagent, :invoke, :stop]), do: "granted"
+  defp authz_label([:ezagent, :invoke, :error]), do: "—"
   defp authz_label(_), do: "—"
 
-  defp result_label([:esr, :authz, :granted], _meta), do: "granted"
-  defp result_label([:esr, :authz, :denied], %{caller: c}), do: "denied (caller=#{c})"
-  defp result_label([:esr, :authz, :denied], _meta), do: "denied"
-  defp result_label([:esr, :invoke, :stop], _meta), do: "ok"
+  defp result_label([:ezagent, :authz, :granted], _meta), do: "granted"
+  defp result_label([:ezagent, :authz, :denied], %{caller: c}), do: "denied (caller=#{c})"
+  defp result_label([:ezagent, :authz, :denied], _meta), do: "denied"
+  defp result_label([:ezagent, :invoke, :stop], _meta), do: "ok"
 
-  defp result_label([:esr, :invoke, :error], %{reason: :unauthorized}),
+  defp result_label([:ezagent, :invoke, :error], %{reason: :unauthorized}),
     do: "denied"
 
-  defp result_label([:esr, :invoke, :error], %{reason: r}), do: "err: #{inspect(r)}"
+  defp result_label([:ezagent, :invoke, :error], %{reason: r}), do: "err: #{inspect(r)}"
   defp result_label(_, _), do: "—"
 
   defp stringify(nil), do: "—"
