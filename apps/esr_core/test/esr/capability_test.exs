@@ -152,4 +152,85 @@ defmodule Esr.CapabilityTest do
       assert Capability.matches?(admin_cap, needed)
     end
   end
+
+  describe "scope-bounded instance tuples (Phase 7 PR 42 / D7-3)" do
+    defp scoped_cap(instance) do
+      %Capability{
+        kind: :session,
+        behavior: :any,
+        instance: instance,
+        granted_by: URI.parse("user://admin"),
+        granted_at: ~U[2026-05-18 00:00:00Z]
+      }
+    end
+
+    defp needed(target_str) do
+      target = URI.new!(target_str)
+      Capability.cap_for_action(Esr.Entity.Session, :send, target)
+    end
+
+    test "{:within_session, S} matches needed targeting URI exactly equal to S" do
+      cap = scoped_cap({:within_session, URI.new!("session://main")})
+      assert Capability.matches?(cap, needed("session://main/behavior/chat/send"))
+    end
+
+    test "{:within_session, S} matches needed whose instance is a sub-URI of S (path prefix)" do
+      cap = scoped_cap({:within_session, URI.new!("session://main")})
+
+      needed_subpath = %{
+        kind: :session,
+        behavior: :any,
+        instance: URI.parse("session://main/sub-path")
+      }
+
+      assert Capability.matches?(cap, needed_subpath)
+    end
+
+    test "{:within_session, S} does NOT match needed in a different session (V3.2 scope leak)" do
+      cap = scoped_cap({:within_session, URI.new!("session://main")})
+      refute Capability.matches?(cap, needed("session://other/behavior/chat/send"))
+    end
+
+    test "{:within_session, session://main} does NOT false-match session://main2 (prefix boundary)" do
+      cap = scoped_cap({:within_session, URI.new!("session://main")})
+
+      needed_neighbor = %{
+        kind: :session,
+        behavior: :any,
+        instance: URI.parse("session://main2")
+      }
+
+      refute Capability.matches?(cap, needed_neighbor),
+             "{:within_session, session://main} must not match session://main2 — " <>
+               "prefix check requires '/' boundary, not raw startsWith"
+    end
+
+    test "{:spawned_by, P} placeholder returns false until PR 40 ships lineage (deny-by-default)" do
+      cap = scoped_cap({:spawned_by, URI.new!("agent://orchestrator-1")})
+
+      needed_any_agent = %{
+        kind: :agent,
+        behavior: :any,
+        instance: URI.parse("agent://worker-spawned-by-orchestrator-1")
+      }
+
+      refute Capability.matches?(cap, needed_any_agent),
+             "PR 42 ships {:spawned_by, _} as deny-by-default placeholder; " <>
+               "PR 40 lineage registry will flip this to a real match. " <>
+               "Until then, deny is the conservative correct answer."
+    end
+
+    test "scope tuple cap with wrong kind does NOT match (scope only narrows, never broadens)" do
+      cap = %Capability{
+        kind: :workspace,
+        behavior: :any,
+        instance: {:within_session, URI.new!("session://main")},
+        granted_by: URI.parse("user://admin"),
+        granted_at: ~U[2026-05-18 00:00:00Z]
+      }
+
+      refute Capability.matches?(cap, needed("session://main/behavior/chat/send")),
+             "scope-tuple cap with wrong kind must NOT match"
+    end
+  end
 end
