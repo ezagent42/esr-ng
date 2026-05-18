@@ -25,11 +25,10 @@ defmodule Ezagent.Behavior.Chat do
   `:receive` switches on `ctx.kind_module`:
   - `Ezagent.Entity.User` — broadcast to `esr:user:<self_uri>:events`. LV
     subscribes for admin inbox / mention notifications.
-  - `Ezagent.Entity.Agent` — 2c-step 1 wires bridge push (`agent_uri →
-    bridge_id` map lives on `Ezagent.Bridge.V1Prototype.Server`). For 2b,
-    the Agent branch returns `{:ok, slice}` (no-op) because no Agent
-    is spawned at boot yet (DynamicSupervisor stays empty until a
-    bridge announces).
+  - `Ezagent.Entity.Agent` — wires bridge push via
+    `EzagentPluginCcChannel.BridgeRegistry.lookup(agent_uri)` →
+    `send(channel_pid, {:to_claude, payload})`. If no v2 bridge is
+    bound, the call is a silent no-op (telemetry-only).
 
   ## Offline state machine (P2-D3 failure modes)
 
@@ -173,10 +172,10 @@ defmodule Ezagent.Behavior.Chat do
         {:ok, slice}
 
       Ezagent.Entity.Agent ->
-        # Phase 6 PR 4: prefer v2 CC channel (Phoenix.Channel WS) when
-        # the Agent has a v2 bridge bound. Fall back to v1_prototype
-        # (HTTP+SSE) during the cutover window — both transports work
-        # in parallel until Phase 7 deletes v1.
+        # Phase 7 PR 32c: v1 prototype deleted; v2 CC channel
+        # (Phoenix.Channel WS) is the only bridge transport. If
+        # no channel is bound for the Agent, the dispatch is a
+        # silent no-op below.
         source_session =
           case Map.get(ctx, :caller) do
             %URI{} = u -> URI.to_string(u)
@@ -222,18 +221,12 @@ defmodule Ezagent.Behavior.Chat do
             send(channel_pid, {:to_claude, payload})
 
           :error ->
-            # v2 not bound — try v1_prototype.
-            case Ezagent.Bridge.V1Prototype.Server.bridge_for_agent(ctx.self_uri) do
-              {:ok, bridge_id} ->
-                Ezagent.Bridge.V1Prototype.Server.push_to_claude(
-                  bridge_id,
-                  text_with_hint,
-                  payload["meta"]
-                )
-
-              :error ->
-                :ok
-            end
+            # No bound bridge. Drop silently — telemetry-only after
+            # v1 fallback removal (Phase 7 PR 32c). Agents with no
+            # active bridge are expected (e.g. cc-demo while claude
+            # is restarting); inbound messages buffer at the source
+            # transport (Feishu) on retry.
+            :ok
         end
 
         {:ok, slice}
@@ -335,152 +328,7 @@ defmodule Ezagent.Behavior.Chat do
     end
   end
 
-  # Bridge → Agent reply path (Phase 3c-step 2/3, P3-D8 contract).
-  #
-  # When the controller's forward_reply_to_agent/4 lands on the Agent's
-  # mailbox, this clause constructs ONE chat envelope (identity invariant
-  # per Decision #40) and dispatches `chat/send` once per session_uri in
-  # the target list. Same Message URI lands in multiple sessions via
-  # MessageStore.write upsert + message_routings rows (per #P1-4 fix).
-  #
-  # ref consistency soft warn (P3-D8): if `ref` is provided, look up the
-  # ref'd Message's session presence and check it overlaps with the
-  # supplied session_uris. Mismatch emits telemetry + audit warn but
-  # STILL routes per the explicit session_uris (trust claude's choice).
-  def handle_kind_message(
-        {:reply_received, session_uris, text, ref_str_or_nil},
-        slice,
-        ctx
-      )
-      when is_list(session_uris) and is_binary(text) do
-    handle_kind_message(
-      {:reply_received, session_uris, text, ref_str_or_nil, []},
-      slice,
-      ctx
-    )
-  end
-
-  def handle_kind_message(
-        {:reply_received, session_uris, text, ref_str_or_nil, attachments},
-        _slice,
-        %{kind_module: Ezagent.Entity.Agent} = ctx
-      )
-      when is_list(session_uris) and is_binary(text) and is_list(attachments) do
-    agent_uri = ctx.self_uri
-
-    # Construct envelope once (identity invariant). ref is string at
-    # wire boundary; parse to %URI{} for the Message struct.
-    ref_uri =
-      case ref_str_or_nil do
-        nil -> nil
-        "" -> nil
-        s when is_binary(s) -> URI.new!(s)
-      end
-
-    # Phase 6 PR 14: reply attachments come in as
-    # `[%{"type" => "file", "local_path" => "/abs/path", "name" => "x"}]`
-    # from the Python bridge. Normalize keys to atoms for the
-    # FeishuReceive consumer.
-    msg =
-      Message.new(
-        agent_uri,
-        %{text: text, attachments: normalize_attachments(attachments)},
-        ref: ref_uri
-      )
-
-    # Soft consistency check: ref'd message should have been seen in at
-    # least one of the target sessions. Mismatch = noisy emit, not block.
-    maybe_emit_ref_mismatch(ref_str_or_nil, session_uris)
-
-    # Dispatch chat/send per session_uri. Message envelope shared.
-    # Phase 3d: agent's reply dispatch runs under admin caps for the
-    # same reason as Session fan-out — the reply path is system-routed
-    # from the bridge. Phase 4 will give Agents their own send caps.
-    #
-    # Phase 3d quality fix: if dispatch fails (e.g. claude filled
-    # session_uris with a non-existent session), emit telemetry +
-    # audit warn instead of silently dropping. Real-claude e2e
-    # exposed this — early replies before the meta-session fix
-    # targeted "session://admin" which didn't exist and disappeared
-    # silently.
-    for session_uri_str <- session_uris do
-      target = URI.new!("#{session_uri_str}/behavior/chat/send")
-
-      result =
-        Invocation.dispatch(%Invocation{
-          target: target,
-          mode: :cast,
-          args: %{message: msg},
-          ctx: %{
-            caller: agent_uri,
-            caps: Ezagent.Entity.User.admin_caps(),
-            reply: :ignore
-          }
-        })
-
-      case result do
-        :ok ->
-          :ok
-
-        {:ok, _} ->
-          :ok
-
-        {:error, reason} ->
-          :telemetry.execute(
-            [:ezagent, :chat, :reply_dispatch_failed],
-            %{},
-            %{
-              agent: URI.to_string(agent_uri),
-              target_session: session_uri_str,
-              reason: reason,
-              message_uri: msg.uri
-            }
-          )
-      end
-    end
-
-    # Slice unchanged — Agent has no chat state of its own.
-    :ignore
-  end
-
   def handle_kind_message(_other_message, _slice, _ctx), do: :ignore
-
-  defp maybe_emit_ref_mismatch(nil, _), do: :ok
-  defp maybe_emit_ref_mismatch("", _), do: :ok
-
-  defp maybe_emit_ref_mismatch(ref_str, session_uris) when is_binary(ref_str) do
-    case Ezagent.MessageStore.by_uri(ref_str) do
-      :error ->
-        # Ref points to unknown message — still warn (claude may have
-        # made up a ref or referenced a pruned message).
-        :telemetry.execute(
-          [:ezagent, :chat, :reply_session_mismatch],
-          %{},
-          %{ref: ref_str, target_sessions: session_uris, reason: :ref_not_found}
-        )
-
-      {:ok, _msg} ->
-        # Compare against actual presence (via message_routings join).
-        actual_sessions = Ezagent.MessageStore.sessions_for_message(ref_str)
-
-        intersection = MapSet.intersection(MapSet.new(actual_sessions), MapSet.new(session_uris))
-
-        if MapSet.size(intersection) == 0 do
-          :telemetry.execute(
-            [:ezagent, :chat, :reply_session_mismatch],
-            %{},
-            %{
-              ref: ref_str,
-              target_sessions: session_uris,
-              ref_actual_sessions: actual_sessions,
-              reason: :no_overlap
-            }
-          )
-        end
-    end
-
-    :ok
-  end
 
   # --- Interface schema --------------------------------------------------
 
@@ -632,23 +480,6 @@ defmodule Ezagent.Behavior.Chat do
 
     Enum.join(parts, " ")
   end
-
-  defp normalize_attachments(list) when is_list(list) do
-    Enum.map(list, fn
-      %{} = m -> normalize_attachment_keys(m)
-      other -> other
-    end)
-  end
-
-  defp normalize_attachment_keys(m) do
-    Map.new(m, fn
-      {k, v} when is_binary(k) -> {String.to_atom(k), normalize_attachment_value(k, v)}
-      kv -> kv
-    end)
-  end
-
-  defp normalize_attachment_value("type", v) when is_binary(v), do: String.to_atom(v)
-  defp normalize_attachment_value(_, v), do: v
 
   defp message_schema do
     %{

@@ -39,7 +39,7 @@ defmodule EzagentPluginCcChannel.McpConfigWriterTest do
       McpConfigWriter.write!(
         agent_uri: agent_uri,
         dir: out_dir,
-        script_path: "/fake/path/esr_mcp_bridge.py",
+        script_path: "/fake/path/ezagent_mcp_bridge.py",
         ws_url: "ws://127.0.0.1:10042/cc_socket/websocket"
       )
 
@@ -47,7 +47,7 @@ defmodule EzagentPluginCcChannel.McpConfigWriterTest do
     config = path |> File.read!() |> Jason.decode!()
 
     assert config["mcpServers"]["esr-bridge"]["command"] == "uv"
-    assert config["mcpServers"]["esr-bridge"]["args"] == ["run", "python3", "/fake/path/esr_mcp_bridge.py"]
+    assert config["mcpServers"]["esr-bridge"]["args"] == ["run", "python3", "/fake/path/ezagent_mcp_bridge.py"]
 
     env = config["mcpServers"]["esr-bridge"]["env"]
     assert env["EZAGENT_AGENT_URI"] == agent_uri
@@ -107,6 +107,6 @@ defmodule EzagentPluginCcChannel.McpConfigWriterTest do
   test "bridge_script_path/0 points at v2 Python script that exists" do
     path = McpConfigWriter.bridge_script_path()
     assert File.exists?(path), "expected v2 bridge script at #{path}"
-    assert Path.basename(path) == "esr_mcp_bridge.py"
+    assert Path.basename(path) == "ezagent_mcp_bridge.py"
   end
 end

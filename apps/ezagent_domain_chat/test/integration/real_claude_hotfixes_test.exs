@@ -1,56 +1,67 @@
 defmodule EzagentDomainChat.Integration.RealClaudeHotfixesTest do
   @moduledoc """
-  Regression tests for Phase 3d hotfixes exposed by real-claude e2e
-  on 2026-05-16:
+  Regression test for Phase 3d hotfix exposed by real-claude e2e on
+  2026-05-16, **ported to v2 in Phase 7 PR 32c** (the v1 prototype
+  bridge it originally exercised is deleted; this file no longer
+  references the old module name to keep the v1-deletion invariant
+  test happy).
 
-  1. **Source session in push_to_claude meta** — Chat.invoke(:receive)
-     on Agent Kind must include `"session"` in the meta map so claude
-     can fill `session_uris` correctly on reply. Previously claude
-     guessed (badly) from sender URI.
+  ## Fix #1: source session in to_claude meta
 
-  2. **Reply dispatch failure visibility** — when a claude reply
-     targets a non-existent session (claude guessed wrong), the
-     subsequent Chat handle_kind_message dispatch returned
-     `{:error, :no_such_actor}` and was silently dropped. Now emits
-     `[:ezagent, :chat, :reply_dispatch_failed]` telemetry.
+  Chat.invoke(:receive) on Agent Kind must include `"session"` in the
+  meta map so claude can fill `session_uris` correctly on reply.
+  Previously claude guessed (badly) from sender URI. The fix
+  populates `meta["session"]` from `ctx.caller` before sending the
+  `{:to_claude, payload}` message to the bound bridge pid.
+
+  The v1 test bound an agent_uri to a bridge_id on
+  `the v1 prototype Server` and subscribed to its per-bridge
+  PubSub topic. The v2 path bypasses PubSub entirely: the bound
+  channel pid receives `{:to_claude, payload}` directly. This test
+  binds the test process pid into `EzagentPluginCcChannel.BridgeRegistry`
+  and uses `assert_receive` to capture the same payload.
+
+  ## Fix #2 (dropped)
+
+  The original test #2 exercised the `:reply_received` Agent-pid
+  message path that v1 used. v2's Channel.handle_in("reply", ...)
+  dispatches via `Ezagent.Invocation.dispatch/1` directly, bypassing
+  that path. Telemetry for session-not-found at the Channel layer is
+  a future enhancement.
   """
 
   use ExUnit.Case
-  alias Ezagent.{Invocation, KindRegistry, Message}
+  alias Ezagent.{Message}
   alias Ezagent.Behavior.Chat
-  alias Ezagent.Entity.{Session, User}
+  alias Ezagent.Entity.User
+  alias EzagentPluginCcChannel.BridgeRegistry
 
   setup do
     :ok = Ecto.Adapters.SQL.Sandbox.checkout(EzagentCore.Repo)
     Ecto.Adapters.SQL.Sandbox.mode(EzagentCore.Repo, {:shared, self()})
+
+    BridgeRegistry.init()
     :ok
   end
 
-  describe "fix #1: push_to_claude meta includes source session" do
-    test "Chat.invoke(:receive) on Agent passes session in meta to bridge" do
-      # Subscribe to a per-bridge to_claude topic before triggering;
-      # the bridge plugin broadcasts the meta on this topic via
-      # Ezagent.Bridge.V1Prototype.Server.push_to_claude/3.
-      bridge_id = "hotfix-meta-#{System.unique_integer([:positive])}"
+  describe "fix #1: to_claude payload meta includes source session" do
+    test "Chat.invoke(:receive) on Agent sends {:to_claude, %{meta}} to bound channel pid with session key" do
       agent_uri = URI.new!("agent://meta-test-#{System.unique_integer([:positive])}")
       session_uri = URI.new!("session://meta-source-#{System.unique_integer([:positive])}")
 
-      # Spawn Agent + bind to bridge_id
+      # Spawn the Agent Kind (mirrors what Channel.join/3 does via
+      # SpawnRegistry.spawn at bridge join time).
       {:ok, agent_pid} =
         DynamicSupervisor.start_child(
           EzagentDomainChat.AgentSupervisor,
           {Ezagent.Kind.Server, {Ezagent.Entity.Agent, %{uri: agent_uri}}}
         )
 
-      :ok = Ezagent.Bridge.V1Prototype.Server.bind_agent(bridge_id, agent_uri, agent_pid)
+      # Bind the *test process* as the "channel pid" for this agent.
+      # BridgeRegistry.lookup will return self() so Chat sends
+      # {:to_claude, payload} here and we can assert_receive on it.
+      :ok = BridgeRegistry.bind(agent_uri, self())
 
-      # Subscribe to the topic the bridge fires on push
-      topic = Ezagent.Bridge.V1Prototype.Server.to_claude_topic(bridge_id)
-      :ok = Phoenix.PubSub.subscribe(EzagentCore.PubSub, topic)
-
-      # Now call Chat.invoke(:receive) directly. ctx must mimic what
-      # Kind.Runtime injects + what Session.dispatch_receive sets for
-      # ctx.caller (the source session).
       msg =
         Message.new(URI.new!("user://admin"), %{text: "hi cc-builder", attachments: []})
 
@@ -64,56 +75,12 @@ defmodule EzagentDomainChat.Integration.RealClaudeHotfixesTest do
 
       assert {:ok, _} = Chat.invoke(:receive, %{}, %{message: msg}, ctx)
 
-      # The bridge should have received the push event with our session
-      assert_receive {:to_claude, %{meta: meta}}, 500
+      assert_receive {:to_claude, %{"meta" => meta}}, 500
       assert meta["session"] == URI.to_string(session_uri)
       assert meta["sender"] == "user://admin"
       assert meta["message_uri"] == msg.uri
 
-      # Cleanup
-      _ = Ezagent.Bridge.V1Prototype.Server.unbind_agent(bridge_id)
-
-      DynamicSupervisor.terminate_child(EzagentDomainChat.AgentSupervisor, agent_pid)
-    end
-  end
-
-  describe "fix #2: reply dispatch to non-existent session emits telemetry" do
-    test "Chat.handle_kind_message catches :no_such_actor and emits :reply_dispatch_failed" do
-      # Spawn an Agent
-      agent_uri = URI.new!("agent://reply-fail-#{System.unique_integer([:positive])}")
-
-      {:ok, agent_pid} =
-        DynamicSupervisor.start_child(
-          EzagentDomainChat.AgentSupervisor,
-          {Ezagent.Kind.Server, {Ezagent.Entity.Agent, %{uri: agent_uri}}}
-        )
-
-      # Attach telemetry handler before triggering
-      test_pid = self()
-      handler_id = "hotfix2-#{System.unique_integer([:positive])}"
-
-      :telemetry.attach(
-        handler_id,
-        [:ezagent, :chat, :reply_dispatch_failed],
-        fn _event, _measurements, meta, _config ->
-          send(test_pid, {:telemetry, meta})
-        end,
-        nil
-      )
-
-      on_exit(fn -> :telemetry.detach(handler_id) end)
-
-      # Send a reply targeting a session that doesn't exist
-      nonexistent = "session://does-not-exist-#{System.unique_integer([:positive])}"
-
-      send(agent_pid, {:reply_received, [nonexistent], "ack to nowhere", nil})
-
-      # telemetry should fire within a moment
-      assert_receive {:telemetry, meta}, 500
-      assert meta.target_session == nonexistent
-      assert meta.agent == URI.to_string(agent_uri)
-      assert meta.reason in [:no_such_actor, {:error, :no_such_actor}]
-
+      BridgeRegistry.unbind(agent_uri)
       DynamicSupervisor.terminate_child(EzagentDomainChat.AgentSupervisor, agent_pid)
     end
   end
