@@ -11,7 +11,11 @@ defmodule EsrPluginFeishu.InboundDispatcher do
     3. If bound → look up session for chat_id, dispatch into it.
        On success, react `:OK` emoji as ergonomic ack (Allen
        2026-05-17 "受到了信息" 反馈).
-    4. On any error → no react (the lack of emoji IS the signal).
+    4. On dispatch error → send a Feishu text back into the source
+       chat explaining what happened, then THUMBSDOWN react. The
+       bound user IS the delegate; if cap denial or other failure
+       happens, surface it to the human, don't silently drop.
+       (Allen 2026-05-18 "silent down 不可接受" — PR 27.)
 
   ## Why a module not a function in WebhookPlug
 
@@ -19,6 +23,31 @@ defmodule EsrPluginFeishu.InboundDispatcher do
   through here so we get identical behavior. Pulling it out makes
   the WS module trivial — it just constructs the keyword args list
   and calls `dispatch/1`.
+
+  ## Dispatch mode: `:call`, not `:cast` (PR 27, Decision #134)
+
+  `Esr.Behavior.Chat.@interface[:send]` declares `:send` as `:cast`
+  (fire-and-forget). This module dispatches with `mode: :call`
+  anyway, so cap-denial or other dispatch failures return
+  synchronously as `{:error, _}` and can be surfaced to the human
+  via `send_dispatch_error/3`.
+
+  This is a **legitimate transport-level override** of the
+  `@interface` default. `Esr.Invocation.dispatch/1` accepts any
+  mode the caller passes; the `@interface` mode declaration is a
+  *default transport behavior hint*, not a contract callers must
+  obey. Future transports (Slack / Discord / email) implementing
+  inbound should use the same pattern: `mode: :call`, decompose
+  the result, send an error message back through the originating
+  channel on failure.
+
+  **What to NOT do**: do not copy `mode: :cast` from another call
+  site into this module "to match the interface declaration."
+  Silent-drop on cap denial is the bug we're fixing.
+
+  See ARCHITECTURE.md Decision #134 and
+  `docs/notes/phase-6-architecture-closeout.md` §2.2 for the
+  forensic record.
   """
 
   require Logger
