@@ -53,6 +53,49 @@ defmodule Esr.Entity.User do
     ])
   end
 
+  @doc """
+  Default caps every non-admin User starts life with.
+
+  PR 27 (Allen 2026-05-18): every ESR User is, by construction, a
+  principal that can attempt to participate in a session — without
+  this baseline cap, even the most basic Feishu-delegate / CLI-test
+  path is unauthorized and silently drops. Making this a User Kind
+  structural default keeps every creation site (LV, mix task, Feishu
+  bind) consistent without forcing each caller to remember the
+  boilerplate.
+
+  This is NOT an authorization escape hatch. The cap says "this
+  principal may attempt to invoke session behaviors on some session
+  instance"; whether the message actually lands depends on session
+  membership and routing rules, not on this cap. Admin's wildcard
+  `admin_caps/0` is the only true escape hatch, and is granted only
+  to `user://admin`.
+
+  **Behavior wildcard**: `:any` follows the existing project
+  convention (cf. `feishu_chat:any` granted by `BindingPolicy`).
+  Modeling specific behaviors here would require esr_domain_identity
+  to depend on esr_domain_chat (circular), or runtime
+  BehaviorRegistry lookups at user-creation time (boot-order
+  fragile). `:any` plus a narrow `:kind` scope is the consistent
+  trade-off the codebase already uses.
+
+  Prepended to user-supplied caps in `Esr.Domain.Identity.Users.create/3`.
+  Idempotently re-granted by Feishu `BindingPolicy.apply/2` to handle
+  pre-PR-27 users that were created without it.
+  """
+  @spec default_caps() :: [Esr.Capability.t()]
+  def default_caps do
+    [
+      %Esr.Capability{
+        kind: :session,
+        behavior: :any,
+        instance: :any,
+        granted_by: @system_bootstrap_uri,
+        granted_at: @admin_granted_at
+      }
+    ]
+  end
+
   # --- Esr.Kind callbacks -----------------------------------------------
   @behaviour Esr.Kind
 

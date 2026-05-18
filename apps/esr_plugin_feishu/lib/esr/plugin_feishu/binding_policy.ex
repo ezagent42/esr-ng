@@ -37,7 +37,8 @@ defmodule EsrPluginFeishu.BindingPolicy do
   """
   @spec apply(URI.t() | String.t(), URI.t() | String.t()) :: :ok | {:error, term()}
   def apply(user_uri, admin_uri) do
-    with :ok <- ensure_user_kind(user_uri) do
+    with :ok <- ensure_user_kind(user_uri),
+         :ok <- ensure_user_default_caps(user_uri, admin_uri) do
       grant_feishu_send_cap(user_uri, admin_uri)
     end
   end
@@ -61,14 +62,41 @@ defmodule EsrPluginFeishu.BindingPolicy do
   end
 
   defp grant_feishu_send_cap(user_uri, admin_uri) do
-    cap = %Capability{
-      kind: :feishu_chat,
-      behavior: :any,
-      instance: :any,
-      granted_by: to_uri(admin_uri),
-      granted_at: DateTime.utc_now()
-    }
+    grant_cap(
+      user_uri,
+      admin_uri,
+      %Capability{
+        kind: :feishu_chat,
+        behavior: :any,
+        instance: :any,
+        granted_by: to_uri(admin_uri),
+        granted_at: DateTime.utc_now()
+      }
+    )
+  end
 
+  # PR 27 (Allen 2026-05-18): users created before this PR (or via
+  # programmatic spawn paths that bypass `Esr.Domain.Identity.Users.create`)
+  # might not have the default user caps installed. When we bind a
+  # Feishu identity to them, top up the default caps so the bound
+  # user can actually act as a delegate. Identity slice uses MapSet
+  # semantics so this is idempotent — already-granted caps don't
+  # double-up.
+  #
+  # The caps themselves come from `Esr.Entity.User.default_caps/0` —
+  # this module doesn't know what "default" means, it only ensures the
+  # baseline is applied.
+  defp ensure_user_default_caps(user_uri, admin_uri) do
+    Esr.Entity.User.default_caps()
+    |> Enum.reduce_while(:ok, fn cap, _acc ->
+      case grant_cap(user_uri, admin_uri, cap) do
+        :ok -> {:cont, :ok}
+        err -> {:halt, err}
+      end
+    end)
+  end
+
+  defp grant_cap(user_uri, admin_uri, %Capability{} = cap) do
     target = URI.new!("#{to_str(user_uri)}/behavior/identity/grant_cap")
 
     inv = %Invocation{

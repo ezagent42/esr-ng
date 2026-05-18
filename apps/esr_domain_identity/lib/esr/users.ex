@@ -55,12 +55,19 @@ defmodule Esr.Users do
         nil
       end
 
+    # PR 27 (Allen 2026-05-18): prepend the User Kind's structural
+    # default caps so every newly-minted user can at least participate
+    # in chat. Caller-supplied caps follow, so an operator who
+    # explicitly grants `session.chat` doesn't double-grant (the
+    # Identity slice de-dupes via MapSet on load anyway).
+    final_caps = Esr.Entity.User.default_caps() ++ caps
+
     changeset =
       %__MODULE__{}
       |> Ecto.Changeset.change(%{
         uri: uri_str,
         password_hash: hash,
-        caps_json: encode_caps(caps)
+        caps_json: encode_caps(final_caps)
       })
       |> Ecto.Changeset.unique_constraint(:uri, name: :users_uri_index)
 

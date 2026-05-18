@@ -44,4 +44,31 @@ defmodule Esr.Entity.UserTest do
     assert User.behaviors() == [Esr.Behavior.Identity]
     assert User.persistence() == {:snapshot, :on_change}
   end
+
+  describe "default_caps/0 (PR 27)" do
+    test "includes a kind=:session cap so every user can attempt session behaviors" do
+      caps = User.default_caps()
+
+      assert is_list(caps)
+
+      assert Enum.any?(caps, fn c ->
+               c.kind == :session and c.behavior == :any and c.instance == :any
+             end),
+             "expected a session:any:any cap in default_caps, got: #{inspect(caps)}"
+    end
+
+    test "default caps are granted_by system://bootstrap (structural, not human-issued)" do
+      for cap <- User.default_caps() do
+        assert cap.granted_by.scheme == "system"
+        assert cap.granted_by.host == "bootstrap"
+      end
+    end
+
+    test "default_caps does NOT include the admin wildcard" do
+      refute Enum.any?(User.default_caps(), fn c ->
+               c.kind == :any and c.behavior == :any and c.instance == :any
+             end),
+             "default_caps must not grant the admin escape hatch to ordinary users"
+    end
+  end
 end
