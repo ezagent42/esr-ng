@@ -11,7 +11,14 @@ defmodule Esr.Entity.SessionTest do
       assert Session.behaviors() == [Esr.Behavior.Chat]
     end
 
-    test "persistence/0 is :ephemeral" do
+    test "persistence/0 is :ephemeral (Phase 7 PR 44 explored flip, deferred to PR 46)" do
+      # Phase 7 PR 44 attempted to flip to {:snapshot, :on_change}
+      # for orchestrator working-copy durability (SPEC §7-3) but the
+      # snapshot writes cascade through tests that don't own the
+      # Ecto sandbox connection — test-helper update is required
+      # before the flip. Deferred to PR 46 (orchestrator tools)
+      # which adds the slice field AND the helper updates together.
+      # Esr.Entity.Session moduledoc documents the planned flip.
       assert Session.persistence() == :ephemeral
     end
   end
