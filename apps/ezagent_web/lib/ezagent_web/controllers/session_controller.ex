@@ -16,7 +16,7 @@ defmodule EzagentWeb.SessionController do
   <!DOCTYPE html>
   <html>
   <head>
-    <title>ESR Login</title>
+    <title>Ezagent Login</title>
     <meta charset="utf-8">
     <style>
       body { font-family: -apple-system, sans-serif; max-width: 400px; margin: 80px auto; padding: 24px; }
@@ -30,7 +30,7 @@ defmodule EzagentWeb.SessionController do
     </style>
   </head>
   <body>
-    <h1>ESR Login</h1>
+    <h1>Ezagent Login</h1>
     {{ERROR}}
     <form method="post" action="/login">
       <input type="hidden" name="_csrf_token" value="{{CSRF}}">

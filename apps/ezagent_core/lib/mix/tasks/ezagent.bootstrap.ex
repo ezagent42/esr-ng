@@ -87,7 +87,7 @@ defmodule Mix.Tasks.Ezagent.Bootstrap do
     Next: start the server.
         mix phx.server
 
-    Admin LV will be reachable at http://localhost:4000/admin.
+    Admin LV will be reachable at http://localhost:10042/admin.
 
     For multi-host or quasi-production setups, see
     docs/onboarding/first-30-days.md.

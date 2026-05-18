@@ -40,7 +40,7 @@ defmodule EzagentPluginCcChannel.McpConfigWriterTest do
         agent_uri: agent_uri,
         dir: out_dir,
         script_path: "/fake/path/esr_mcp_bridge.py",
-        ws_url: "ws://127.0.0.1:4000/cc_socket/websocket"
+        ws_url: "ws://127.0.0.1:10042/cc_socket/websocket"
       )
 
     assert File.exists?(path)
@@ -51,7 +51,7 @@ defmodule EzagentPluginCcChannel.McpConfigWriterTest do
 
     env = config["mcpServers"]["esr-bridge"]["env"]
     assert env["EZAGENT_AGENT_URI"] == agent_uri
-    assert env["EZAGENT_BRIDGE_WS_URL"] == "ws://127.0.0.1:4000/cc_socket/websocket"
+    assert env["EZAGENT_BRIDGE_WS_URL"] == "ws://127.0.0.1:10042/cc_socket/websocket"
     assert is_binary(env["EZAGENT_AGENT_TOKEN"])
     assert String.starts_with?(env["EZAGENT_AGENT_TOKEN"], "tok_")
   end

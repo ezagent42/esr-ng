@@ -15,7 +15,7 @@ preserved across the cutover.
 ## Env
 
 * ``EZAGENT_BRIDGE_WS_URL`` — WebSocket endpoint URL.
-  Default ``ws://127.0.0.1:4000/cc_socket/websocket``.
+  Default ``ws://127.0.0.1:10042/cc_socket/websocket``.
 * ``EZAGENT_AGENT_URI`` — agent the bridge represents (``agent://cc-demo``).
 * ``EZAGENT_AGENT_TOKEN`` — token minted by ``EzagentPluginCcChannel.TokenStore``;
   the Socket auth handler rejects connections without a matching token.
@@ -57,7 +57,7 @@ from urllib.parse import urlencode, urlparse, urlunparse
 
 LOG = logging.getLogger("esr_mcp_bridge")
 
-WS_URL = os.environ.get("EZAGENT_BRIDGE_WS_URL", "ws://127.0.0.1:4000/cc_socket/websocket")
+WS_URL = os.environ.get("EZAGENT_BRIDGE_WS_URL", "ws://127.0.0.1:10042/cc_socket/websocket")
 AGENT_URI = os.environ.get("EZAGENT_AGENT_URI", "")
 AGENT_TOKEN = os.environ.get("EZAGENT_AGENT_TOKEN", "")
 
