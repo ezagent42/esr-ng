@@ -55,9 +55,47 @@ defmodule EsrPluginFeishu.InboundDispatcher do
       {:ok, caller_uri, caps} ->
         case lookup_session_for_chat(chat_id) do
           {:ok, session_uri} ->
-            do_dispatch(session_uri, caller_uri, caps, body)
-            react_safe(message_id, "OK")
-            :ok
+            case do_dispatch(session_uri, caller_uri, caps, body) do
+              :ok ->
+                react_safe(message_id, "OK")
+                :ok
+
+              {:error, :unauthorized} ->
+                # PR 27 (Allen 2026-05-18 "silent down 不可接受"): cap
+                # denial reaches the human via a text in the original
+                # chat + THUMBSDOWN react, not a void log line. The
+                # bound user IS the delegate; if they're missing the
+                # cap, the right answer is to tell them, not silently
+                # drop. Reverse-leg matchers + crash bubbling are
+                # tracked in docs/futures/todo.md.
+                Logger.info(
+                  "Feishu inbound: cap denied for #{URI.to_string(caller_uri)} → " <>
+                    "#{URI.to_string(session_uri)}/chat/send; sending text back"
+                )
+
+                send_dispatch_error(
+                  chat_id,
+                  message_id,
+                  "❌ ESR: 没有权限发送到 #{URI.to_string(session_uri)} " <>
+                    "(missing cap: session.chat). " <>
+                    "请联系管理员补一条 `kind=:session behavior=:chat` 的 cap。"
+                )
+
+                {:error, :unauthorized}
+
+              {:error, reason} ->
+                Logger.warning(
+                  "Feishu inbound dispatch failed: #{inspect(reason)} → sending text back"
+                )
+
+                send_dispatch_error(
+                  chat_id,
+                  message_id,
+                  "❌ ESR: dispatch 失败: #{inspect(reason)}"
+                )
+
+                {:error, reason}
+            end
 
           :error ->
             Logger.info(
@@ -114,18 +152,42 @@ defmodule EsrPluginFeishu.InboundDispatcher do
 
     target = URI.parse("#{URI.to_string(session_uri)}/behavior/chat/send")
 
+    # PR 27 (Allen 2026-05-18): mode :call so cap-denial bubbles back
+    # synchronously; the caller (dispatch/1) sends a text message to
+    # the human explaining the failure. :cast would silently drop —
+    # no audit feedback to the sender.
     inv = %Esr.Invocation{
       target: target,
-      mode: :cast,
+      mode: :call,
       args: %{message: msg},
-      ctx: %{caller: caller_uri, caps: caps, reply: :ignore}
+      ctx: %{caller: caller_uri, caps: caps, reply: :sync}
     }
 
     case Esr.Invocation.dispatch(inv) do
       {:ok, _} -> :ok
       :ok -> :ok
-      {:error, reason} -> Logger.warning("Feishu inbound dispatch failed: #{inspect(reason)}")
+      {:error, _} = err -> err
     end
+  end
+
+  # PR 27: send a Feishu text back to the source chat when ESR
+  # dispatch can't proceed, so the human sees the failure instead of
+  # waiting in silence. THUMBSDOWN react paired with the explanation
+  # text mirrors the existing :pending → THUMBSDOWN pattern: emoji
+  # for at-a-glance status, text for the "why."
+  defp send_dispatch_error(chat_id, message_id, text) do
+    Task.start(fn ->
+      case Client.send_text(chat_id, text) do
+        :ok ->
+          :ok
+
+        {:error, reason} ->
+          Logger.warning("Feishu send_text (dispatch_error) failed: #{inspect(reason)}")
+      end
+    end)
+
+    react_safe(message_id, "THUMBSDOWN")
+    :ok
   end
 
   # Best-effort react — failures are non-fatal (network blip on

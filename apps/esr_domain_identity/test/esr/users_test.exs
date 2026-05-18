@@ -4,7 +4,13 @@ defmodule Esr.UsersTest do
   alias Esr.Users
 
   describe "create/3" do
-    test "inserts a user with bcrypt password + caps" do
+    # PR 27 (Allen 2026-05-18): Users.create prepends
+    # `Esr.Entity.User.default_caps()` so every new user has a baseline
+    # set (session.chat today) and creation sites don't have to remember
+    # the boilerplate. These tests cover both the empty-caller-caps and
+    # custom-caller-caps shapes.
+
+    test "empty caller caps → user still has default_caps installed" do
       uri = "user://test-#{System.unique_integer([:positive])}"
 
       {:ok, decoded} = Users.create(uri, "secret", [])
@@ -12,7 +18,13 @@ defmodule Esr.UsersTest do
       assert URI.to_string(decoded.uri) == uri
       assert is_binary(decoded.password_hash)
       assert decoded.password_hash != "secret"
-      assert decoded.caps == []
+
+      default = Esr.Entity.User.default_caps()
+      assert length(decoded.caps) == length(default)
+
+      assert Enum.any?(decoded.caps, fn c ->
+               c.kind == :session and c.behavior == :any
+             end)
     end
 
     test "nil password leaves password_hash nil" do
@@ -22,7 +34,7 @@ defmodule Esr.UsersTest do
       assert decoded.password_hash == nil
     end
 
-    test "caps round-trip through JSON" do
+    test "caller caps + default_caps both round-trip through JSON" do
       uri = "user://caps-#{System.unique_integer([:positive])}"
 
       cap = %Esr.Capability{
@@ -34,7 +46,14 @@ defmodule Esr.UsersTest do
       }
 
       {:ok, decoded} = Users.create(uri, "x", [cap])
-      assert [%Esr.Capability{kind: :workspace, behavior: Esr.Behavior.Workspace, instance: :any}] = decoded.caps
+
+      assert Enum.any?(decoded.caps, fn c ->
+               c.kind == :workspace and c.behavior == Esr.Behavior.Workspace
+             end)
+
+      assert Enum.any?(decoded.caps, fn c ->
+               c.kind == :session and c.behavior == :any
+             end)
     end
 
     test "duplicate uri returns error" do
