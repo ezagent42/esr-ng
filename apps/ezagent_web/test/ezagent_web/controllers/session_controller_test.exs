@@ -7,7 +7,7 @@ defmodule EzagentWeb.SessionControllerTest do
   describe "GET /login" do
     test "renders the login form" do
       conn = build_conn() |> get("/login")
-      assert html_response(conn, 200) =~ "ESR Login"
+      assert html_response(conn, 200) =~ "Ezagent Login"
       assert html_response(conn, 200) =~ "User URI"
     end
   end
