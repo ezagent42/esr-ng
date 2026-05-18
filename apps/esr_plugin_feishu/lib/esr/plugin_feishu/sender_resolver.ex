@@ -54,6 +54,22 @@ defmodule EsrPluginFeishu.SenderResolver do
   defp resolve_open_id(open_id) do
     case UserBinding.resolve(open_id) do
       {:ok, %URI{} = bound_uri} ->
+        # PR 17 follow-up: ensure the User Kind is live before reading
+        # its caps. After server restart, bound user URIs aren't
+        # automatically re-spawned (they only get spawned at bind time
+        # or via explicit SpawnRegistry call). Without this auto-spawn,
+        # `list_caps_for` finds no Kind → returns empty MapSet →
+        # dispatch denied as :unauthorized despite the binding +
+        # cap-grant having persisted in the snapshot.
+        case Esr.KindRegistry.lookup(bound_uri) do
+          {:ok, _pid} ->
+            :ok
+
+          :error ->
+            _ = Esr.SpawnRegistry.spawn(bound_uri)
+            :ok
+        end
+
         caps = Esr.Identity.list_caps_for(bound_uri)
         {:ok, bound_uri, caps}
 
