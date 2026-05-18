@@ -113,5 +113,28 @@ process.on('SIGTERM', () => {
     process.exit(0);
 });
 
+// Phase 7 PR 35 — orphan reap via stdin EOF.
+//
+// When the Elixir parent (Esr.PluginFeishu.WsClient via Port.open) exits,
+// the OS reaps the Port but does NOT propagate a signal to this Node
+// child — `:spawn_executable` Ports leak their children to PID 1 on
+// BEAM crash/exit. Without explicit handling, every phx.server restart
+// leaves a new orphan sidecar (we hit this in Phase 6 PR 27 debug —
+// 3 orphans accumulated across the day, all racing for Feishu events,
+// stealing inbound messages, silently dropping).
+//
+// The fix is universal across BEAM ports: child reads its own stdin and
+// exits when it sees EOF. The Elixir Port closes stdin on Port.close /
+// VM exit, so this fires reliably on parent death. SIGINT/SIGTERM
+// handlers stay as primary signal paths; this is a belt-and-suspenders
+// safety net for the case where the parent dies without sending a
+// signal.
+process.stdin.on('end', () => {
+    emit({ type: 'disconnected', reason: 'stdin_eof' });
+    try { wsClient.close({ force: true }); } catch (_) {}
+    process.exit(0);
+});
+process.stdin.resume(); // ensure stdin is in flowing mode so 'end' fires
+
 // Keep the process alive (the SDK manages its own WS loop).
 setInterval(() => {}, 60_000);
