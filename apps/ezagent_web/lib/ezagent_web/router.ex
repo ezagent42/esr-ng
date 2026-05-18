@@ -26,42 +26,46 @@ defmodule EzagentWeb.Router do
     post "/logout", SessionController, :delete
   end
 
-  # /admin* requires login (Phase 4-completion Spec 05 §A.2.3).
+  # /admin* requires login (Phase 4-completion Spec 05 §A.2.3 +
+  # PR #123 hardening: live_session on_mount gates the WS reconnect
+  # path that bypasses the HTTP Plug pipeline).
   scope "/", EzagentPluginLiveview do
     pipe_through [:browser, EzagentWeb.Plugs.RequireUser]
 
-    live "/admin", AdminLive
+    live_session :require_user, on_mount: {EzagentWeb.LiveAuth, :require_user} do
+      live "/admin", AdminLive
 
-    # Phase 4d: Workspace management surfaces. Separate LV (not a tab
-    # inside admin_live) per Phase 4 D2 — cluster-shape config is a
-    # different surface than per-session chat.
-    live "/admin/workspaces", WorkspacesLive
-    live "/admin/workspaces/:name", WorkspaceDetailLive
+      # Phase 4d: Workspace management surfaces. Separate LV (not a tab
+      # inside admin_live) per Phase 4 D2 — cluster-shape config is a
+      # different surface than per-session chat.
+      live "/admin/workspaces", WorkspacesLive
+      live "/admin/workspaces/:name", WorkspaceDetailLive
 
-    # Phase 4-completion PR 7: global RoutingRegistry rule editor.
-    live "/admin/routing", RoutingLive
+      # Phase 4-completion PR 7: global RoutingRegistry rule editor.
+      live "/admin/routing", RoutingLive
 
-    # Phase 5 PR 2: Users LV.
-    live "/admin/users", UsersLive
-    # Phase 6 PR 6: per-user cap-grant UI.
-    live "/admin/users/:uri/caps", UserCapsLive
+      # Phase 5 PR 2: Users LV.
+      live "/admin/users", UsersLive
+      # Phase 6 PR 6: per-user cap-grant UI.
+      live "/admin/users/:uri/caps", UserCapsLive
 
-    # Phase 5 PR 3: Snapshots observability.
-    live "/admin/snapshots", SnapshotsLive
+      # Phase 5 PR 3: Snapshots observability.
+      live "/admin/snapshots", SnapshotsLive
 
-    # Real Phase 5 PR 3: PTY agent live status.
-    live "/admin/agents", AgentsLive
-    live "/admin/agents/:uri", AgentDetailLive
+      # Real Phase 5 PR 3: PTY agent live status.
+      live "/admin/agents", AgentsLive
+      live "/admin/agents/:uri", AgentDetailLive
 
-    # Real Phase 5 PR 4: Pty-Web (xterm.js in browser).
-    live "/admin/agents/:uri/terminal", PtyTerminalLive
+      # Real Phase 5 PR 4: Pty-Web (xterm.js in browser).
+      live "/admin/agents/:uri/terminal", PtyTerminalLive
 
-    # Phase 6 PR 10: auto-derived list/detail for any Kind.
-    live "/admin/auto/:kind", AutoDeriveLive
-    live "/admin/auto/:kind/:uri", AutoDeriveLive
+      # Phase 6 PR 10: auto-derived list/detail for any Kind.
+      live "/admin/auto/:kind", AutoDeriveLive
+      live "/admin/auto/:kind/:uri", AutoDeriveLive
 
-    # Phase 6 PR 15: Feishu open_id ↔ local user bindings admin UI.
-    live "/admin/feishu/bindings", FeishuBindingsLive
+      # Phase 6 PR 15: Feishu open_id ↔ local user bindings admin UI.
+      live "/admin/feishu/bindings", FeishuBindingsLive
+    end
   end
 
   # Liveness probe — plain JSON, no ESR dispatch path involved.

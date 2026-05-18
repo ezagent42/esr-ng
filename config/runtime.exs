@@ -42,12 +42,24 @@ if config_env() == :prod do
       You can generate one by calling: mix phx.gen.secret
       """
 
+  # PR #123 hardening: when the public Cloudflare tunnel fronts the
+  # phx endpoint, WS upgrades come from app.ezagent.chat (the tunnel
+  # rewrites Origin). Lock check_origin to the public hostname +
+  # the Tailscale IP for in-network admin access. Anything else
+  # gets a 403 on WS upgrade — keeps any other-origin browser tab
+  # from opening a cross-origin LV channel.
   config :ezagent_web, EzagentWeb.Endpoint,
     http: [
       # Enable IPv6 and bind on all interfaces.
       # Set it to  {0, 0, 0, 0, 0, 0, 0, 1} for local network only access.
       ip: {0, 0, 0, 0, 0, 0, 0, 0},
       port: String.to_integer(System.get_env("PORT") || "10042")
+    ],
+    check_origin: [
+      "https://app.ezagent.chat",
+      "http://100.64.0.27:10042",
+      "http://localhost:10042",
+      "http://127.0.0.1:10042"
     ],
     secret_key_base: secret_key_base
 

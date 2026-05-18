@@ -52,15 +52,12 @@ defmodule EzagentPluginLiveview.RoutingLive do
   ]
 
   @impl true
-  def mount(_params, session, socket) do
+  def mount(_params, _session, socket) do
     [{_, first_table} | _] = @tables
 
-    # Phase 5 PR 4: derive caller from session for CapBAC dispatch
-    caller_uri =
-      case Map.get(session || %{}, "current_user_uri") do
-        nil -> Ezagent.Entity.User.admin_uri()
-        uri_str -> URI.parse(uri_str)
-      end
+    # PR #123 hardening: live_session :require_user on_mount sets
+    # current_user_uri before mount/3 runs; admin fallback deleted.
+    caller_uri = socket.assigns.current_user_uri
 
     caller_caps =
       if URI.to_string(caller_uri) == URI.to_string(Ezagent.Entity.User.admin_uri()) do

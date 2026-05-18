@@ -134,9 +134,13 @@ defmodule EzagentWeb.ApiV1Controller do
         end
 
       _ ->
-        # No auth header: fall back to admin (backward-compat,
-        # matches CLI behavior — single-machine deployment default).
-        {:ok, Ezagent.Entity.User.admin_uri(), Ezagent.Entity.User.admin_caps()}
+        # PR #123 hardening: the pre-public-tunnel admin fallback
+        # was the largest open attack surface on /api/v1 — any
+        # anonymous internet caller could dispatch as admin. Now
+        # requires a valid `esr_pat_…` bearer token issued via
+        # `mix ezagent.user.rotate_cli_token <uri>`.
+        {:error, 401, "missing_token",
+         "bearer token required; mint via `mix ezagent.user.rotate_cli_token <uri>`"}
     end
   end
 
