@@ -53,7 +53,7 @@ defmodule EsrDomainChat.Application do
   use Application
 
   alias Esr.{BehaviorRegistry, Invocation, RoutingRegistry}
-  alias Esr.Entity.{Agent, Session, User}
+  alias Esr.Entity.{Agent, AgentTemplate, Session, User}
   alias Esr.Behavior.Chat
   alias EsrDomainChat.Routing.{MentionRouting, SessionRouting}
 
@@ -65,6 +65,10 @@ defmodule EsrDomainChat.Application do
     children = [
       {DynamicSupervisor, name: EsrDomainChat.AgentSupervisor, strategy: :one_for_one},
       {DynamicSupervisor, name: EsrDomainChat.SessionSupervisor, strategy: :one_for_one},
+      # Phase 7 PR 37: supervisor for AgentTemplate Kinds. 0 children at
+      # boot; templates materialize on admin create (LV or mix task) or
+      # on snapshot restore at next reference.
+      {DynamicSupervisor, name: EsrDomainChat.AgentTemplateSupervisor, strategy: :one_for_one},
       kind_server_spec(:session_main, Session, Session.default_uri())
       # Phase 6 PR 2: admin User spawn moved to EsrDomainIdentity.Application
       # (User Kind belongs to identity domain). Chat's start callback below
@@ -115,6 +119,28 @@ defmodule EsrDomainChat.Application do
           EsrDomainChat.SessionSupervisor,
           {Esr.Kind.Server, {Session, %{uri: uri}}}
         )
+      end)
+
+    # Phase 7 PR 37: template:// scheme dispatches on host segment.
+    # `template://agent/<name>` → AgentTemplate Kind.
+    # `template://session/<name>@<hash>` → SessionTemplate Kind (PR 38).
+    # The single spawn fn for the scheme switches on URI.host so
+    # both Template Kinds share the same scheme namespace without
+    # colliding on the registry.
+    :ok =
+      Esr.SpawnRegistry.register("template", fn uri ->
+        case uri.host do
+          "agent" ->
+            DynamicSupervisor.start_child(
+              EsrDomainChat.AgentTemplateSupervisor,
+              {Esr.Kind.Server, {AgentTemplate, %{uri: uri}}}
+            )
+
+          other ->
+            # SessionTemplate host (PR 38) will pattern-match here.
+            # For now anything else is unknown.
+            {:error, {:unknown_template_host, other}}
+        end
       end)
 
     # Phase 6 PR 2: user:// spawn fn moved to esr_domain_identity.

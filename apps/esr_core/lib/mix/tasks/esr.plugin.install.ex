@@ -226,9 +226,15 @@ defmodule Mix.Tasks.Esr.Plugin.Install do
 
   defp list_templates_matching(needle) do
     try do
-      Esr.TemplateRegistry.list_all()
-      |> Enum.filter(fn {_name, class_mod} ->
-        class_mod |> Atom.to_string() |> String.contains?(needle)
+      # TemplateRegistry's public surface is `registered_template_names/0`
+      # which returns ETS objects as `[{name, class_mod}, ...]`.
+      Esr.TemplateRegistry.registered_template_names()
+      |> Enum.filter(fn
+        {_name, class_mod} when is_atom(class_mod) ->
+          class_mod |> Atom.to_string() |> String.contains?(needle)
+
+        _ ->
+          false
       end)
       |> Enum.map(fn {name, _} -> name end)
     rescue
