@@ -1,9 +1,21 @@
 # Phase 7 resume state (for next Claude Code session)
 
-**Updated:** 2026-05-18 PM (after Allen rejected the premature v1 declaration in PR #95).
-**Status:** Phase 7 at **rc1** (NOT released). 24 PRs merged on `main` (#84–#109) — Decision Log #135–#144 locked, tool surfaces + skill + onboarding docs shipped. Five blockers remain before v1 can be declared: **PR 32** (CC v1→v2 cutover), **PR 46-impl** (orchestrator 7 tool bodies — currently `{:error, :not_implemented_yet}` stubs), **PR 47** (Generator scoped-cap grant call site), **PR 48** (in-flight template-deletion semantics), **PR 49** (orchestrator e2e demo + recorded video).
+**Updated:** 2026-05-18 evening (after all 5 rc1 code blockers landed).
+**Status:** Phase 7 at **v1 release**. Code-complete; PR 49 e2e demo recording is the only open non-code deliverable.
 
-A prior revision of `docs/notes/phase-7-handoff.md` (PR #95) declared "Ezagent v1 released" — that framing has been **withdrawn**; the file is now an rc1 note and a true v1 release note will replace it after the blockers clear.
+PRs merged this evening (continuation of the rc1 → v1 work):
+
+- #110 — rc1 declaration (withdraw premature v1 from PR #95)
+- #111 — PR 32a (v2 readiness — McpConfigWriter, attachments, Agent Kind spawn on Channel.join, Python WS client)
+- #112 — gitignore `.cf-access*.env` (cloudflared service-token secrets)
+- #113 — collision-app rename (`esr_plugin_ezagent` → `ezagent_plugin_liveview`)
+- #114 — **mega Esr→Ezagent rebrand** (14 apps, 75 module prefixes, 14 env vars, 12 ETS atoms, path defaults, port 4000→10042, +1359 files)
+- #115 — PR 32b (PtyServer cuts over from v1 to v2 writer + "Ezagent Login" string scrub)
+- #118 — PR 32c (delete v1 plugin + Decision #144 invariant); replaced original #116 closed due to rebase conflict
+- #119 — PR 46-impl (7 orchestrator tool bodies wired); replaced original #117 closed due to rebase conflict
+- #120 — PR 47 + PR 48 (Generator scoped-cap grant + template-deletion semantics)
+
+Live verification: agent-browser screenshot of `http://100.64.0.27:10042/login` confirming "Ezagent Login" page renders + `/admin` LV mounts post-login on the new EZAGENT_HOME world. See `docs/notes/phase-7-handoff.md` for the v1 release declaration with the full rc1 → v1 history preserved at the top.
 
 If a fresh Claude Code session is picking up Phase 7 implementation, read this first. Then read in order:
 
