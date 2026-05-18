@@ -34,13 +34,10 @@ defmodule EzagentDomainChat.MixProject do
       # order also enforces start order: identity → workspace → chat.
       {:ezagent_domain_identity, in_umbrella: true},
       {:ezagent_domain_workspace, in_umbrella: true},
-      # Phase 6 PR 4: Chat.invoke(:receive) for Agent prefers the v2
-      # CC channel BridgeRegistry; falls back to v1_prototype while
-      # both transports coexist. Both layer-violation-exempt — v1 to
-      # be deleted in Phase 7, v2 stays as the official bridge.
-      # layer-violation-exempt: cc-bridge-cutover-window
-      {:ezagent_plugin_cc_bridge_v1_prototype, in_umbrella: true},
-      # layer-violation-exempt: cc-bridge-cutover-window
+      # Chat.invoke(:receive) for Agent dispatches to the v2 CC channel
+      # BridgeRegistry. v1 prototype dep + fallback branch removed in
+      # PR 32c (rebrand-4) after PtyServer cutover landed in PR 32b.
+      # layer-violation-exempt: cc-bridge production wire
       {:ezagent_plugin_cc_channel, in_umbrella: true}
     ]
   end

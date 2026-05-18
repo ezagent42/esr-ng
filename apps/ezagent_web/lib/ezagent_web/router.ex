@@ -14,11 +14,6 @@ defmodule EzagentWeb.Router do
     plug :accepts, ["json"]
   end
 
-  # SSE pipeline — accepts text/event-stream for streaming endpoints.
-  pipeline :sse do
-    plug :accepts, ["event-stream"]
-  end
-
   scope "/", EzagentWeb do
     pipe_through :browser
 
@@ -76,20 +71,17 @@ defmodule EzagentWeb.Router do
     get "/_health", HealthController, :index
   end
 
-  # Phase 1 v1_prototype: CC bridge announce endpoint (Phase 5 will use
-  # a Phoenix Channel join handshake instead — this scope is throwaway).
+  # Phase 7 PR 32c (rebrand-4): v1 prototype CC bridge HTTP routes
+  # deleted alongside their controller. Production CC bridges connect
+  # via the v2 `/cc_socket` Phoenix.Channel (token-authenticated by
+  # EzagentPluginCcChannel.TokenStore), defined in EzagentWeb.Endpoint.
   scope "/api", EzagentWeb do
     pipe_through :api
-
-    post "/cc-bridge/announce", CcBridgeAnnounceController, :announce
-    delete "/cc-bridge/announce/:bridge_id", CcBridgeAnnounceController, :disconnect
-    post "/cc-bridge/reply", CcBridgeAnnounceController, :reply
 
     # Phase 4-plus follow-up (2026-05-17): CC hook error reporting.
     # No auth — see CcEventsController moduledoc for trust-boundary
     # rationale (the agent the hook reports about may be down).
     post "/cc-events", CcEventsController, :report
-
   end
 
   # (Post-Phase-5 cleanup, Allen 2026-05-17: the `/api/cli/exec` HTTP
@@ -111,13 +103,6 @@ defmodule EzagentWeb.Router do
 
     get "/", ApiV1Controller, :index
     post "/:kind/:action", ApiV1Controller, :invoke
-  end
-
-  # SSE route — separate scope because its accepts header differs.
-  scope "/api", EzagentWeb do
-    pipe_through :sse
-
-    get "/cc-bridge/events", CcBridgeAnnounceController, :events_sse
   end
 
   # Other scopes may use custom stacks.

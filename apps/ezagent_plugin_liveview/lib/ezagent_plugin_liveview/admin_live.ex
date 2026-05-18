@@ -492,19 +492,16 @@ defmodule EzagentPluginLiveview.AdminLive do
   end
 
   defp bridge_topic_safely do
-    if Code.ensure_loaded?(Ezagent.Bridge.V1Prototype.Server) do
-      Ezagent.Bridge.V1Prototype.Server.topic()
-    else
-      "esr:bridge_v1:unavailable"
-    end
+    # Phase 7 PR 32c: v1 prototype deleted; v2 BridgeRegistry is the
+    # only source of connect/disconnect events.
+    EzagentPluginCcChannel.BridgeRegistry.topic()
   end
 
   defp list_bridges_safely do
-    if Code.ensure_loaded?(Ezagent.Bridge.V1Prototype.Server) do
-      Ezagent.Bridge.V1Prototype.Server.list_connected()
-    else
-      []
-    end
+    # v2 returns [{agent_uri :: URI.t(), %{pid, connected_at, info}}].
+    # The debug panel's table renderer adapts to the shape — see
+    # ezagent_plugin_liveview/admin/debug_panel.ex.
+    EzagentPluginCcChannel.BridgeRegistry.list_connected()
   end
 
   defp load_recent_invocations(n) do

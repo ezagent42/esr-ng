@@ -3,7 +3,7 @@ defmodule EzagentPluginCcChannel.McpConfigWriter do
   Writes the `.mcp.json` Claude Code consumes via `--mcp-config` for
   the v2 CC channel bridge.
 
-  Replaces `Ezagent.Bridge.V1Prototype.McpConfigWriter` (HTTP/SSE wire)
+  Replaces the v1 prototype's MCP-config writer (HTTP/SSE wire)
   with a v2-shaped config that points Claude at the WebSocket Python
   client script + injects the WS URL, agent URI, and per-instance
   connect token.

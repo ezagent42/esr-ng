@@ -47,22 +47,22 @@ defmodule EzagentPluginLiveview.Admin.DebugPanel do
     </section>
 
     <section id="cc-bridges" style="margin-top: 24px;">
-      <h2 style="font-size: 16px; font-weight: 500; margin: 0 0 8px 0;">CC Bridges (v1 prototype)</h2>
+      <h2 style="font-size: 16px; font-weight: 500; margin: 0 0 8px 0;">CC Bridges (v2)</h2>
       <p :if={@connected_bridges == []} id="bridge-empty" style="font-size: 13px; color: #57606a;">
-        No connected bridges. Start one with <code>bash scripts/cc-bridge-attach.sh</code>.
+        No connected bridges. A bridge connects when a cc.pty Template instance spawns a claude process whose Python sidecar joins <code>/cc_socket</code>.
       </p>
       <table :if={@connected_bridges != []} id="bridges-table" style="width: 100%; font-size: 13px; border-collapse: collapse;">
         <thead>
           <tr style="border-bottom: 1px solid #d1d5da;">
-            <th style="text-align: left; padding: 4px 0;">bridge_id</th>
+            <th style="text-align: left; padding: 4px 0;">agent_uri</th>
             <th style="text-align: left;">status</th>
             <th style="text-align: left;">connected_at</th>
             <th style="text-align: left;">client</th>
           </tr>
         </thead>
         <tbody>
-          <tr :for={{bridge_id, entry} <- @connected_bridges} style="border-bottom: 1px solid #eee;">
-            <td style="font-family: monospace; padding: 4px 0;">{bridge_id}</td>
+          <tr :for={{agent_uri, entry} <- @connected_bridges} style="border-bottom: 1px solid #eee;">
+            <td style="font-family: monospace; padding: 4px 0;">{URI.to_string(agent_uri)}</td>
             <td style="color: #1f883d; font-weight: 600;">connected</td>
             <td style="color: #57606a;">{DateTime.to_iso8601(entry.connected_at)}</td>
             <td style="font-family: monospace; font-size: 11px;">{client_label(entry)}</td>
