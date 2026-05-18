@@ -24,8 +24,8 @@ If a fresh Claude Code session is picking up Phase 7 implementation, read this f
 | 7-1-f `mix esr.plugin.install` | 36/#89 | ✅ merged | Runtime hot-load via :application.load/:application.start; D7-8 contract (no uninstall); Mix.env() pitfall noted; 3/3 structural tests pass |
 | 7-2-a AgentTemplate Kind + template:// scheme | 37/#92 | ✅ merged | Kind contract + template:// scheme spawn fn dispatching by host (agent/session); 4/4 tests pass |
 | 7-2-b SessionTemplate Kind + SHA-256 versioning | 38/#98 | ✅ merged | Kind contract + git-style content-addressable hash + build_uri helper; 9/9 tests pass |
-| 7-2-c template caps (read/write/instantiate) | 39 | ⏳ pending | Mostly doc-only PR — cap kinds are open atoms; need codified semantics in SPEC + LV cap-grant form |
-| 7-2-d Agent.spawn/4 + slice workspace_uri + spawned_by | 40 | ⏳ pending | Add `spawn(template_uri, instance_name, workspace_uri, granted_by)` + Agent slice fields + migration + populate from PR 47 Generator |
+| 7-2-c template caps (read/write/instantiate) | 39/#103 | ✅ merged | 8 invariant tests pin read/write/instantiate semantic partition + kind boundary strictness; cap kinds are open atoms so no code change needed |
+| 7-2-d Agent.spawn/4 + AgentLineage + flip spawned_by placeholder | 40/#104 | ✅ merged | 3 coupled pieces: new Esr.AgentLineage ETS Registry (6th in family), Agent.spawn/4 composing SpawnRegistry+WorkspaceRegistry+AgentLineage, Capability.instance_match?/2 {:spawned_by, _} flip from PR 42 placeholder to real lineage walk. 19/19 capability tests pass. Closes V3.3. |
 | 7-2-e Generator (Session.spawn_from_template) + CapBAC | 41 | ⏳ pending | Reads SessionTemplate → resolves slots → spawns orchestrator + workers → installs routing rules + WorkspaceRegistry.bind → new `template:instantiate` cap gate |
 | 7-3-a Capability.matches?/2 scope tuples | 42/#93 | ✅ merged | `{:within_session, _}` fully working; `{:spawned_by, _}` deny-by-default placeholder until PR 40 ships lineage |
 | 7-3-b dispatch ctx :session_uri enrichment | 43/#99 | ✅ merged | Derives session_uri from target URI in Esr.Kind.Runtime.handle_dispatch; additive, no regression |
