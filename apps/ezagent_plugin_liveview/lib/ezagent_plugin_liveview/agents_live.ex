@@ -62,8 +62,13 @@ defmodule EzagentPluginLiveview.AgentsLive do
               <td>
                 <a
                   href={"/admin/agents/#{uri_to_path_seg(agent.agent_uri)}"}
-                  style="color: #0969da; font-size: 12px;"
+                  style="color: #0969da; font-size: 12px; margin-right: 12px;"
                 >detail →</a>
+                <a
+                  href={"/admin/agents/#{uri_to_path_seg(agent.agent_uri)}/terminal"}
+                  style="color: #0969da; font-size: 12px;"
+                  title="Open xterm.js terminal for this PTY"
+                >📺 terminal</a>
               </td>
             </tr>
           </tbody>
