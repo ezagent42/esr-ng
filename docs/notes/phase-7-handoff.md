@@ -1,15 +1,34 @@
-# Phase 7 handoff — ESR v1 release
+# Phase 7 handoff — ESR v1-rc1 (release candidate, NOT released)
 
-> **ESR v1.0** is officially released at Phase 7 closeout. This
-> document is the v1 release note + handoff summary for the dev
-> team that takes over.
+> **⚠️ STATUS DOWNGRADE 2026-05-18 PM:** an earlier revision of this
+> document (PR #95) declared "ESR v1.0 officially released". Allen
+> reviewed and rejected that framing the same day — v1 cannot be
+> declared while the items in **§Blocking work for true v1 release**
+> below remain open. This file is now the **rc1** handoff note. A
+> true v1 release note will replace it after the blockers are cleared.
 
-**Released:** 2026-05-18 (Phase 7 closeout, Allen's last hands-on phase).
+**rc1 frozen:** 2026-05-18 (PRs #84–#109 on `main`).
 **Companion docs:** Phase 6 closeout `docs/notes/phase-6-architecture-closeout.md`, SPEC `phase-specs/phase7/SPEC.md` (LOCKED v3), VERIFICATION `phase-specs/phase7/VERIFICATION.md`, PLAN `phase-specs/phase7/PLAN.md`.
 
 ---
 
-## v1 in one line
+## Blocking work for true v1 release
+
+These items are part of Phase 7 SPEC §7-1 and §7-3. Until they land, the system does **not** meet the v1 contract stated in §"What ESR v1 means" below — it is **rc1**.
+
+| Blocker | What's missing | SPEC ref |
+|---|---|---|
+| **PR 32** CC channel v1→v2 cutover | `esr_plugin_cc_bridge_v1_prototype/` app still ships; live `cc-demo` still binds via v1 prototype path; v2 `EsrPluginCcChannel.BridgeRegistry` exists but is not the production wire. Decision #144 invariant `no_v1_bridge_after_cutover_test.exs` cannot be enabled. | SPEC §7-1 (CC channel v1→v2 cutover row) |
+| **PR 46-impl** orchestrator 7 tool bodies | Tool surface + design-lock CI gates (#137 no `grant_cap` tool, #141 no `fork` tool) shipped, but every tool body returns `{:error, :not_implemented_yet}`. The killer feature (`save_template_as`, `update_template`, `write_matcher`, `add_agent_slot`, etc.) is non-functional. | SPEC §7-3 orchestrator tool table (7 rows) |
+| **PR 47** Generator scoped-cap grant call site | `Esr.Entity.Session.spawn_from_template/2` does not yet dispatch `identity/grant_cap` with `{:within_session, S}` + `{:spawned_by, orchestrator_uri}` — orchestrator runs without the bounded delegation envelope D7-3 promises. | SPEC §7-3 D7-3 deliverable c |
+| **PR 48** in-flight template-deletion semantics | `update_template` on a deleted parent must return `{:error, :parent_template_deleted}`; `save_template_as` must still work. Untested. | SPEC §7-3 deletion semantics row |
+| **PR 49** orchestrator e2e demo | No recorded agent-browser run of the full flow (NL prompt → spawn orchestrator + workers → `save_template_as` → re-instantiate). V5 evidence pack lacks the killer-feature video. | VERIFICATION V5 |
+
+Until **all** of these land, do not cite this document as "v1 released". The architectural decisions (Decision Log #135–#144) are still locked — the implementation that makes those decisions observable in production is what's missing.
+
+---
+
+## v1 in one line (target — rc1 does NOT yet meet this)
 
 ESR v1 = "production-grade session-template generator" + "complete handoff to dev team without Allen as fallback."
 
@@ -17,7 +36,7 @@ The killer feature is multi-agent orchestration where the user spawns a session,
 
 The non-feature half is just as important: invariant tests + an `esr-developer` Claude Code skill take over the architectural-judgment role Allen used to play in PR reviews. Dev team can ship without escalating.
 
-## What v1 actually delivered (8 of the 10 architecturally significant pieces)
+## What rc1 actually delivered (8 of the 10 architecturally significant pieces — design + surfaces only; bodies pending for orchestrator tools)
 
 | | Decision Log | What it is |
 |---|---|---|
@@ -86,7 +105,12 @@ If any of these fails: **stop the merge**. Do not paper over with a `@tag :skip`
 
 These are out of v1 scope. The dev team picks them up or leaves them based on their own roadmap.
 
-- **CC channel v1→v2 cutover** (PR 32 deferred — see resume note below): v2 BridgeRegistry shipped (Phase 6 PR 4) but `agent://cc-demo` still binds via v1 prototype in production. Cutover requires Python bridge HTTP/SSE → WebSocket port + 6 Elixir file migrations + delete v1 app + invariant test. Risk to Allen's live cc-demo if done carelessly. Allen-flagged "fresh session, careful pre-audit" approach.
+> **Note (rc1 downgrade):** the earlier revision of this doc listed
+> "CC channel v1→v2 cutover (PR 32)" in this deferred bucket. That
+> was wrong — it is a v1 **blocker**, not a deferral. It has been
+> moved to §Blocking work for true v1 release at the top of this
+> file.
+
 - **Federation** (D7-4): Allen reopens later. Not even prep hooks in v1.
 - **Plugin unload** (D7-8): hot install ships; unload requires Kind lifecycle management for live instances of the unregistered Kind — non-trivial. Defer until needed.
 - **OTP release / Docker / systemd** (D7-9): `mix esr.bootstrap` is sufficient for "dev team installs ESR on prod-like host." Full release engineering when scale demands.
@@ -128,6 +152,6 @@ Allen has driven 7 phases (0-7) plus the Phase 4.5 in-flight insertion, ~30 Deci
 
 The dev team's job is to take v1, ship the deferred items in their own time, build Phase 8 (or whatever direction makes sense for them), and keep the cross-PR invariants green. The skill + docs + CI are designed to make that possible without Allen on call.
 
-**ESR v1 released.** Phase 7 closed.
+**ESR v1-rc1 frozen.** Phase 7 nearly closed — see §Blocking work for true v1 release at top of this file. A subsequent revision of this document will declare v1 once those land.
 
-— closeout signed off by Allen 2026-05-18, executed by Claude Code (Opus 4.7 / Sonnet 4.7 / Haiku — whichever model picked up the autonomous run).
+— rc1 framing recorded 2026-05-18, executed by Claude Code (Opus 4.7 / Sonnet 4.7 / Haiku — whichever model picked up the autonomous run).

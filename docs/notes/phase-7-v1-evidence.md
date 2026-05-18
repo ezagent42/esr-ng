@@ -1,9 +1,17 @@
-# Phase 7 / ESR v1 — visual evidence pack
+# Phase 7 / ESR v1-rc1 — visual evidence pack (NOT yet v1)
+
+> **Status:** rc1, **not v1**. See `docs/notes/phase-7-handoff.md`
+> §Blocking work for true v1 release. This evidence pack only covers
+> the rc1 surface (text + image round-trip, bootstrap, sidecar reap).
+> The **orchestrator end-to-end demo video** (Phase 7 PR 49) is a v1
+> blocker — once recorded via `agent-browser record start/stop`, it
+> lands as Evidence 5 in a follow-up revision and this header is
+> upgraded to "v1 evidence pack."
 
 > Allen 2026-05-18 asked for a demo video. The autonomous CC session
 > shipping Phase 7 didn't have a screen-recording capability — best
 > available was agent-browser screenshots from the live admin LV.
-> This doc collects them as v1 evidence + names what each shows.
+> This doc collects them as rc1 evidence + names what each shows.
 
 A real demo video is a Phase 8 / day-1-dev-team deliverable per
 `docs/onboarding/first-30-days.md` §week 4. This evidence pack is
@@ -147,9 +155,11 @@ Test passes locally; runs in CI when `--include slow` is set.
 
 ---
 
-## Phase 7 / ESR v1 declaration
+## Phase 7 status (rc1, not v1)
 
-ESR v1 officially released per `docs/notes/phase-7-handoff.md` at
-Phase 7 closeout (2026-05-18). This evidence pack is the visual
-companion to that release note for stakeholders who want to see
-the system working before reading the design docs.
+This evidence pack is the visual companion to `docs/notes/phase-7-handoff.md`
+**rc1** revision. The earlier "v1 officially released" framing has been
+withdrawn — see that file's §Blocking work for true v1 release. The
+declaration here will be upgraded to "v1 released" once PR 32 + PR
+46-impl + PR 47/48/49 land and Evidence 5 (the killer-feature
+orchestrator video) is recorded.
