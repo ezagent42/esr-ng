@@ -1,0 +1,4 @@
+{
+  "remoteControlAtStartup": false,
+  "$comment": "Phase 6 PR 23 (Allen 2026-05-18): when claude is spawned under PtyServer (not by a human in their own terminal), we MUST keep interactive I/O on the local PTY. The operator's global ~/.claude/settings.json may enable remoteControlAtStartup which redirects keystrokes + screen draws to the claude.ai cloud session — making the local PTY a passive observer. PtyServer passes this file via --settings to override the global default for the spawned process only."
+}
