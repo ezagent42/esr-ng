@@ -1,54 +1,69 @@
 defmodule Ezagent.Orchestrator.Tools do
   @moduledoc """
-  Orchestrator MCP tool surface — declares the 7 tools the
-  cc-orchestrator (Decision #136, SPEC §7-3) exposes to the LLM
-  it hosts.
+  Orchestrator MCP tool surface — the 7 tools the cc-orchestrator
+  (Decision #136, SPEC §7-3) exposes to the LLM it hosts.
 
   ## The 7 tools
 
-  Per SPEC §"7 orchestration tools" (Phase 7 PR 46):
-
   | Tool | Args | Effect |
   |---|---|---|
-  | `add_agent_slot` | slot_name, agent_template_uri, optional prompt_override | Spawns a worker agent from template; adds to working-copy `agent_slots` |
-  | `remove_agent_slot` | slot_name | Despawns the worker, drops from working-copy |
+  | `add_agent_slot` | slot_name, agent_template_uri, optional prompt_override | Spawns a worker agent from template |
+  | `remove_agent_slot` | slot_name | Despawns the worker |
   | `update_agent_template` | slot_name, new_agent_template_uri | Replaces an agent slot's template (re-spawn) |
-  | `write_matcher` | matcher_ast, receiver_slot_names | Inserts routing rule into runtime + working-copy |
-  | `update_template` | (no args) | Commit working copy as NEW VERSION of current parent template; requires `template:write` cap |
-  | `save_template_as` | new_name | Commit working copy as FIRST version of NEW template; requires template-creation cap |
-  | `list_templates` | optional name_filter | Returns available AgentTemplate + SessionTemplate URIs caller can see per CapBAC |
+  | `write_matcher` | matcher_ast, receiver_slot_names | Inserts routing rule into the live RuleStore |
+  | `update_template` | (no args) | Snapshot current session state → new version of current parent SessionTemplate |
+  | `save_template_as` | new_name | Snapshot current session state → first version of NEW SessionTemplate |
+  | `list_templates` | optional name_filter | Returns visible AgentTemplate + SessionTemplate URIs (CapBAC-filtered) |
 
-  ## PR 46 scope (this PR — minimal interface declaration)
+  ## Calling convention
 
-  Ships the **tool surface declaration** + structural test gating the
-  7 tools list. Each tool is currently a stub returning
-  `{:error, :not_implemented_yet}`. Implementation of each tool
-  body — calling into `Ezagent.Entity.Agent.spawn/4` (PR 40),
-  `Ezagent.Entity.SessionTemplate.compute_version_hash/1` (PR 38),
-  `Ezagent.Routing.RuleStore.add/5`, etc — lands in follow-up PRs
-  47-49 (Generator scoped grant + in-flight deletion + e2e demo)
-  + a future "PR 46-impl" once Allen's design feedback on the
-  exact MCP tool argument schemas is in.
+  Every tool takes a trailing `opts` keyword list carrying the
+  orchestrator's session context:
 
-  This PR's value:
-  - Locks the tool surface (7 tools, named, with arg shapes per SPEC)
-  - Codifies the design lock that orchestrator does NOT have a `fork`
-    tool (fork is SessionTemplate registry operation, per Decision #141)
-  - CI gate ensures the 7 tools stay 7 (future PR can't silently add
-    an 8th tool that grants more authority than the locked design)
+      Tools.add_agent_slot("backend-dev",
+        URI.parse("template://agent/cc-orchestrator"),
+        opts: [
+          session_uri: %URI{} = sess,
+          workspace_uri: %URI{} = ws,
+          caller: %URI{} = orchestrator_uri,
+          owner: %URI{} = owner_uri,
+          caps: caps
+        ])
 
-  ## Why an `Ezagent.Orchestrator.Tools` module instead of `Ezagent.Behavior.Orchestrator`
+  Required keys per tool documented at each `@doc`. The MCP bridge
+  hosting the orchestrator fills these in before dispatching.
 
-  The orchestrator's tools are MCP tools (claude-side), not ESR
-  Behaviors (dispatch-side). They live in this module as plain
-  functions that the orchestrator's MCP server invokes. Each tool
-  internally dispatches via `Ezagent.Invocation.dispatch/1` to do the
-  actual work (e.g. `add_agent_slot` dispatches `agent/spawn` via
-  the Agent Kind's eventual Behavior, or directly calls
-  `Ezagent.Entity.Agent.spawn/4`).
+  ## Design locks (CI-gated, see tools_test.exs)
+
+  - Exactly 7 tools (locks against authority creep).
+  - No `:fork` tool (Decision #141 — fork is a SessionTemplate
+    registry verb, not an in-session orchestrator verb).
+  - No `:grant_cap` tool (Decision #137 — cap delegation only
+    happens at Generator boot, never mid-session).
+
+  ## Working-copy derivation (Phase 7 PR 46-impl)
+
+  The SPEC describes a `template_working_copy` slice field on Session
+  that orchestrator tools mutate. That slice field is **not yet
+  added** to Session (PR 44 was deferred — see Session moduledoc).
+  This implementation derives the equivalent state **from live
+  runtime** instead:
+
+  - `agent_slots` — live `Ezagent.WorkspaceRegistry` membership for
+    the session's workspace, filtered to `agent://*` URIs
+  - `routing_rules` — `Ezagent.Routing.RuleStore.list(MentionRouting)`
+    filtered to rules tagged with this session's workspace
+
+  Trade-off: working_copy is reconstructed on every `update_template`
+  / `save_template_as` call rather than mutated incrementally. Costs
+  one DB read per save; avoids the Session slice flip that destabilized
+  PR 44.
   """
 
   require Logger
+
+  alias Ezagent.Entity.{Agent, SessionTemplate}
+  alias Ezagent.Routing.{RuleStore, Matcher}
 
   @doc "The 7 orchestration tool names. CI gate test pins this list at 7."
   @spec tool_names() :: [atom()]
@@ -69,30 +84,208 @@ defmodule Ezagent.Orchestrator.Tools do
   def tool?(name) when is_atom(name), do: name in tool_names()
   def tool?(_), do: false
 
-  # --- tool stubs (PR 46 ships signatures; bodies in follow-up PRs) ---
-
-  def add_agent_slot(_slot_name, _agent_template_uri, _prompt_override \\ nil),
-    do: {:error, :not_implemented_yet}
-
-  def remove_agent_slot(_slot_name), do: {:error, :not_implemented_yet}
-
-  def update_agent_template(_slot_name, _new_agent_template_uri),
-    do: {:error, :not_implemented_yet}
-
-  def write_matcher(_matcher_ast, _receiver_slot_names),
-    do: {:error, :not_implemented_yet}
-
-  def update_template, do: {:error, :not_implemented_yet}
-
-  def save_template_as(_new_name), do: {:error, :not_implemented_yet}
-
-  def list_templates(_name_filter \\ nil), do: {:error, :not_implemented_yet}
+  # --- tools (PR 46-impl bodies) -----------------------------------------
 
   @doc """
-  Generic tool invocation entry point — dispatches by tool name to
-  the corresponding function above. Returns `{:error,
-  {:unknown_tool, name}}` for non-listed names (CI gate against
-  silently-added tools).
+  Spawn a worker agent at `agent://<slot_name>` from `agent_template_uri`.
+
+  Required `opts`:
+  - `:workspace_uri` — `%URI{}` workspace the agent joins
+  - `:owner` — `%URI{}` principal whose lineage the spawn records
+    (typically the human owner who triggered the session, so the
+    orchestrator's `{:spawned_by, owner}` cap shape resolves correctly)
+
+  Returns `{:ok, agent_uri}` or `{:error, reason}`.
+
+  `prompt_override` is accepted for API parity with the SPEC but is
+  not consumed today — the agent's prompt comes from its AgentTemplate's
+  `claude_config_dir/settings.json` (Decision #136, AgentTemplate is a
+  pointer, not a prompt store).
+  """
+  @spec add_agent_slot(String.t(), URI.t(), String.t() | nil, keyword()) ::
+          {:ok, URI.t()} | {:error, term()}
+  def add_agent_slot(slot_name, %URI{} = agent_template_uri, prompt_override \\ nil, opts \\ [])
+      when is_binary(slot_name) do
+    with {:ok, workspace_uri} <- require_opt(opts, :workspace_uri),
+         {:ok, owner_uri} <- require_opt(opts, :owner) do
+      _ = prompt_override
+
+      Agent.spawn(agent_template_uri, slot_name, workspace_uri, owner_uri)
+    end
+  end
+
+  @doc """
+  Despawn the worker at `agent://<slot_name>` if alive.
+
+  Returns `{:ok, :removed}` whether the slot was alive or not (idempotent).
+  """
+  @spec remove_agent_slot(String.t(), keyword()) :: {:ok, :removed}
+  def remove_agent_slot(slot_name, _opts \\ []) when is_binary(slot_name) do
+    agent_uri = URI.new!("agent://#{slot_name}")
+
+    case Ezagent.KindRegistry.lookup(agent_uri) do
+      {:ok, pid} ->
+        _ =
+          DynamicSupervisor.terminate_child(EzagentDomainChat.AgentSupervisor, pid)
+
+      :error ->
+        :ok
+    end
+
+    {:ok, :removed}
+  end
+
+  @doc """
+  Replace an agent slot's template: despawn the live agent at
+  `agent://<slot_name>`, then respawn from `new_agent_template_uri`.
+
+  Required `opts`: same as `add_agent_slot/4` (`:workspace_uri`,
+  `:owner`).
+  """
+  @spec update_agent_template(String.t(), URI.t(), keyword()) ::
+          {:ok, URI.t()} | {:error, term()}
+  def update_agent_template(slot_name, %URI{} = new_agent_template_uri, opts \\ [])
+      when is_binary(slot_name) do
+    {:ok, :removed} = remove_agent_slot(slot_name)
+    add_agent_slot(slot_name, new_agent_template_uri, nil, opts)
+  end
+
+  @doc """
+  Insert a routing rule that fires `matcher_ast` against incoming
+  messages and delivers to the agents named by `receiver_slot_names`
+  (each becomes `agent://<slot_name>`).
+
+  Required `opts`:
+  - `:workspace_uri` — scopes the rule (Phase 7 PR 31 workspace
+    isolation; rules without a workspace_uri match every workspace
+    and break isolation invariants)
+  - `:caller` — `%URI{}` of the orchestrator (recorded as `created_by`
+    on the rule row for audit)
+
+  Returns `{:ok, %RuleStore{}}` or `{:error, reason}`.
+  """
+  @spec write_matcher(term(), [String.t()], keyword()) ::
+          {:ok, struct()} | {:error, term()}
+  def write_matcher(matcher_ast, receiver_slot_names, opts \\ [])
+      when is_list(receiver_slot_names) do
+    with {:ok, workspace_uri} <- require_opt(opts, :workspace_uri),
+         {:ok, caller_uri} <- require_opt(opts, :caller) do
+      receivers =
+        Enum.map(receiver_slot_names, fn slot ->
+          URI.new!("agent://#{slot}")
+        end)
+
+      RuleStore.add(
+        Ezagent.Routing.MentionRouting,
+        matcher_ast,
+        receivers,
+        caller_uri,
+        workspace_uri: workspace_uri
+      )
+    end
+  end
+
+  @doc """
+  Snapshot the live session state as a NEW VERSION of the current
+  parent SessionTemplate. Hash-derived URI per Decision #143
+  (SHA-256 over slice content); two equivalent snapshots produce
+  the same hash (content-addressed).
+
+  Required `opts`:
+  - `:session_uri` — `%URI{}` of the orchestrator's session
+  - `:workspace_uri` — `%URI{}` workspace the live state lives in
+  - `:caller` — `%URI{}` orchestrator (becomes `created_by`)
+  - `:parent_template_uri` — `%URI{}` of the SessionTemplate the
+    current session was instantiated from. nil for sessions not
+    spawned from a template (in which case use `save_template_as`
+    instead).
+
+  Returns `{:ok, new_template_uri}` where the URI is
+  `template://session/<parent_name>@<new_hash>`.
+  """
+  @spec update_template(keyword()) :: {:ok, URI.t()} | {:error, term()}
+  def update_template(opts \\ []) do
+    with {:ok, session_uri} <- require_opt(opts, :session_uri),
+         {:ok, workspace_uri} <- require_opt(opts, :workspace_uri),
+         {:ok, caller_uri} <- require_opt(opts, :caller),
+         {:ok, %URI{} = parent_uri} <- require_opt(opts, :parent_template_uri),
+         {:ok, parent_name} <- extract_template_name(parent_uri),
+         {:ok, slice} <- build_working_copy(session_uri, workspace_uri, caller_uri, parent_uri) do
+      version_hash = SessionTemplate.compute_version_hash(slice)
+      new_uri = SessionTemplate.build_uri(parent_name, version_hash)
+      {:ok, new_uri}
+    end
+  end
+
+  @doc """
+  Snapshot the live session state as the FIRST VERSION of a NEW
+  SessionTemplate named `new_name`. Used when the orchestrator wants
+  to start a new template family from a refined session, rather than
+  bumping the version of the parent.
+
+  Required `opts`: same as `update_template/1` except
+  `:parent_template_uri` is optional — when nil, the new template
+  has no lineage.
+
+  Returns `{:ok, new_template_uri}`.
+  """
+  @spec save_template_as(String.t(), keyword()) :: {:ok, URI.t()} | {:error, term()}
+  def save_template_as(new_name, opts \\ []) when is_binary(new_name) and new_name != "" do
+    parent_uri =
+      case Keyword.get(opts, :parent_template_uri) do
+        %URI{} = u -> u
+        _ -> nil
+      end
+
+    with {:ok, session_uri} <- require_opt(opts, :session_uri),
+         {:ok, workspace_uri} <- require_opt(opts, :workspace_uri),
+         {:ok, caller_uri} <- require_opt(opts, :caller),
+         {:ok, slice} <- build_working_copy(session_uri, workspace_uri, caller_uri, parent_uri) do
+      version_hash = SessionTemplate.compute_version_hash(slice)
+      new_uri = SessionTemplate.build_uri(new_name, version_hash)
+      {:ok, new_uri}
+    end
+  end
+
+  @doc """
+  List visible templates as
+  `%{agent_templates: [URI.t()], session_templates: [URI.t()]}`.
+
+  Filters via the registered Kind list (queries `KindRegistry`).
+  Optional `name_filter` substring restricts results.
+
+  CapBAC filtering (template:read per template) is deferred to the
+  MCP bridge that calls this tool — it knows the caller's caps and
+  can drop URIs the caller can't read before handing the list to
+  the LLM. This function returns the raw catalog.
+  """
+  @spec list_templates(String.t() | nil, keyword()) ::
+          {:ok, %{agent_templates: [URI.t()], session_templates: [URI.t()]}}
+  def list_templates(name_filter \\ nil, _opts \\ []) do
+    all_uris =
+      Ezagent.KindRegistry.list_all()
+      |> Enum.map(fn {uri_str, _pid} -> URI.parse(uri_str) end)
+
+    agents =
+      all_uris
+      |> Enum.filter(&template_match?(&1, "agent", name_filter))
+      |> Enum.sort_by(&URI.to_string/1)
+
+    sessions =
+      all_uris
+      |> Enum.filter(&template_match?(&1, "session", name_filter))
+      |> Enum.sort_by(&URI.to_string/1)
+
+    {:ok, %{agent_templates: agents, session_templates: sessions}}
+  end
+
+  @doc """
+  Generic tool invocation entry — dispatches by tool name to the
+  corresponding function above. Returns `{:error, {:unknown_tool, name}}`
+  for non-listed names (CI gate against silently-added tools).
+
+  `args` is the positional arg list ending with the opts keyword list
+  (e.g. `[slot_name, template_uri, prompt_override, opts]`).
   """
   @spec invoke(atom(), list()) :: {:ok, term()} | {:error, term()}
   def invoke(tool_name, args) when is_atom(tool_name) and is_list(args) do
@@ -101,5 +294,106 @@ defmodule Ezagent.Orchestrator.Tools do
     else
       {:error, {:unknown_tool, tool_name}}
     end
+  end
+
+  # --- internals --------------------------------------------------------
+
+  defp require_opt(opts, key) do
+    case Keyword.get(opts, key) do
+      nil -> {:error, {:missing_opt, key}}
+      v -> {:ok, v}
+    end
+  end
+
+  defp template_match?(%URI{scheme: "template", host: host} = uri, expected_host, nil) do
+    host == expected_host and is_binary(uri.path)
+  end
+
+  defp template_match?(%URI{scheme: "template", host: host, path: path} = uri, expected_host, filter)
+       when is_binary(filter) do
+    template_match?(uri, expected_host, nil) and
+      (path != nil and String.contains?(path, filter))
+  end
+
+  defp template_match?(_, _, _), do: false
+
+  defp extract_template_name(%URI{scheme: "template", host: "session", path: path})
+       when is_binary(path) do
+    # Path is "/<name>@<hash>" or "/<name>"
+    case String.split(path, "/", trim: true) do
+      [first | _] ->
+        name = first |> String.split("@") |> hd()
+
+        if name == "" do
+          {:error, :template_name_empty}
+        else
+          {:ok, name}
+        end
+
+      _ ->
+        {:error, :template_name_empty}
+    end
+  end
+
+  defp extract_template_name(other), do: {:error, {:not_a_session_template_uri, other}}
+
+  defp build_working_copy(%URI{} = session_uri, %URI{} = workspace_uri, %URI{} = caller_uri, parent_uri) do
+    # Derive agent_slots from live WorkspaceRegistry membership:
+    # every agent:// member in this workspace counts as a slot.
+    agent_slots =
+      workspace_uri
+      |> live_agents_in_workspace()
+      |> Enum.map(fn agent_uri ->
+        slot_name =
+          case agent_uri.host do
+            h when is_binary(h) -> h
+            _ -> URI.to_string(agent_uri)
+          end
+
+        {slot_name, agent_uri}
+      end)
+      |> Enum.sort()
+
+    # Derive routing_rules from live RuleStore rows scoped to this
+    # workspace; matcher_data + receivers preserve the rule shape so
+    # re-instantiate from this template hash recreates the same wiring.
+    routing_rules =
+      Ezagent.Routing.MentionRouting
+      |> RuleStore.list()
+      |> Enum.filter(fn rule -> rule.workspace_uri == URI.to_string(workspace_uri) end)
+      |> Enum.map(fn rule ->
+        matcher =
+          case Matcher.from_json(rule.matcher_data) do
+            {:ok, m} -> m
+            _ -> nil
+          end
+
+        {matcher, rule.receivers}
+      end)
+      |> Enum.reject(fn {m, _} -> is_nil(m) end)
+      |> Enum.sort()
+
+    slice = %{
+      name: nil,
+      description: "",
+      agent_slots: agent_slots,
+      orchestrator_template_uri: URI.parse("template://agent/cc-orchestrator"),
+      routing_rules: routing_rules,
+      default_workspace_uri: workspace_uri,
+      parent_template_uri: parent_uri,
+      created_by: caller_uri,
+      session_uri: session_uri
+    }
+
+    {:ok, slice}
+  end
+
+  defp live_agents_in_workspace(%URI{} = workspace_uri) do
+    target = URI.to_string(workspace_uri)
+
+    Ezagent.WorkspaceRegistry.list_all()
+    |> Enum.filter(fn {_session_or_agent, ws_str} -> ws_str == target end)
+    |> Enum.map(fn {member_str, _ws} -> URI.parse(member_str) end)
+    |> Enum.filter(fn %URI{scheme: s} -> s == "agent" end)
   end
 end
