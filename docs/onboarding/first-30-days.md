@@ -23,7 +23,7 @@ Then:
 mix phx.server
 ```
 
-Open `http://localhost:4000/admin` (or `http://100.64.0.27:4000/admin` if remote). LV admin should load.
+Open `http://localhost:10042/admin` (or `http://100.64.0.27:10042/admin` if remote). LV admin should load.
 
 **Day 2-3: read the architecture in order**
 

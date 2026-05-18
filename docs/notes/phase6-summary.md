@@ -73,7 +73,7 @@ After PR 12 merges, run:
 
 ```
 mix ezagent.home.adopt_db       # one-time migration (idempotent if already done)
-mix phx.server              # boots at http://0.0.0.0:4000 (tailnet: 100.64.0.27:4000)
+mix phx.server              # boots at http://0.0.0.0:10042 (tailnet: 100.64.0.27:10042)
 ```
 
 Then via browser:
