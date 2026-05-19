@@ -157,6 +157,84 @@ defmodule Ezagent.PluginCcPty.PtyServer do
   def output_topic(%URI{} = agent_uri),
     do: "pty:output:" <> URI.to_string(agent_uri)
 
+  @doc """
+  PR #128 — return the current accumulated stdout buffer for replay
+  on new xterm connections (ttyd-style initial-render fix).
+
+  Without this, a fresh `/admin/agents/:uri/terminal` mount shows
+  a black screen until claude (or whatever TUI is running) emits
+  fresh output. With this, the LV pushes the existing buffer to
+  xterm at mount and the operator sees the current screen state
+  immediately.
+
+  Bounded to the last `max_bytes` (default 64KB) so a long-running
+  session doesn't send megabytes through PubSub on every reconnect.
+  Most TUIs (claude included) re-emit their full visible screen
+  within the last few KB of output via ANSI cursor + redraw
+  sequences, so 64KB is generous.
+
+  Returns `{:ok, binary}` or `:error` if PtyServer not alive.
+  """
+  @spec snapshot_buffer(URI.t(), pos_integer()) :: {:ok, binary()} | :error
+  def snapshot_buffer(%URI{} = agent_uri, max_bytes \\ 65_536) do
+    case find_by_agent_uri(agent_uri) do
+      {:ok, pid} ->
+        try do
+          state = :sys.get_state(pid, 500)
+          buf = state.pty_buffer
+
+          tail =
+            if byte_size(buf) > max_bytes do
+              binary_part(buf, byte_size(buf) - max_bytes, max_bytes)
+            else
+              buf
+            end
+
+          {:ok, tail}
+        catch
+          _, _ -> :error
+        end
+
+      :error ->
+        :error
+    end
+  end
+
+  @doc """
+  PR #128 — trigger a TUI redraw by sending a brief winsize change
+  followed by the original size. Most TUIs (claude included) listen
+  for SIGWINCH and re-emit their full screen.
+
+  This is the **belt-and-suspenders** companion to `snapshot_buffer/2`:
+  buffer replay handles the cumulative output; winsz nudge handles
+  the case where the TUI's last redraw is older than the bounded
+  buffer window.
+  """
+  @spec trigger_redraw(URI.t()) :: :ok | :error
+  def trigger_redraw(%URI{} = agent_uri) do
+    case find_by_agent_uri(agent_uri) do
+      {:ok, pid} ->
+        try do
+          state = :sys.get_state(pid, 500)
+
+          if state.os_pid do
+            # Briefly shrink + restore to provoke a redraw without
+            # leaving a smaller window pinned.
+            :exec.winsz(state.os_pid, 40, 119)
+            Process.sleep(50)
+            :exec.winsz(state.os_pid, 40, 120)
+          end
+
+          :ok
+        catch
+          _, _ -> :error
+        end
+
+      :error ->
+        :error
+    end
+  end
+
   @doc "List all live PtyServer agent_uris under the DynamicSupervisor."
   def list_agents do
     sup_pid = Process.whereis(EzagentPluginCcPty.PtyServerSupervisor)
