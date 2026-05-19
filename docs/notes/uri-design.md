@@ -216,6 +216,83 @@ This is the **plugin isolation north star** rule made specific to URIs.
 
 (Discussion appended here as it progresses. Newest entry at top within this section.)
 
+### 2026-05-19 — Round 1: Allen's first pass
+
+**Allen's verdicts on the 8 questions:**
+
+| Q | Allen's call | Note |
+|---|---|---|
+| Q1 — uniform `<scheme>://<type>/<name>` | **Yes, uniform** | "多打几个 default 没问题" (an extra `default` path segment is fine) |
+| Q2 — split `template://` or unify | **Unify with `@hash`** | Agent templates should ALSO be versioned |
+| Q3 — `/behavior/...` path vs query string | **Query string** | "位置式指定资源，动作是 query" — path identifies the resource, action is a query param |
+| Q4 — `resource://` namespace meaning | **Deferred** | Pending workspace discussion below |
+| Q5 — singleton sentinel naming | **Open** | Allen: "我没有看明白，routing-admin:// 的路径是怎么回事？" — see clarification below |
+| Q6 — plugin scheme vs type | **All plugins are core flavors** | "不应该有任何 plugin 不是 core 的风味" — `feishu://` is the wrong shape. `user://X/feishu/openid` or `session://X/feishu/chat_id` instead |
+| Q7 — `@hash` extension | **Templates only** | "其它的好像没有知道内容版本的需要" |
+| Q8 — `@known_schemes` as SoT | **Yes, lock down bypass paths** | Allowlist becomes load-bearing |
+
+**Q5 clarification (asked by Allen):** `routing-admin://default` is a **synthetic singleton Kind**. It exists so routing rule mutations can dispatch through the regular cap-check pipeline. Source: `apps/ezagent_core/lib/ezagent/entity/routing_admin.ex:7`:
+
+> "All routing rule mutations (add/delete/disable/enable) now go through `Ezagent.Invocation.dispatch` to `routing-admin://default/behavior/routing_admin/<action>`, which fires the Phase 3d real CapBAC check at dispatch step 5.5."
+
+Dispatch target shape: `routing-admin://default/behavior/routing_admin/<action>`. The `default` is the singleton instance name (since there's only one routing-admin per cluster, the name doesn't carry meaning — it's a placeholder). Same pattern as `pty-input://default`.
+
+Under Q3's query-string outcome, the path collapses to: `routing-admin://default?action=routing_admin.add_rule`. Even cleaner: under Q1's uniform 2-segment + Q3's query, sentinels become `routing-admin://singleton/default?action=...` — `singleton` as the type segment, `default` as the (still placeholder) instance name. Allen's "default vs bootstrap" question reduces to: pick ONE word for "the placeholder instance of a singleton Kind". Recommendation: `default`.
+
+**Q6 follow-through (feishu re-shape):**
+
+If `feishu://oc_xxx` becomes `session://X/feishu/chat_id` (or `user://X/feishu/openid`), then:
+
+- The `feishu://oc_xxx` Receiver Kind shape goes away. Instead, the `session://X` Kind acquires a `feishu` sub-resource path that the feishu plugin's Behavior registers against (mirroring how `/behavior/<kind>/<action>` works today, but for plugin-supplied side-effects).
+- The `feishu_user_bindings` table either stays as-is (a join table — fine, no scheme change needed) or its row keys become path-segment fragments under `user://X`.
+- Existing `feishu://X` URIs in `KindRegistry`, routing rules, audit log need migration.
+
+**This is a substantial refactor** — separate PR (call it PR-F). The URI design lock-in justifies it: keeping `feishu://` as a top-level scheme cements the "plugin can carve out its own world" anti-pattern.
+
+### Open follow-up — Workspace's role (Allen's deferring Q4 to this)
+
+Allen asks: **"workspace 究竟是做什么的？为什么我们需要独立的 workspace，而不是直接类似 Template 那样，提供 SessionWorkspace, UserWorkspace 这些具体的使用概念，workspace 当作文件夹使用？"**
+
+**What workspace actually does today** (code reading):
+
+`apps/ezagent_domain_workspace/lib/ezagent/entity/workspace.ex:1-22`:
+> A `workspace://<name>` URI carries (a) a set of member Entity URIs that should be alive whenever the Workspace is "instantiated", (b) a list of session templates, (c) routing rules scoped to this Workspace. It is the **plugin-isolation north star** in action: a future plugin author adds a new Kind X, declares it in a Workspace template, and on cluster restart their Kind X comes back without any change to ezagent_core.
+
+So workspace serves **two functions**:
+
+1. **Declarative**: "when this instance boots, ensure these entities are alive + these templates are loaded + these rules are installed."  This is the bootable-config role; not a folder.
+
+2. **Routing scope**: at dispatch time, the bound workspace_uri filters which routing rules apply. `apps/ezagent_domain_chat/lib/ezagent/behavior/chat.ex:127-137` resolves session_uri → workspace_uri via WorkspaceRegistry, passes that to the rule evaluator.
+
+Allen's "as folder" framing probes whether workspace is **one concept too many**. Three coherent answers:
+
+**Answer X — keep workspace as a Kind, clarify its role.** Workspace is "the unit of bootable configuration + the routing scope unit". Not a folder; a declaration. Document this. (Status quo with clearer framing.)
+
+**Answer Y — collapse workspace into a tag-only concept.** Drop the Workspace Kind entirely. Replace with a `workspace: string` field on each entity. Rule scoping becomes `routing_rules.workspace = "X"`. The "boot-time guarantee that entities are alive" becomes a separate concept (a Manifest? a Deployment?). Lighter; less ceremony.
+
+**Answer Z — replace workspace with per-type containers (Allen's suggestion).** `SessionWorkspace` holds sessions + their routing. `AgentWorkspace` holds agents that should be alive. `UserWorkspace` holds users (?). Each type has its own organizational unit.
+
+**Trade-offs:**
+
+- Y is the most reductive: workspace becomes a string. Lightest model; question is whether "I want these N agents alive at boot" needs a Kind to express, or just a field.
+- Z splits concerns by entity type. Pro: clearer per-type semantics. Con: cross-type concerns (a routing rule that says "messages from this user go to this agent in this session" — which container owns it?) become ambiguous. SessionWorkspace? AgentWorkspace? Both?
+- X keeps workspace as the "deployment unit" — clearer if we frame it like Kubernetes Namespace: a tenant boundary for shipped configuration.
+
+**My recommendation: X with explicit re-framing.** Workspace is the **deployment unit** — like a tenant or a project root. SessionTemplate is the **conversation recipe** (one instance gets cloned per spawn). Workspace and SessionTemplate are different shapes:
+
+- Workspace: "this is what should be alive after `mix phx.server`". One per cluster usually; multiple if you tenant by team/project.
+- SessionTemplate: "this is what a conversation should look like when instantiated by an orchestrator". Many per workspace.
+
+Under this framing:
+
+- The routing-rule scope hierarchy becomes natural: global ⊂ workspace ⊂ session.
+- S-10 (session-scoped rules) lands cleanly.
+- SessionTemplate inherits the workspace's routing rules at save time (the working-copy captures them), and fork-instantiates them under the new session_uri scope (per S-10's session_uri column).
+
+But: this is my read, not a decision. Allen's question is structural and deserves an explicit pick before Q4 (`resource://` namespace) gets answered, because if workspace becomes Y or Z, resource:// gets pulled in the same direction.
+
+---
+
 ---
 
 ## §5 Final spec
