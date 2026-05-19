@@ -44,7 +44,12 @@ defmodule EzagentCore.EtsOwner do
     # Phase 7 PR 40: agent spawn lineage for {:spawned_by, _} cap
     # shape (Decision #137 / PR 42). Ezagent.Entity.Agent.spawn/4
     # records here; CapBAC step 5.5 (future PR 46+) reads here.
-    {Ezagent.AgentLineage, :set}
+    {Ezagent.AgentLineage, :set},
+    # PR #131 (Allen 2026-05-19): agent URI type-encoding registry.
+    # Each plugin registers its agent type (e.g. "cc", "curl", "echo")
+    # → spawn fn; the chat plugin's `agent://` SpawnRegistry fn
+    # delegates here based on the URI's `<type>` host segment.
+    {Ezagent.AgentTypeRegistry, :set}
   ]
 
   def start_link(_opts) do

@@ -15,7 +15,9 @@ defmodule Ezagent.Kind.SnapshotTest do
   test "load_or_init for :on_change Kind without prior snapshot init_fresh" do
     uri = URI.parse("user://snap-noprior-#{System.unique_integer([:positive])}")
     state = Snapshot.load_or_init(uri, Ezagent.Entity.User, %{uri: uri})
-    assert state == %{identity: %{caps: MapSet.new()}}
+    # PR #126 added ApiKeys behavior to User → :api_keys slice coexists
+    # with :identity. Both default to empty.
+    assert state == %{identity: %{caps: MapSet.new()}, api_keys: %{keys: %{}}}
   end
 
   test "maybe_save no-op for :ephemeral" do
@@ -65,7 +67,11 @@ defmodule Ezagent.Kind.SnapshotTest do
     :ok = Snapshot.save_now(uri, Ezagent.Entity.User, %{identity: %{caps: caps}})
 
     loaded = Snapshot.load_or_init(uri, Ezagent.Entity.User, %{uri: uri})
-    assert loaded == %{identity: %{caps: caps}}
+    # PR #126: load_or_init merges any fresh-init slices from new Behaviors
+    # (here :api_keys was added after the saved snapshot) onto the loaded
+    # state. The saved :identity slice survives; :api_keys gets its
+    # init_slice default.
+    assert loaded == %{identity: %{caps: caps}, api_keys: %{keys: %{}}}
   end
 
   test "term_to_binary survives MapSet round-trip (Q1: lossless encoding)" do

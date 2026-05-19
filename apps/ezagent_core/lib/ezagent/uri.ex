@@ -41,30 +41,60 @@ defmodule Ezagent.URI do
   end
 
   @doc """
-  Return the instance form of a URI — drop everything from the path on.
+  Return the instance form of a URI — keep everything BEFORE the
+  `/behavior/<name>/<action>` marker; drop the marker + everything
+  after it.
 
-  `agent://echo/behavior/echo/say` → `%URI{scheme: "agent", host: "echo"}`.
+  Examples:
+  - `agent://echo/behavior/echo/say` → `%URI{scheme: "agent", host: "echo", path: nil}`
+  - `agent://cc/demo-builder/behavior/chat/receive` (PR #131 path-style)
+    → `%URI{scheme: "agent", host: "cc", path: "/demo-builder"}`
+  - `agent://cc/demo-builder` (instance URI itself) → unchanged
+  - `session://main/behavior/chat/send` → `%URI{scheme: "session", host: "main", path: nil}`
+
   Used by dispatch to find the instance pid in KindRegistry.
   """
   @spec instance(URI.t()) :: URI.t()
-  def instance(%URI{} = uri) do
-    %URI{uri | path: nil, query: nil, fragment: nil}
+  def instance(%URI{path: nil} = uri), do: %URI{uri | query: nil, fragment: nil}
+
+  def instance(%URI{path: path} = uri) when is_binary(path) do
+    case String.split(path, "/behavior/", parts: 2) do
+      [pre, _suffix] ->
+        new_path = if pre == "", do: nil, else: pre
+        %URI{uri | path: new_path, query: nil, fragment: nil}
+
+      [_only] ->
+        # No /behavior/ marker — this URI is already an instance form
+        # with a path component (PR #131 path-style: `agent://cc/demo-builder`).
+        # Strip only query + fragment.
+        %URI{uri | query: nil, fragment: nil}
+    end
   end
 
   @doc """
-  Split the URI path into `{behavior_name_atom, action_atom}`.
+  Split the URI path on `"/behavior/"` and return the
+  `{behavior_name_atom, action_atom}` from the suffix.
 
-  Expects path of form `/behavior/<name>/<action>`. Returns `{:error,
-  :malformed_path}` if the path doesn't match.
+  Works for both pre-PR-#131 `<scheme>://<host>/behavior/<name>/<action>`
+  and PR-#131 path-style `<scheme>://<type>/<name>/behavior/<bname>/<action>`.
+
+  Returns `{:error, :malformed_path}` if the path lacks `/behavior/`
+  or the suffix doesn't have exactly two segments.
   """
   @spec behavior_action(URI.t()) ::
           {:ok, {atom(), atom()}} | {:error, :malformed_path}
   def behavior_action(%URI{path: path}) when is_binary(path) do
-    case String.split(path, "/", trim: true) do
-      ["behavior", behavior_name, action] ->
-        {:ok, {String.to_atom(behavior_name), String.to_atom(action)}}
+    case String.split(path, "/behavior/", parts: 2) do
+      [_pre, suffix] ->
+        case String.split(suffix, "/", trim: true) do
+          [behavior_name, action] ->
+            {:ok, {String.to_atom(behavior_name), String.to_atom(action)}}
 
-      _ ->
+          _ ->
+            {:error, :malformed_path}
+        end
+
+      [_only] ->
         {:error, :malformed_path}
     end
   end

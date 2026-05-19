@@ -30,11 +30,14 @@ defmodule EzagentPluginEcho.Application do
 
   use Application
 
-  @default_uri URI.parse("agent://echo")
+  # PR #131 (Allen 2026-05-19): agent URIs are `agent://<type>/<name>`.
+  # Echo's default instance moves from `agent://echo` → `agent://echo/default`.
+  @default_uri URI.parse("agent://echo/default")
 
   @impl true
   def start(_type, _args) do
     register_behaviors()
+    register_agent_type()
 
     children = [
       {DynamicSupervisor, name: __MODULE__.Supervisor, strategy: :one_for_one}
@@ -52,6 +55,16 @@ defmodule EzagentPluginEcho.Application do
 
   defp register_behaviors do
     :ok = Ezagent.BehaviorRegistry.register(Ezagent.Entity.Echo, :say, Ezagent.Behavior.Echo)
+  end
+
+  defp register_agent_type do
+    :ok =
+      Ezagent.AgentTypeRegistry.register("echo", fn uri, _name ->
+        DynamicSupervisor.start_child(
+          __MODULE__.Supervisor,
+          {Ezagent.Kind.Server, {Ezagent.Entity.Echo, %{uri: uri}}}
+        )
+      end)
   end
 
   defp spawn_default_instance do

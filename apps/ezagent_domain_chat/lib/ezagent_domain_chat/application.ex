@@ -151,8 +151,21 @@ defmodule EzagentDomainChat.Application do
   end
 
   defp register_spawn_fns do
+    # PR #131 (Allen 2026-05-19): `agent://` URIs are now `agent://<type>/<name>`
+    # — the host segment encodes the agent flavour (cc / curl / echo / ...).
+    # Each plugin registers its own type via Ezagent.AgentTypeRegistry; the
+    # SpawnRegistry fn here delegates by URI host.
     :ok =
       Ezagent.SpawnRegistry.register("agent", fn uri ->
+        Ezagent.AgentTypeRegistry.spawn(uri)
+      end)
+
+    # Register type "cc" — the chat domain's Entity.Agent Kind backs all
+    # bridge-driven Claude Code agents (cc.pty + cc.channel_instance both
+    # produce `agent://cc/<name>` URIs). Chat owns this registration
+    # because chat owns Entity.Agent the Kind module.
+    :ok =
+      Ezagent.AgentTypeRegistry.register("cc", fn uri, _name ->
         DynamicSupervisor.start_child(
           EzagentDomainChat.AgentSupervisor,
           {Ezagent.Kind.Server, {Agent, %{uri: uri, initial_caps: MapSet.new()}}}

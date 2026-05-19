@@ -47,10 +47,23 @@ defmodule Ezagent.PluginCc.Template do
   defp check_class(%{"class" => other}), do: {:error, {:wrong_class, other}}
   defp check_class(_), do: {:error, :missing_class_field}
 
+  # PR #131: strict `agent://cc/<name>` shape — cc.pty produces only
+  # Claude Code agents so the URI's type segment must be "cc".
   defp check_agent_uri(%{"agent_uri" => uri_str}) when is_binary(uri_str) and uri_str != "" do
     case URI.new(uri_str) do
-      {:ok, %URI{scheme: "agent"}} -> :ok
-      _ -> {:error, {:bad_agent_uri, uri_str}}
+      {:ok, %URI{scheme: "agent", host: "cc", path: "/" <> name}} when name != "" ->
+        :ok
+
+      {:ok, %URI{scheme: "agent", host: other, path: "/" <> _}} ->
+        {:error, {:wrong_agent_type, other, expected: "cc"}}
+
+      {:ok, %URI{scheme: "agent"}} ->
+        {:error,
+         {:missing_type_segment, uri_str,
+          "agent URIs must be `agent://cc/<name>` (PR #131)"}}
+
+      _ ->
+        {:error, {:bad_agent_uri, uri_str}}
     end
   end
 
@@ -97,9 +110,9 @@ defmodule Ezagent.PluginCc.Template do
       %{
         name: "agent_uri",
         type: :uri,
-        label: "Agent URI",
+        label: "Agent URI (PR #131: must be agent://cc/<name>)",
         required: true,
-        placeholder: "agent://cc-architect"
+        placeholder: "agent://cc/cc-architect"
       },
       %{
         name: "cwd",

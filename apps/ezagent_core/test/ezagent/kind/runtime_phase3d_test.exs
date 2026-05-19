@@ -43,8 +43,8 @@ defmodule Ezagent.Kind.RuntimePhase3dTest do
   end
 
   test "dispatch with empty caps → {:error, :unauthorized} + :denied telemetry" do
-    # Echo plugin pre-spawns agent://echo at boot; use it as the target.
-    target = URI.new!("agent://echo/behavior/echo/say")
+    # Echo plugin pre-spawns agent://echo/default at boot; use it as the target.
+    target = URI.new!("agent://echo/default/behavior/echo/say")
 
     inv = %Invocation{
       target: target,
@@ -66,7 +66,7 @@ defmodule Ezagent.Kind.RuntimePhase3dTest do
   end
 
   test "dispatch with admin caps → success + :granted telemetry" do
-    target = URI.new!("agent://echo/behavior/echo/say")
+    target = URI.new!("agent://echo/default/behavior/echo/say")
 
     inv = %Invocation{
       target: target,
@@ -84,7 +84,7 @@ defmodule Ezagent.Kind.RuntimePhase3dTest do
     assert_receive {:authz_event, [:ezagent, :authz, :granted], _meta}, 500
   end
 
-  test "KindRegistry still has agent://echo (sanity — dispatch path live)" do
-    assert {:ok, _pid} = KindRegistry.lookup(URI.new!("agent://echo"))
+  test "KindRegistry still has agent://echo/default (sanity — dispatch path live)" do
+    assert {:ok, _pid} = KindRegistry.lookup(URI.new!("agent://echo/default"))
   end
 end
