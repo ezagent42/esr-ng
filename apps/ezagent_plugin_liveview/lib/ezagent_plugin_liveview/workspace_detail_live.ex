@@ -14,6 +14,7 @@ defmodule EzagentPluginLiveview.WorkspaceDetailLive do
   """
 
   use Phoenix.LiveView
+  alias EzagentDomainUi.IdeShell
   import Phoenix.Component
 
   @impl true
@@ -256,15 +257,33 @@ defmodule EzagentPluginLiveview.WorkspaceDetailLive do
   end
 
   def render(assigns) do
+    # Phase 8 阶段 C: wrap in IdeShell.
+    assigns =
+      assign_new(assigns, :current_entity_uri_str, fn ->
+        URI.to_string(assigns.current_entity_uri || URI.parse("entity://user/admin"))
+      end)
+
     ~H"""
-    <div style="max-width: 1000px; margin: 0 auto; padding: 24px; font-family: -apple-system, sans-serif;">
-      <header>
+    <IdeShell.ide_shell
+      current_entity_uri={@current_entity_uri_str}
+      current_path={"/admin/workspaces/" <> @workspace.name}
+      status={%{agents_alive: 0, bridges: 0, debug_events: 0, version: "dev"}}
+    >
+      <:resource_panel>
+        <div class="p-3">
+          <div class="text-[10px] uppercase tracking-wide text-zinc-500 mb-2">Workspace</div>
+          <div class="px-2 py-1 text-xs bg-zinc-100 rounded font-mono">{@workspace.name}</div>
+          <a href="/admin/workspaces" class="block mt-3 px-2 py-1 text-xs text-zinc-600 hover:text-zinc-900">← All workspaces</a>
+        </div>
+      </:resource_panel>
+      <:main_window>
+        <div class="flex-1 overflow-auto px-6 py-6 text-zinc-900">
+        <header>
         <h1 style="font-size: 22px; font-weight: 600;">
           Workspace: <code>{@workspace.name}</code>
         </h1>
         <p style="font-size: 13px; color: #666;">
           <code>{URI.to_string(@workspace.uri)}</code>
-          <a href="/admin/workspaces" style="margin-left: 16px; color: #0969da;">← Workspaces</a>
         </p>
       </header>
 
@@ -445,7 +464,9 @@ defmodule EzagentPluginLiveview.WorkspaceDetailLive do
         </p>
         <pre :if={@workspace.routing_rules != []} id="rules-json" style="background: #f6f8fa; padding: 12px; border-radius: 4px; overflow-x: auto; font-size: 11px;">{Jason.encode!(@workspace.routing_rules, pretty: true)}</pre>
       </section>
-    </div>
+        </div>
+      </:main_window>
+    </IdeShell.ide_shell>
     """
   end
 end

@@ -15,6 +15,7 @@ defmodule EzagentPluginLiveview.EntitiesLive do
   """
 
   use Phoenix.LiveView
+  alias EzagentDomainUi.IdeShell
   import Phoenix.Component
 
   @impl true
@@ -72,26 +73,39 @@ defmodule EzagentPluginLiveview.EntitiesLive do
 
   @impl true
   def render(assigns) do
+    # Phase 8 阶段 C: wrap in IdeShell.
+    assigns =
+      assign_new(assigns, :current_entity_uri_str, fn ->
+        URI.to_string(assigns.current_entity_uri || URI.parse("entity://user/admin"))
+      end)
+
     ~H"""
-    <div style="max-width: 1100px; margin: 0 auto; padding: 24px; font-family: -apple-system, sans-serif;">
-      <header>
+    <IdeShell.ide_shell
+      current_entity_uri={@current_entity_uri_str}
+      current_path="/admin/entities"
+      status={%{agents_alive: 0, bridges: 0, debug_events: 0, version: "dev"}}
+    >
+      <:resource_panel>
+        <div class="p-3 flex flex-col gap-1">
+          <div class="text-[10px] uppercase tracking-wide text-zinc-500 mb-1">Filters</div>
+          <.filter_chip filter={@filter} value="all" label="all" />
+          <.filter_chip filter={@filter} value="user" label="entity://user" />
+          <.filter_chip filter={@filter} value="agent" label="entity://agent" />
+          <.filter_chip filter={@filter} value="session" label="session://" />
+          <.filter_chip filter={@filter} value="workspace" label="workspace://" />
+          <.filter_chip filter={@filter} value="template" label="template://" />
+          <.filter_chip filter={@filter} value="system" label="system://" />
+        </div>
+      </:resource_panel>
+      <:main_window>
+        <div class="flex-1 overflow-auto px-6 py-6 text-zinc-900">
+        <header>
         <h1 style="font-size: 22px; font-weight: 600;">Entities (live registry)</h1>
         <p style="font-size: 13px; color: #666;">
           Every Kind currently registered in <code>Ezagent.KindRegistry</code> — users,
           agents, sessions, workspaces, templates, system sentinels.
-          <a href="/admin" style="margin-left: 16px; color: #0969da;">← /admin</a>
         </p>
       </header>
-
-      <nav style="margin-top: 16px; display: flex; gap: 8px; flex-wrap: wrap;">
-        <.filter_chip filter={@filter} value="all" label="all" />
-        <.filter_chip filter={@filter} value="user" label="entity://user" />
-        <.filter_chip filter={@filter} value="agent" label="entity://agent" />
-        <.filter_chip filter={@filter} value="session" label="session://" />
-        <.filter_chip filter={@filter} value="workspace" label="workspace://" />
-        <.filter_chip filter={@filter} value="template" label="template://" />
-        <.filter_chip filter={@filter} value="system" label="system://" />
-      </nav>
 
       <section style="margin-top: 16px;">
         <p :if={@entities == []} id="entities-empty" style="font-size: 13px; color: #57606a; font-style: italic;">
@@ -125,7 +139,9 @@ defmodule EzagentPluginLiveview.EntitiesLive do
           </tbody>
         </table>
       </section>
-    </div>
+        </div>
+      </:main_window>
+    </IdeShell.ide_shell>
     """
   end
 
