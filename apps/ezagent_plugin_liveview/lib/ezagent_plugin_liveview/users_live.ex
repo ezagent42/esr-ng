@@ -90,9 +90,11 @@ defmodule EzagentPluginLiveview.UsersLive do
     {:noreply, assign(socket, :flash_error, "password cannot be empty")}
   end
 
+  # PR #141 + #145: entity:// scheme; user URIs are entity://user/<name>.
   defp parse_user_uri(s) do
     case URI.new(s) do
-      {:ok, %URI{scheme: "user", host: host}} when is_binary(host) and host != "" ->
+      {:ok, %URI{scheme: "entity", host: "user", path: "/" <> name}}
+      when is_binary(name) and name != "" ->
         {:ok, URI.parse(s)}
 
       _ ->

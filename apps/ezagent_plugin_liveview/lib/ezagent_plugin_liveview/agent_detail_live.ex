@@ -33,12 +33,17 @@ defmodule EzagentPluginLiveview.AgentDetailLive do
     end
   end
 
+  # PR #141 + #145: entity:// scheme; agent URIs are entity://agent/<flavor>_<name>.
   defp parse_agent_uri(encoded) do
     decoded = URI.decode_www_form(encoded)
 
     case URI.new(decoded) do
-      {:ok, %URI{scheme: "agent"} = uri} -> {:ok, uri}
-      _ -> :error
+      {:ok, %URI{scheme: "entity", host: "agent", path: "/" <> name} = uri}
+      when is_binary(name) and name != "" ->
+        {:ok, uri}
+
+      _ ->
+        :error
     end
   end
 
