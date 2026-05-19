@@ -7,7 +7,8 @@ defmodule EzagentPluginFeishu.SenderResolver do
   1. **Bound** open_id → use bound `entity://user/X` as caller; fetch caps
      from that User Kind's Identity slice. CapBAC at step 5.5 will
      accept anything that user is authorized for (BindingPolicy
-     grants the standard feishu_chat cap on bind).
+     ensures `Ezagent.Entity.User.default_caps/0` is present on bind,
+     so the user can dispatch into sessions).
   2. **Unbound** open_id → return a pending state. WebhookPlug /
      WsClient log it for admin attention but DO NOT dispatch the
      message (matches Allen's "默认权限应该是绑定一个 esr 用户"

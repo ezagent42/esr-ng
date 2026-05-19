@@ -6,9 +6,12 @@ defmodule Mix.Tasks.Ezagent.Feishu.Bind do
       mix ezagent.feishu.bind ou_6b11faf8e9... entity://user/linyilun
       mix ezagent.feishu.bind ou_xxx entity://user/linyilun --admin entity://user/admin
 
-  After binding, the bound user receives an `Ezagent.Capability`
-  authorizing dispatch into any `feishu_chat://` Kind (text / image
-  / file / future-card / etc.) — see `EzagentPluginFeishu.BindingPolicy`.
+  After binding, `EzagentPluginFeishu.BindingPolicy.apply/2` ensures
+  the bound user has `Ezagent.Entity.User.default_caps/0` (the
+  baseline `kind=:session, behavior=:any` cap). With those caps the
+  user can dispatch into sessions; per-session reach is controlled
+  by the chat_id ↔ session_uri binding in `feishu_session_bindings`
+  (see `mix ezagent.feishu.chat.bind`).
 
   Idempotent on the (open_id, user_uri) pair — rebinding to a
   different user replaces the prior binding silently.
@@ -37,7 +40,7 @@ defmodule Mix.Tasks.Ezagent.Feishu.Bind do
 
         case BindingPolicy.apply(user_uri, admin_uri) do
           :ok ->
-            Mix.shell().info("✓ granted feishu_chat:* cap to #{user_uri}")
+            Mix.shell().info("✓ ensured default session-participation caps for #{user_uri}")
 
           err ->
             Mix.shell().error("⚠ binding saved but cap grant failed: #{inspect(err)}")

@@ -86,13 +86,19 @@ defmodule Ezagent.Routing.Matcher do
   def always, do: {:always}
 
   @doc """
-  Match if message originated in a specific session (Plan B 2026-05-17).
+  Match if message originated in a specific session.
 
   Without this, all routing rules apply globally — a rule
-  `always() → [feishu://oc_xxx]` would fire for EVERY session's send.
-  `in_session(session_uri)` scopes a rule to one session so plugins
-  like Feishu can bind one chat to one session via routing rule
-  without affecting unrelated sessions.
+  `always() → [entity://agent/cc_alerts]` would fire for EVERY
+  session's send. `in_session(session_uri)` scopes a rule to one
+  session so an agent / receiver can subscribe to one session via
+  routing rule without affecting unrelated sessions.
+
+  (Pre-PR-144 this was also how the Feishu plugin bound a chat to
+  a session — `in_session(session) → [feishu://oc_X]`. The
+  `feishu://` Receiver Kind is now deleted (SPEC §5.8); the binding
+  lives in `feishu_session_bindings` join table and the outbound
+  mirror is a Behavior on Session Kind, not a routing rule.)
   """
   @spec in_session(URI.t() | String.t()) :: matcher()
   def in_session(%URI{} = uri), do: {:in_session, URI.to_string(uri)}

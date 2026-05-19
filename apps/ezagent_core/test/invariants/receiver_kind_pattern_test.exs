@@ -5,9 +5,14 @@ defmodule EzagentCore.Invariants.ReceiverKindPatternTest do
   Per memory `feedback_plugin_external_integration_is_receiver_kind` and
   `docs/notes/plugin-receiver-kind-contract.md`: any plugin that sends
   ESR messages OUT to an external system MUST model the external
-  destination as a Receiver Kind (URI scheme + Behavior with `:receive`
-  action), NOT subscribe to a session PubSub topic and write externally
-  in `handle_info`.
+  destination as either (a) a Receiver Kind (URI scheme + Behavior
+  with `:receive` action — pre-PR-144 shape) OR (b) a Behavior
+  registered on an existing core Kind (Session for per-room mirrors,
+  User for per-user channels) with side-table metadata
+  (PR-144 SPEC v2 §5.8 shape). Both pass through `Ezagent.Invocation.dispatch/1`
+  so CapBAC + audit + idempotency apply. Neither shape may
+  PubSub-subscribe to a session/chat topic and write externally in a
+  `handle_info` — that bypasses dispatch entirely.
 
   This test grep-walks all plugin source for the forbidden pattern:
   - `Phoenix.PubSub.subscribe` referencing `chat_message` or session
@@ -28,8 +33,10 @@ defmodule EzagentCore.Invariants.ReceiverKindPatternTest do
      action; routing rule binds it
   3. Delete the PubSub subscriber
 
-  Reference impl: `apps/ezagent_plugin_feishu/` (`Ezagent.Entity.FeishuChat` +
-  `EzagentPluginFeishu.Behavior.FeishuReceive`).
+  Reference impl: `apps/ezagent_plugin_feishu/` —
+  `EzagentPluginFeishu.Behavior.FeishuOutbound` registered against
+  `Ezagent.Entity.Session` for the `:notify_external` action, with
+  `EzagentPluginFeishu.SessionBinding` as the side-table.
   """
   use ExUnit.Case, async: true
 
