@@ -86,8 +86,9 @@ defmodule EzagentCli.Dispatch do
     scheme = scheme_for(type_name)
     behavior_seg = behavior_module.state_slice() |> to_string()
 
+    # SPEC v2 §5.2 (PR #148): action lives in ?action=<behavior>.<action> query.
     URI.parse(
-      "#{scheme}://#{instance}/behavior/#{behavior_seg}/#{to_string(action)}"
+      "#{scheme}://#{instance}?action=#{behavior_seg}.#{to_string(action)}"
     )
   end
 

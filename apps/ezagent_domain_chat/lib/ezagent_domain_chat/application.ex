@@ -29,7 +29,7 @@ defmodule EzagentDomainChat.Application do
        admin User from a never-spawned stub to a live participant.
 
   3. **Post-boot admin join** — once Session and admin User are both
-     alive, dispatch `session://main/behavior/chat/join` with
+     alive, dispatch `session://main?action=chat.join` with
      `member: entity://user/admin`. Using `:cast` so this is non-blocking;
      PendingDelivery absorbs the still-becoming-ready window (memory
      `feedback_let_it_crash_no_workarounds`: no defensive sleeps).
@@ -246,7 +246,7 @@ defmodule EzagentDomainChat.Application do
     # domain's concern, not chat's.
 
     # PR #146 (SPEC v2 §5.7) — session-scoped routing rule mutations
-    # dispatch to `session://<name>/behavior/routing/<action>` against
+    # dispatch to `session://<name>?action=routing.<action>` against
     # the Session Kind. The synthetic `routing-admin://default`
     # singleton is dissolved; rules naturally cap-scope to their session.
     alias Ezagent.Behavior.Routing, as: RB
@@ -283,7 +283,7 @@ defmodule EzagentDomainChat.Application do
   defp admin_user_joins_default_session do
     admin_uri = User.admin_uri()
     session_uri = Session.default_uri()
-    target = URI.new!("#{URI.to_string(session_uri)}/behavior/chat/join")
+    target = URI.new!("#{URI.to_string(session_uri)}?action=chat.join")
 
     _ =
       Invocation.dispatch(%Invocation{

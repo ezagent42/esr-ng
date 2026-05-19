@@ -11,7 +11,7 @@ defmodule Ezagent.InvocationTest do
     {:ok, _pid} = Ezagent.Kind.Server.start_link({TestKind, %{uri: uri}})
     :ok = wait_until_ready(uri)
 
-    {:ok, instance_uri: uri, target: URI.parse("#{URI.to_string(uri)}/behavior/test/noop")}
+    {:ok, instance_uri: uri, target: URI.parse("#{URI.to_string(uri)}?action=test.noop")}
   end
 
   describe "dispatch/1 — happy path" do
@@ -42,7 +42,7 @@ defmodule Ezagent.InvocationTest do
   describe "dispatch/1 — error paths" do
     test ":no_such_actor for unknown URI" do
       inv = %Invocation{
-        target: URI.parse("entity://agent/echo_does-not-exist/behavior/test/noop"),
+        target: URI.parse("entity://agent/echo_does-not-exist?action=test.noop"),
         mode: :call,
         args: %{msg: "x"},
         ctx: ctx_for(self())
@@ -57,7 +57,7 @@ defmodule Ezagent.InvocationTest do
       :ok = Ezagent.ReadyGate.put(uri, :not_ready)
 
       inv = %Invocation{
-        target: URI.parse("#{URI.to_string(uri)}/behavior/test/noop"),
+        target: URI.parse("#{URI.to_string(uri)}?action=test.noop"),
         mode: :call,
         args: %{msg: "x"},
         ctx: ctx_for(self())
@@ -72,7 +72,7 @@ defmodule Ezagent.InvocationTest do
     test ":not_ready + :cast → buffered (no error)", %{instance_uri: uri} do
       :ok = Ezagent.ReadyGate.put(uri, :not_ready)
 
-      target = URI.parse("#{URI.to_string(uri)}/behavior/test/noop")
+      target = URI.parse("#{URI.to_string(uri)}?action=test.noop")
 
       inv = %Invocation{
         target: target,

@@ -20,7 +20,7 @@ defmodule EzagentPluginFeishu.Behavior.FeishuOutbound do
   ## Dispatch path
 
   `Ezagent.Behavior.Chat.invoke(:send)` ends its fan-out by
-  opportunistically dispatching `<self_uri>/behavior/feishu_outbound/notify_external`
+  opportunistically dispatching `<self_uri>?action=feishu_outbound.notify_external`
   if `BehaviorRegistry.lookup(SessionKind, :notify_external)` returns
   this module. The behavior's `:notify_external` action reads the
   session's binding(s) and calls the Feishu Open API for each enabled

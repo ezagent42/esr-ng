@@ -55,7 +55,7 @@ defmodule EzagentPluginLiveview.UserCapsLive do
 
       {:ok, _pid} ->
         # Dispatch list_caps and capture the result.
-        target = URI.new!("#{URI.to_string(socket.assigns.user_uri)}/behavior/identity/list_caps")
+        target = URI.new!("#{URI.to_string(socket.assigns.user_uri)}?action=identity.list_caps")
 
         case Invocation.dispatch(%Invocation{
                target: target,
@@ -101,7 +101,7 @@ defmodule EzagentPluginLiveview.UserCapsLive do
 
   defp do_grant_or_revoke(socket, action, cap, msg) do
     target =
-      URI.new!("#{URI.to_string(socket.assigns.user_uri)}/behavior/identity/#{action}")
+      URI.new!("#{URI.to_string(socket.assigns.user_uri)}?action=identity.#{action}")
 
     case Invocation.dispatch(%Invocation{
            target: target,

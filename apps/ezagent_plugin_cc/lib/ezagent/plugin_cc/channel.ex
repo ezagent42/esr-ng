@@ -106,7 +106,7 @@ defmodule EzagentPluginCc.Channel do
     msg = Ezagent.Message.new(agent_uri, body, ref: ref_uri)
 
     for session_uri_str <- sessions do
-      target = URI.new!("#{session_uri_str}/behavior/chat/send")
+      target = URI.new!("#{session_uri_str}?action=chat.send")
 
       Ezagent.Invocation.dispatch(%Ezagent.Invocation{
         target: target,

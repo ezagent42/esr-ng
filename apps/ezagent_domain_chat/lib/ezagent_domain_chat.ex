@@ -72,7 +72,7 @@ defmodule EzagentDomainChat do
   end
 
   defp join_creator(session_uri, creator_uri) do
-    target = URI.new!("#{URI.to_string(session_uri)}/behavior/chat/join")
+    target = URI.new!("#{URI.to_string(session_uri)}?action=chat.join")
 
     _ =
       Invocation.dispatch(%Invocation{

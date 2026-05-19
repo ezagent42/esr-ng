@@ -191,7 +191,7 @@ defmodule Ezagent.Entity.Session do
       }
     ]
 
-    target = URI.new!("#{URI.to_string(orchestrator_uri)}/behavior/identity/grant_cap")
+    target = URI.new!("#{URI.to_string(orchestrator_uri)}?action=identity.grant_cap")
 
     ctx = %{
       caller: owner_uri,

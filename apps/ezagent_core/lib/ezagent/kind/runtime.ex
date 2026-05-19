@@ -179,9 +179,9 @@ defmodule Ezagent.Kind.Runtime do
   # Phase 7 PR 43 — derive session URI from target URI for ctx enrichment.
   #
   # Sources covered:
-  # - `session://main/behavior/chat/send` → `session://main` (legacy 1-seg)
+  # - `session://main?action=chat.send` → `session://main` (legacy 1-seg)
   # - `session://main` → `session://main` (already session)
-  # - `entity://agent/cc_demo/behavior/chat/receive` → nil (not session-targeted)
+  # - `entity://agent/cc_demo?action=chat.receive` → nil (not session-targeted)
   # - any non-session URI → nil
   #
   # Pure URI manipulation; no registry / dispatch / GenServer involvement.

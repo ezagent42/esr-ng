@@ -29,7 +29,7 @@ defmodule Ezagent.Identity do
         MapSet.new()
 
       {:ok, _pid} ->
-        target = URI.parse("#{URI.to_string(user_uri)}/behavior/identity/list_caps")
+        target = URI.parse("#{URI.to_string(user_uri)}?action=identity.list_caps")
 
         case Invocation.dispatch(%Invocation{
                target: target,

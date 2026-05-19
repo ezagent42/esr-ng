@@ -6,7 +6,7 @@ defmodule Ezagent.Behavior.CurlAgent do
 
   Registered for `(Ezagent.Entity.CurlAgent, :receive)` in
   `EzagentPluginCurlAgent.Application`. The chat router targets
-  `entity://agent/curl_<name>/behavior/chat/receive`; the dispatcher pattern-
+  `entity://agent/curl_<name>?action=chat.receive`; the dispatcher pattern-
   matches behavior_module to land here.
 
   ## Slice (state_slice :curl_agent)
@@ -209,7 +209,7 @@ defmodule Ezagent.Behavior.CurlAgent do
   end
 
   defp fetch_owner_api_key(%URI{} = owner_uri, provider) when is_binary(provider) do
-    target = URI.new!("#{URI.to_string(owner_uri)}/behavior/identity/get_api_key")
+    target = URI.new!("#{URI.to_string(owner_uri)}?action=identity.get_api_key")
 
     invocation = %Ezagent.Invocation{
       target: target,
@@ -245,7 +245,7 @@ defmodule Ezagent.Behavior.CurlAgent do
       msg =
         Ezagent.Message.new(agent_uri, %{text: text, attachments: []})
 
-      target = URI.new!("#{URI.to_string(session)}/behavior/chat/send")
+      target = URI.new!("#{URI.to_string(session)}?action=chat.send")
 
       Ezagent.Invocation.dispatch(%Ezagent.Invocation{
         target: target,

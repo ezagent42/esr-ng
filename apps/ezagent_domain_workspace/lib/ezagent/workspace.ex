@@ -193,7 +193,7 @@ defmodule Ezagent.Workspace do
   end
 
   defp dispatch_mutation(name, action_str, args) do
-    target = URI.parse("workspace://#{name}/behavior/workspace/#{action_str}")
+    target = URI.parse("workspace://#{name}?action=workspace.#{action_str}")
 
     case Invocation.dispatch(%Invocation{
            target: target,

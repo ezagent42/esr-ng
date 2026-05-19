@@ -35,7 +35,7 @@ defmodule Ezagent.WorkspaceTest do
 
       {:ok, _pid} = Ezagent.Workspace.spawn_workspace(name, %{members: members})
 
-      target = URI.parse("#{URI.to_string(uri)}/behavior/workspace/list_members")
+      target = URI.parse("#{URI.to_string(uri)}?action=workspace.list_members")
 
       assert {:ok, %{members: listed}} =
                Invocation.dispatch(%Invocation{
@@ -61,7 +61,7 @@ defmodule Ezagent.WorkspaceTest do
 
       {:ok, _pid} = Ezagent.Workspace.spawn_workspace(name, %{members: members})
 
-      target = URI.parse("#{URI.to_string(uri)}/behavior/workspace/instantiate")
+      target = URI.parse("#{URI.to_string(uri)}?action=workspace.instantiate")
 
       assert {:ok, %{children: children}} =
                Invocation.dispatch(%Invocation{

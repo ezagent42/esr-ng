@@ -35,7 +35,7 @@ defmodule EzagentPluginCc.Application do
      PtyServerSupervisor (DynamicSupervisor)
   3. Register the `cc.agent` Template Class
   4. Register `Ezagent.Behavior.Pty` on `Ezagent.Entity.Agent` so
-     `entity://agent/cc_<X>/behavior/pty/write` dispatches resolve.
+     `entity://agent/cc_<X>?action=pty.write` dispatches resolve.
      (PR #146: previously a synthetic `pty-input://default` singleton;
      dissolved per SPEC v2 §5.7 — PTY input now dispatches to the
      agent itself.)
@@ -88,7 +88,7 @@ defmodule EzagentPluginCc.Application do
   # PR #146 (SPEC v2 §5.7) — synthetic `pty-input://default` singleton
   # dissolved. Register `Behavior.Pty` on `Ezagent.Entity.Agent` so
   # xterm.js LV input dispatches to the agent's own URI:
-  # `entity://agent/cc_<X>/behavior/pty/write`.
+  # `entity://agent/cc_<X>?action=pty.write`.
   defp register_pty_behavior_on_agent do
     alias Ezagent.BehaviorRegistry
     alias Ezagent.Behavior.Pty, as: PtyB

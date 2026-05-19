@@ -9,7 +9,7 @@ defmodule EzagentPluginFeishu.BindingPolicy do
   `feishu://oc_xxx` Receiver Kind directly. With the Kind deleted,
   the bound user's path is now:
 
-      Feishu (open_id) → entity://user/<X> → session://<Y>/behavior/chat/send
+      Feishu (open_id) → entity://user/<X> → session://<Y>?action=chat.send
 
   All caps the user needs to *use* a Feishu binding come from
   `Ezagent.Entity.User.default_caps/0` (`kind=:session, behavior=:any,
@@ -86,7 +86,7 @@ defmodule EzagentPluginFeishu.BindingPolicy do
   end
 
   defp grant_cap(user_uri, admin_uri, %Capability{} = cap) do
-    target = URI.new!("#{to_str(user_uri)}/behavior/identity/grant_cap")
+    target = URI.new!("#{to_str(user_uri)}?action=identity.grant_cap")
 
     inv = %Invocation{
       target: target,

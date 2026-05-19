@@ -81,7 +81,7 @@ defmodule EzagentDomainChat.Integration.WorkspaceIsolationTest do
     msg = Message.new(sender, %{text: text, attachments: []})
 
     inv = %Invocation{
-      target: URI.new!("#{URI.to_string(session_uri)}/behavior/chat/send"),
+      target: URI.new!("#{URI.to_string(session_uri)}?action=chat.send"),
       mode: :cast,
       args: %{message: msg},
       ctx: %{caller: sender, caps: User.admin_caps(), reply: :ignore}
@@ -96,7 +96,7 @@ defmodule EzagentDomainChat.Integration.WorkspaceIsolationTest do
   end
 
   defp receive_dispatches_to(target_uri) do
-    target_prefix = "#{URI.to_string(target_uri)}/behavior/chat/receive"
+    target_prefix = "#{URI.to_string(target_uri)}?action=chat.receive"
 
     EzagentCore.Repo.all(
       from(i in "invocations",

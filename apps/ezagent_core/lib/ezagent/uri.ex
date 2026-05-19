@@ -2,42 +2,46 @@ defmodule Ezagent.URI do
   @moduledoc """
   URI helpers — thin convenience over stdlib `URI`.
 
-  ## Shape (SPEC v2 — PR #141 onwards)
+  ## Shape (SPEC v2 — PR #141 onwards, query-string actions since #148)
 
   SPEC v2 §5.1 defines the **target** uniform 2-segment authority
   for every Ezagent URI:
 
-      <scheme>://<type>/<name>[/<sub-resource>...]
+      <scheme>://<type>/<name>[/<sub-resource>...][?action=<behavior>.<action>]
 
   - `<scheme>` is one of the registered schemes (see
     `Ezagent.URI.SchemeRegistry` — runtime ETS allowlist, PR #145).
   - `<type>` is the value on the scheme's type axis (e.g. `user` /
     `agent` for `entity://`, free-form tenant name for `workspace://`).
   - `<name>` is the instance identity within `<scheme>/<type>`.
-  - Anything after `/<name>` is sub-resource (currently only
-    `/behavior/<kind>/<action>` is defined; the parser is open).
+  - Anything after `/<name>` is sub-resource (reserved for future named
+    sub-resources such as `/auth/...`; the previous path-based
+    `/behavior/<kind>/<action>` suffix was removed in PR #148,
+    SPEC v2 §5.2).
+  - `?action=<behavior>.<action>` selects the Behavior + action to invoke
+    (SPEC v2 §5.2, PR #148). The path is identity; the query carries the
+    action verb.
 
-  PR #141 implements the migration for the `entity://` scheme (user
-  + agent merged). The other 2-seg-target schemes (`workspace://`,
-  `session://`, `template://`, `resource://`, `system://`) migrate
-  in later PRs (#143/#144/#146) — until then their existing 1-seg
-  shape is preserved by `instance/1` (legacy clause).
+  PR #148 (SPEC v2 §5.2) moved action selection from a path suffix to a
+  query parameter:
+
+      OLD: entity://agent/cc_demo-builder + path suffix selecting behavior+action
+      NEW: entity://agent/cc_demo-builder?action=chat.receive
 
   ### Examples
 
-      entity://user/admin
-      entity://agent/cc_demo-builder
-      session://main             # legacy 1-seg, migrating in #147
-      workspace://default        # legacy 1-seg, migrating in #147
+      entity://user/admin                                   # bare instance
+      entity://agent/cc_demo-builder?action=chat.receive    # action dispatch
+      session://default/main?action=chat.send
+      workspace://default/main?action=routing.add_rule
       template://agent/cc-orchestrator
-      system://routing/default   # 2-seg (PR #146)
+      system://routing/default?action=add_rule
 
-  ## SPEC v2 deltas (PR #141)
+  ## SPEC v2 deltas
 
-  - `user://` + `agent://` schemes deleted — merged into `entity://`.
-  - `instance/1` is now **uniform across all schemes**: it splits
-    on `host + /<first-path-segment>`, treating every URI the same.
-    The pre-PR-141 agent-specific clause is gone.
+  - `user://` + `agent://` schemes deleted — merged into `entity://` (PR #141).
+  - `instance/1` strips query + fragment + (legacy) trailing path segments.
+  - `behavior_action/1` reads `?action=<behavior>.<action>` (PR #148).
   - Agent flavor (cc / curl / echo) moves OUT of the URI type segment
     INTO the name segment as a free-form prefix:
     `entity://agent/cc_demo-builder`, `entity://agent/curl_my-deepseek`
@@ -48,10 +52,9 @@ defmodule Ezagent.URI do
   - `instance/1` is **positional**: it knows where the instance ends
     based on uniform structure (always `host + /first-path-segment`),
     NOT by searching for a keyword like "behavior".
-  - `behavior_action/1` is **named**: it looks for the `behavior/`
-    keyword in the sub-resource portion. A future `auth_action/1`
-    would do the same for `auth/`. Each named parser returns `:error`
-    for sub-resources it doesn't recognize.
+  - `behavior_action/1` is **named**: it pulls the `action` query param
+    and splits it on `.` into `{behavior_atom, action_atom}`. A future
+    `auth_action/1` could do the same for an `auth=` query param.
 
   ## Scheme allowlist — runtime ETS (PR #145)
 
@@ -99,29 +102,34 @@ defmodule Ezagent.URI do
   end
 
   @doc """
-  Return the instance form of a URI — strip the sub-resource portion
-  (and any query/fragment).
+  Return the instance form of a URI — drop query + fragment and (for
+  legacy 1-seg schemes) any trailing sub-resource path segments.
 
-  **PR #141 + #146 SPEC v2 transitional rule**: 2-segment-authority
-  schemes use the uniform split `host + /<first-path-segment>`:
-  - `entity://` (PR #141)
-  - `system://` (PR #146 — `system://routing/default`,
-    `system://bootstrap/default`)
+  Under SPEC v2 §5.2 (PR #148), the action verb lives in the query
+  string, NOT in the path. So instance/1 mostly just strips
+  `query` + `fragment`. Path is the identity.
 
-  Remaining schemes (`session://`, `workspace://`, `template://`,
-  `resource://`, `message://`) keep the legacy "strip entire path"
-  behavior until PR #147 migrates them along with the query-string
-  action syntax.
+  **2-segment-authority schemes** (`entity://`, `system://`) keep the
+  `host + /<first-path-segment>` split — if any trailing path segments
+  exist (reserved for future named sub-resources like `/auth/login`),
+  they are stripped.
+
+  **Legacy 1-seg-authority schemes** (`session://`, `workspace://`,
+  `template://`, `resource://`) drop the entire path to recover the
+  bare instance form. Migration to uniform 2-seg lives in a future PR.
 
   Examples:
-  - `entity://user/admin` → unchanged (no sub-resource)
-  - `entity://agent/cc_demo-builder/behavior/chat/receive`
+  - `entity://user/admin` → unchanged (no sub-resource, no query)
+  - `entity://agent/cc_demo-builder?action=chat.receive`
     → `%URI{scheme: "entity", host: "agent", path: "/cc_demo-builder"}`
-  - `system://routing/default/behavior/routing/add_rule`
+  - `system://routing/default?action=add_rule`
     → `%URI{scheme: "system", host: "routing", path: "/default"}`
-  - `session://main/behavior/chat/send`
+  - `session://main?action=chat.send`
     → `%URI{scheme: "session", host: "main", path: nil}` (legacy
        1-seg session URI; path stripped entirely)
+  - `workspace://default/main?action=routing.add_rule`
+    → `%URI{scheme: "workspace", host: "default", path: nil}` (legacy
+       1-seg)
   - `workspace://default/main` → unchanged
 
   Used by dispatch to find the instance pid in KindRegistry.
@@ -163,39 +171,50 @@ defmodule Ezagent.URI do
   end
 
   @doc """
-  Parse the sub-resource portion of a URI looking for the `behavior/`
-  keyword. Returns `{:ok, {behavior_atom, action_atom}}` or
-  `{:error, :malformed_path}` (which also covers "this URI's
-  sub-resource isn't a behavior call — e.g. it's `/auth/...`").
+  Parse the `?action=<behavior>.<action>` query parameter of a URI.
+  Returns `{:ok, {behavior_atom, action_atom}}` or
+  `{:error, :missing_action | :malformed_action}`.
 
-  **Named parser** — sibling to a hypothetical `auth_action/1`. The
-  parser uses `subresource/1` to locate the sub-resource portion
-  (positional) and then looks for the `behavior/` prefix within it.
+  **PR #148 SPEC v2 §5.2** — action selection moved from the path
+  suffix (`/behavior/<kind>/<action>`) to a query parameter. Path is
+  identity; query carries the action verb.
+
+  **Named parser** — sibling to a hypothetical `auth_action/1` that
+  would read a different query key. Each named parser reads its own
+  key and converts the value (e.g. dotted form for action+behavior).
 
   Examples:
-  - `entity://agent/echo_default/behavior/echo/say` → `{:ok, {:echo, :say}}`
-  - `entity://agent/cc_demo-builder/behavior/chat/receive` → `{:ok, {:chat, :receive}}`
-  - `session://default/main/behavior/chat/send` → `{:ok, {:chat, :send}}`
-  - `entity://agent/cc_demo-builder/auth/login` → `{:error, :malformed_path}`
-  - `entity://agent/cc_demo-builder` → `{:error, :malformed_path}`
+  - `entity://agent/echo_default?action=echo.say` → `{:ok, {:echo, :say}}`
+  - `entity://agent/cc_demo-builder?action=chat.receive` → `{:ok, {:chat, :receive}}`
+  - `session://default/main?action=chat.send` → `{:ok, {:chat, :send}}`
+  - `entity://agent/cc_demo-builder` → `{:error, :missing_action}`
+  - `entity://agent/cc_demo-builder?action=` → `{:error, :missing_action}`
+  - `entity://agent/cc_demo-builder?action=justone` → `{:error, :malformed_action}`
   """
   @spec behavior_action(URI.t()) ::
-          {:ok, {atom(), atom()}} | {:error, :malformed_path}
-  def behavior_action(%URI{} = uri) do
-    case subresource(uri) do
-      "behavior/" <> rest ->
-        case String.split(rest, "/", trim: true) do
-          [behavior_name, action] ->
-            {:ok, {String.to_atom(behavior_name), String.to_atom(action)}}
+          {:ok, {atom(), atom()}} | {:error, :missing_action | :malformed_action}
+  def behavior_action(%URI{query: query}) when is_binary(query) do
+    decoded = URI.decode_query(query)
+
+    case Map.get(decoded, "action") do
+      nil ->
+        {:error, :missing_action}
+
+      "" ->
+        {:error, :missing_action}
+
+      action_str ->
+        case String.split(action_str, ".", parts: 2) do
+          [behavior, action] when behavior != "" and action != "" ->
+            {:ok, {String.to_atom(behavior), String.to_atom(action)}}
 
           _ ->
-            {:error, :malformed_path}
+            {:error, :malformed_action}
         end
-
-      _ ->
-        {:error, :malformed_path}
     end
   end
+
+  def behavior_action(_), do: {:error, :missing_action}
 
   @doc """
   Return the sub-resource portion of a URI as a string (no leading
@@ -207,9 +226,9 @@ defmodule Ezagent.URI do
 
   Examples:
   - `entity://user/admin` → `""`
-  - `entity://agent/cc_demo-builder/behavior/chat/receive` → `"behavior/chat/receive"`
+  - `entity://agent/cc_demo-builder?action=chat.receive` → `"behavior/chat/receive"`
   - `entity://agent/cc_demo-builder/auth/login` → `"auth/login"`
-  - `session://default/main/behavior/chat/send` → `"behavior/chat/send"`
+  - `session://default/main?action=chat.send` → `"behavior/chat/send"`
   """
   @spec subresource(URI.t()) :: String.t()
   def subresource(%URI{path: nil}), do: ""

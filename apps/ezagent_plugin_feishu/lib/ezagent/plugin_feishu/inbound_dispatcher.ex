@@ -13,7 +13,7 @@ defmodule EzagentPluginFeishu.InboundDispatcher do
        §5.8 — replaces the prior routing-rule reverse-lookup that
        depended on the deleted `feishu://oc_xxx` Kind).
     4. On bound + session-bound → dispatch
-       `<session_uri>/behavior/chat/send`. On success, react `OK`
+       `<session_uri>?action=chat.send`. On success, react `OK`
        emoji (Allen 2026-05-17 "受到了信息" 反馈).
     5. On dispatch error → send a Feishu text back into the source
        chat explaining what happened, then `THUMBSDOWN` react. The
@@ -148,7 +148,7 @@ defmodule EzagentPluginFeishu.InboundDispatcher do
 
     msg = Ezagent.Message.new(caller_uri, body, mentions: mentions)
 
-    target = URI.parse("#{URI.to_string(session_uri)}/behavior/chat/send")
+    target = URI.parse("#{URI.to_string(session_uri)}?action=chat.send")
 
     # Allen 2026-05-18: mode :call so cap-denial bubbles back
     # synchronously; the caller (dispatch/1) sends a text message to

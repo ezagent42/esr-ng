@@ -59,7 +59,7 @@ defmodule Ezagent.Integration.SnapshotRestartTest do
 
       # 6. Dispatch list_caps — should return the SAVED caps (admin_caps),
       #    not the fresh init's empty MapSet
-      target = URI.new!("#{uri_str}/behavior/identity/list_caps")
+      target = URI.new!("#{uri_str}?action=identity.list_caps")
 
       assert {:ok, %{caps: cap_list}} =
                Invocation.dispatch(%Invocation{

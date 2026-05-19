@@ -37,7 +37,7 @@ defmodule EzagentPluginLiveview.AdminLive do
   import EzagentPluginLiveview.Admin.MemberPanel
   import EzagentPluginLiveview.Admin.DebugPanel
 
-  @echo_target URI.parse("entity://agent/echo_default/behavior/echo/say")
+  @echo_target URI.parse("entity://agent/echo_default?action=echo.say")
   @main_session_uri URI.new!("session://main")
   @message_limit 50
 
@@ -249,7 +249,7 @@ defmodule EzagentPluginLiveview.AdminLive do
         mentions: mentions
       )
 
-    target = URI.new!("#{URI.to_string(socket.assigns.current_session_uri)}/behavior/chat/send")
+    target = URI.new!("#{URI.to_string(socket.assigns.current_session_uri)}?action=chat.send")
 
     inv = %Ezagent.Invocation{
       target: target,
@@ -332,7 +332,7 @@ defmodule EzagentPluginLiveview.AdminLive do
       when session_uri_str != "" do
     with {:ok, agent_uri} <- URI.new(agent_uri_str),
          {:ok, session_uri} <- URI.new(session_uri_str) do
-      target = URI.new!("#{URI.to_string(session_uri)}/behavior/chat/join")
+      target = URI.new!("#{URI.to_string(session_uri)}?action=chat.join")
 
       _ =
         Ezagent.Invocation.dispatch(%Ezagent.Invocation{

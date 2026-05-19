@@ -92,7 +92,7 @@ defmodule Ezagent.Workspace.Loader do
   end
 
   defp instantiate_via_dispatch(workspace_uri) do
-    target = URI.parse("#{URI.to_string(workspace_uri)}/behavior/workspace/instantiate")
+    target = URI.parse("#{URI.to_string(workspace_uri)}?action=workspace.instantiate")
 
     case Invocation.dispatch(%Invocation{
            target: target,
