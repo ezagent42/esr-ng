@@ -9,10 +9,10 @@ defmodule Ezagent.URITest do
     end
 
     test "parses URI with behavior path" do
-      uri = Ezagent.URI.parse!("agent://echo/behavior/echo/say")
+      uri = Ezagent.URI.parse!("agent://echo/default/behavior/echo/say")
       assert uri.scheme == "agent"
       assert uri.host == "echo"
-      assert uri.path == "/behavior/echo/say"
+      assert uri.path == "/default/behavior/echo/say"
     end
 
     test "raises on missing scheme" do
@@ -28,35 +28,97 @@ defmodule Ezagent.URITest do
     end
   end
 
-  describe "instance/1" do
-    test "drops path/query/fragment" do
-      uri = Ezagent.URI.parse!("agent://echo/behavior/echo/say")
+  describe "instance/1 — positional split" do
+    test "agent:// keeps type + name as instance, strips sub-resource" do
+      uri = Ezagent.URI.parse!("agent://echo/default/behavior/echo/say")
       inst = Ezagent.URI.instance(uri)
       assert inst.scheme == "agent"
       assert inst.host == "echo"
-      assert inst.path == nil
-      assert URI.to_string(inst) == "agent://echo"
+      assert inst.path == "/default"
+      assert URI.to_string(inst) == "agent://echo/default"
     end
 
-    test "instance of an already-instance URI is itself" do
+    test "agent:// already-instance form is unchanged (still has /name)" do
+      uri = Ezagent.URI.parse!("agent://cc/demo-builder")
+      assert Ezagent.URI.instance(uri) == uri
+    end
+
+    test "non-agent scheme drops entire path" do
+      uri = Ezagent.URI.parse!("session://main/behavior/chat/send")
+      inst = Ezagent.URI.instance(uri)
+      assert inst.scheme == "session"
+      assert inst.host == "main"
+      assert inst.path == nil
+      assert URI.to_string(inst) == "session://main"
+    end
+
+    test "instance of an already-instance non-agent URI is itself" do
       uri = Ezagent.URI.parse!("user://admin")
       assert Ezagent.URI.instance(uri) == uri
     end
+
+    test "decoupled from /behavior/ keyword — hypothetical sub-resource still splits cleanly" do
+      # PR-A: instance/1 is positional, NOT keyword-based. A future
+      # `/auth/...` sub-resource (or any other) is treated identically.
+      uri = Ezagent.URI.parse!("agent://cc/demo-builder/auth/login")
+      inst = Ezagent.URI.instance(uri)
+      assert URI.to_string(inst) == "agent://cc/demo-builder"
+    end
   end
 
-  describe "behavior_action/1" do
-    test "extracts {behavior_atom, action_atom}" do
-      uri = Ezagent.URI.parse!("agent://echo/behavior/echo/say")
+  describe "subresource/1" do
+    test "agent:// returns segments after the name" do
+      uri = Ezagent.URI.parse!("agent://cc/demo-builder/behavior/chat/receive")
+      assert Ezagent.URI.subresource(uri) == "behavior/chat/receive"
+    end
+
+    test "agent:// without sub-resource returns empty string" do
+      uri = Ezagent.URI.parse!("agent://cc/demo-builder")
+      assert Ezagent.URI.subresource(uri) == ""
+    end
+
+    test "non-agent scheme returns entire path" do
+      uri = Ezagent.URI.parse!("session://main/behavior/chat/send")
+      assert Ezagent.URI.subresource(uri) == "behavior/chat/send"
+    end
+
+    test "no path → empty string" do
+      uri = Ezagent.URI.parse!("user://admin")
+      assert Ezagent.URI.subresource(uri) == ""
+    end
+
+    test "agent:// with hypothetical /auth/ sub-resource" do
+      uri = Ezagent.URI.parse!("agent://cc/demo-builder/auth/login")
+      assert Ezagent.URI.subresource(uri) == "auth/login"
+    end
+  end
+
+  describe "behavior_action/1 — named parser" do
+    test "extracts {behavior_atom, action_atom} from agent:// path-style" do
+      uri = Ezagent.URI.parse!("agent://echo/default/behavior/echo/say")
       assert {:ok, {:echo, :say}} = Ezagent.URI.behavior_action(uri)
     end
 
-    test "returns :malformed_path for non-behavior paths" do
+    test "extracts from non-agent scheme" do
+      uri = Ezagent.URI.parse!("session://main/behavior/chat/send")
+      assert {:ok, {:chat, :send}} = Ezagent.URI.behavior_action(uri)
+    end
+
+    test "returns :malformed_path for URI without sub-resource" do
       uri = Ezagent.URI.parse!("agent://echo")
       assert {:error, :malformed_path} = Ezagent.URI.behavior_action(uri)
     end
 
-    test "returns :malformed_path for short paths" do
-      uri = Ezagent.URI.parse!("agent://echo/random/thing")
+    test "returns :malformed_path for non-behavior sub-resource" do
+      # PR-A: behavior_action is a NAMED parser — only matches the
+      # `behavior/` keyword in the sub-resource. Future `/auth/...`
+      # would be parsed by a separate `auth_action/1`.
+      uri = Ezagent.URI.parse!("agent://cc/demo-builder/auth/login")
+      assert {:error, :malformed_path} = Ezagent.URI.behavior_action(uri)
+    end
+
+    test "returns :malformed_path when behavior path is incomplete" do
+      uri = Ezagent.URI.parse!("agent://echo/default/behavior/just-one")
       assert {:error, :malformed_path} = Ezagent.URI.behavior_action(uri)
     end
   end

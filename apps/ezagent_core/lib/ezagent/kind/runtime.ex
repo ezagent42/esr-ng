@@ -181,7 +181,7 @@ defmodule Ezagent.Kind.Runtime do
   # Sources covered:
   # - `session://main/behavior/chat/send` → `session://main`
   # - `session://main` → `session://main` (already session)
-  # - `agent://cc-demo/behavior/chat/receive` → nil (not session-targeted)
+  # - `agent://cc/cc-demo/behavior/chat/receive` → nil (not session-targeted)
   # - any non-session URI → nil
   #
   # Pure URI manipulation; no registry / dispatch / GenServer involvement.

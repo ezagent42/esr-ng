@@ -37,7 +37,7 @@ defmodule EzagentPluginLiveview.AdminLive do
   import EzagentPluginLiveview.Admin.MemberPanel
   import EzagentPluginLiveview.Admin.DebugPanel
 
-  @echo_target URI.parse("agent://echo/behavior/echo/say")
+  @echo_target URI.parse("agent://echo/default/behavior/echo/say")
   @main_session_uri URI.new!("session://main")
   @message_limit 50
 

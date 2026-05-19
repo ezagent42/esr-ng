@@ -40,7 +40,7 @@ defmodule EzagentPluginLiveview.AdminLiveTest do
     Process.sleep(50)
     html = render(lv)
 
-    assert html =~ "agent://echo/behavior/echo/say"
+    assert html =~ "agent://echo/default/behavior/echo/say"
     # Phase 3d hard flip: :stub_grant is gone; admin's all-cap matches
     # produce "granted" in the audit column.
     assert html =~ "granted"
@@ -51,7 +51,7 @@ defmodule EzagentPluginLiveview.AdminLiveTest do
 
     form_data = %{
       "manual_dispatch" => %{
-        "target" => "agent://echo/behavior/echo/say",
+        "target" => "agent://echo/default/behavior/echo/say",
         "args" => ~s({"msg": "via-form"}),
         "mode" => "call"
       }
@@ -61,7 +61,7 @@ defmodule EzagentPluginLiveview.AdminLiveTest do
 
     Process.sleep(50)
     html = render(lv)
-    assert html =~ "agent://echo/behavior/echo/say"
+    assert html =~ "agent://echo/default/behavior/echo/say"
   end
 
   test "Session members section shows admin User as online (Phase 2 boot)", %{conn: conn} do

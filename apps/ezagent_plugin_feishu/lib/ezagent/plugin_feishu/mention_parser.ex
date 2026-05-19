@@ -19,16 +19,23 @@ defmodule EzagentPluginFeishu.MentionParser do
 
   ## Resolution
 
-  Each `@<name>` token is checked against `Ezagent.KindRegistry` for
-  a live `agent://<name>`. Unknown names are ignored (no Message
-  mention added — admin sees the message in /admin but no agent
-  gets singled out).
+  Each `@<name>` token expands to one candidate per registered agent
+  type (`agent://<type>/<name>`); live agents in `Ezagent.KindRegistry`
+  pass through. Unknown names are ignored (no Message mention added —
+  admin sees the message in /admin but no agent gets singled out).
+
+  ## UX: name-only mention with type auto-discovery (PR-A)
+
+  Users type `@<name>`, not `@<type>/<name>` — the parser asks
+  `AgentTypeRegistry.registered_types/0` for every type and tries
+  each one. If the same name happens to exist under multiple types
+  (rare), both URIs are returned (both mentioned).
 
   Allen 2026-05-17: "B2 路线可以，暂时只考虑文字" — text only,
   no attachment-level mentions.
   """
 
-  alias Ezagent.KindRegistry
+  alias Ezagent.{AgentTypeRegistry, KindRegistry}
 
   @mention_re ~r/@([A-Za-z0-9_\-\.]+)/
 
@@ -36,7 +43,7 @@ defmodule EzagentPluginFeishu.MentionParser do
   Extract live agent URIs from free text. Returns `[URI.t()]`.
 
       iex> EzagentPluginFeishu.MentionParser.extract_agent_mentions("@cc-architect look")
-      [%URI{scheme: "agent", host: "cc-architect", ...}]   # if live
+      [%URI{scheme: "agent", host: "cc", path: "/cc-architect", ...}]  # if live
 
   Returns `[]` if no `@name` tokens or none of them resolve.
   """
@@ -53,11 +60,12 @@ defmodule EzagentPluginFeishu.MentionParser do
 
   def extract_agent_mentions(_), do: []
 
-  # Each `@name` token expands to candidate URIs. For now only
-  # `agent://<name>` is considered — Phase 7 can add `session://`
-  # and `user://` if needed.
+  # Each `@name` token expands to one candidate per registered agent
+  # type. live? filters down to whichever URIs are actually alive.
   defp candidate_uris(name) do
-    [URI.parse("agent://" <> name)]
+    for type <- AgentTypeRegistry.registered_types() do
+      URI.parse("agent://#{type}/#{name}")
+    end
   end
 
   defp live?(%URI{} = uri) do

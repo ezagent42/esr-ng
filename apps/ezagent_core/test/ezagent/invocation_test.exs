@@ -3,7 +3,8 @@ defmodule Ezagent.InvocationTest do
   alias Ezagent.{Invocation, Test.TestKind, Test.TestBehavior}
 
   setup do
-    uri = URI.parse("agent://invocation-test-#{System.unique_integer([:positive])}")
+    # PR-A: agent URIs are typed (agent://<type>/<name>); use "test" type
+    uri = URI.parse("agent://test/invocation-#{System.unique_integer([:positive])}")
     :ok = Ezagent.BehaviorRegistry.register(TestKind, :noop, TestBehavior)
     :ok = Ezagent.BehaviorRegistry.register(TestKind, :fail, TestBehavior)
 
@@ -41,7 +42,7 @@ defmodule Ezagent.InvocationTest do
   describe "dispatch/1 — error paths" do
     test ":no_such_actor for unknown URI" do
       inv = %Invocation{
-        target: URI.parse("agent://does-not-exist/behavior/test/noop"),
+        target: URI.parse("agent://echo/does-not-exist/behavior/test/noop"),
         mode: :call,
         args: %{msg: "x"},
         ctx: ctx_for(self())
