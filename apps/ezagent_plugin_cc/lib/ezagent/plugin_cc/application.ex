@@ -12,32 +12,34 @@ defmodule EzagentPluginCc.Application do
   - Mint + persist per-instance connect tokens (`TokenStore`)
   - Write the `mcp.json` Claude reads for the WS bridge sidecar
     (`McpConfigWriter`)
-  - Register Template Classes: `cc.pty` (the agent), `cc.channel_instance`
-    (legacy / back-compat — its work is folded into `cc.pty` now)
+  - Register the unified `cc.agent` Template Class (PR-D2,
+    Allen 2026-05-19 — replaces the pre-existing cc.pty +
+    cc.channel_instance split)
 
-  ## Why merged
+  ## Why the unified template
 
-  Pre-merge the operator had to add TWO templates per CC agent —
+  Pre-PR-D2 the operator had to add TWO templates per CC agent —
   one `cc.pty` (spawns the PTY) and one `cc.channel_instance` (mints
   the token + makes BridgeRegistry happy). They were always added
-  together, deleted together. The split was originally justified
-  by "maybe we'll reuse cc_channel without cc_pty someday" — but
-  any such reuse can happen at the code layer (drop into this
-  plugin, call our public functions). No need for a plugin
-  boundary.
+  together, deleted together.
 
-  Now: ONE template (`cc.pty`), ONE plugin, full functionality.
+  Now: ONE template (`cc.agent`), ONE plugin. The operator picks
+  a `mode` field — `"local-pty"` spawns a local PTY-managed claude
+  (the cc.pty path); `"remote-channel"` is reserved for a future
+  external-host bridge.
 
   ## Boot order
 
   1. Init BridgeRegistry (ETS table for agent_uri → Channel pid)
-  2. Start the per-PtyServer DynamicSupervisor + the synthetic
+  2. Start PtyServerRegistry (:via name source for PtyServers) +
+     PtyServerSupervisor (DynamicSupervisor) + the synthetic
      PtyInput Kind that hosts the `Behavior.Pty.write` action
      (xterm.js input dispatch target)
-  3. Register Template Classes (`cc.pty`, `cc.channel_instance`)
+  3. Register the `cc.agent` Template Class
   4. Re-run `Workspace.Loader.load_all/0` to instantiate any
-     CC templates that were skipped during boot before this
-     plugin was up
+     cc.agent templates that were skipped during boot before this
+     plugin was up. Idempotent at supervisor layer via the
+     PtyServer :via Registry.
   """
 
   use Application
@@ -49,6 +51,9 @@ defmodule EzagentPluginCc.Application do
     :ok = BridgeRegistry.init()
 
     children = [
+      # PR-D2: PtyServer registers under :via Registry keyed by
+      # agent_uri so spawn-with-same-uri collapses atomically.
+      {Registry, keys: :unique, name: EzagentPluginCc.PtyServerRegistry},
       {DynamicSupervisor, name: EzagentPluginCc.PtyServerSupervisor, strategy: :one_for_one}
     ]
 
@@ -71,8 +76,9 @@ defmodule EzagentPluginCc.Application do
   end
 
   defp register_template_classes do
-    :ok = Ezagent.TemplateRegistry.register(Ezagent.PluginCc.Template)
-    :ok = Ezagent.TemplateRegistry.register(Ezagent.Template.CcChannelInstance)
+    # PR-D2 (Allen 2026-05-19): cc.pty + cc.channel_instance collapsed
+    # into a single cc.agent Template with a "mode" form field.
+    :ok = Ezagent.TemplateRegistry.register(Ezagent.PluginCc.Template.CcAgent)
     :ok
   end
 

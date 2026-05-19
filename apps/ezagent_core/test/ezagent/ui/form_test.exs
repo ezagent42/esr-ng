@@ -14,7 +14,7 @@ defmodule Ezagent.UI.FormTest do
 
   describe "implements?/1" do
     test "true for Template Classes that opted in" do
-      assert Form.implements?(Ezagent.PluginCc.Template)
+      assert Form.implements?(Ezagent.PluginCc.Template.CcAgent)
       assert Form.implements?(Ezagent.Template.GenericSession)
     end
 
@@ -25,9 +25,13 @@ defmodule Ezagent.UI.FormTest do
 
   describe "default_form_to_args/2" do
     test "adds class field from template_name/0" do
-      out = Form.default_form_to_args(Ezagent.PluginCc.Template, %{"agent_uri" => "agent://x"})
-      assert out["class"] == "cc.pty"
-      assert out["agent_uri"] == "agent://x"
+      out =
+        Form.default_form_to_args(Ezagent.PluginCc.Template.CcAgent, %{
+          "agent_uri" => "agent://cc/x"
+        })
+
+      assert out["class"] == "cc.agent"
+      assert out["agent_uri"] == "agent://cc/x"
     end
   end
 
@@ -36,7 +40,7 @@ defmodule Ezagent.UI.FormTest do
       classes = Form.list_form_classes()
       names = Enum.map(classes, fn {n, _, _} -> n end)
 
-      assert "cc.pty" in names
+      assert "cc.agent" in names
       assert "session.generic" in names
       assert names == Enum.sort(names)
 

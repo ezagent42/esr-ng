@@ -73,8 +73,17 @@ defmodule Ezagent.PluginCc.PtyServer do
     auto_prompts: []
   ]
 
-  def start_link(args) when is_map(args) do
-    GenServer.start_link(__MODULE__, args)
+  def start_link(%{agent_uri: %URI{} = agent_uri} = args) do
+    # PR-D2: register under :via Registry keyed by agent_uri so any
+    # concurrent attempt to spawn the same agent collapses to a single
+    # process atomically (start_link returns {:error, {:already_started,
+    # pid}} for the second caller, no race window).
+    GenServer.start_link(__MODULE__, args, name: via(agent_uri))
+  end
+
+  @doc "Build the :via tuple for an agent_uri (used as a process name)."
+  def via(%URI{} = agent_uri) do
+    {:via, Registry, {EzagentPluginCc.PtyServerRegistry, URI.to_string(agent_uri)}}
   end
 
   @doc """
