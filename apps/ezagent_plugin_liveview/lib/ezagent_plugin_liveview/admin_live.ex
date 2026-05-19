@@ -37,6 +37,9 @@ defmodule EzagentPluginLiveview.AdminLive do
   import EzagentPluginLiveview.Admin.MemberPanel
   import EzagentPluginLiveview.Admin.DebugPanel
 
+  # Phase 8 — IDE Shell wrapper
+  alias EzagentDomainUi.IdeShell
+
   @echo_target URI.parse("entity://agent/echo_default?action=echo.say")
   @main_session_uri URI.new!("session://main")
   @message_limit 50
@@ -408,28 +411,38 @@ defmodule EzagentPluginLiveview.AdminLive do
 
   @impl true
   def render(assigns) do
-    ~H"""
-    <div style="max-width: 1200px; margin: 0 auto; padding: 24px; font-family: -apple-system, sans-serif;">
-      <header>
-        <h1 style="font-size: 22px; font-weight: 600;">Admin</h1>
-        <p style="font-size: 13px; color: #666;">
-          Caller: <code>{@caller_uri_str}</code>
-          <a href="/admin/workspaces" style="margin-left: 16px; color: #0969da;">Workspaces →</a>
-          <a href="/admin/routing" style="margin-left: 16px; color: #0969da;">Routing →</a>
-          <a href="/admin/users" style="margin-left: 16px; color: #0969da;">Users →</a>
-          <a href="/admin/snapshots" style="margin-left: 16px; color: #0969da;">Snapshots →</a>
-          <a href="/admin/entities" style="margin-left: 16px; color: #0969da;">Entities →</a>
-        </p>
-      </header>
+    # Phase 8 (spec §5 阶段 B): wrap admin_live in IdeShell. Activity Bar
+    # high-level navigation replaces the old top text links. Debug panel
+    # remains visible at the bottom of Main Window for v1 ergonomics;
+    # Phase 8 阶段 D moves it to a dedicated Observability page.
+    assigns =
+      assigns
+      |> assign_new(:status, fn ->
+        %{
+          session_uri: assigns.current_session_uri,
+          agents_alive: count_alive_agents(),
+          bridges: length(assigns.connected_bridges),
+          debug_events: length(assigns.cc_events),
+          version: ezagent_version()
+        }
+      end)
 
-      <section id="layout" style="margin-top: 24px; display: grid; grid-template-columns: 200px 1fr 240px; gap: 16px;">
+    ~H"""
+    <IdeShell.ide_shell
+      current_entity_uri={@caller_uri_str}
+      current_path="/admin"
+      status={@status}
+    >
+      <:resource_panel>
         <.sessions_sidebar
           sessions={@sessions}
           current_session_uri={@current_session_uri}
           floating_agents={@floating_agents}
           new_session_form={@new_session_form}
         />
+      </:resource_panel>
 
+      <:main_window>
         <.chat_window
           current_session_uri={@current_session_uri}
           messages_stream={@streams.messages}
@@ -440,17 +453,31 @@ defmodule EzagentPluginLiveview.AdminLive do
           uploads={@uploads}
         />
 
-        <.member_panel members={@session_members} />
-      </section>
+        <.debug_panel
+          connected_bridges={@connected_bridges}
+          form={@form}
+          invocations_stream={@streams.invocations}
+          cc_events={@cc_events}
+        />
+      </:main_window>
 
-      <.debug_panel
-        connected_bridges={@connected_bridges}
-        form={@form}
-        invocations_stream={@streams.invocations}
-        cc_events={@cc_events}
-      />
-    </div>
+      <:right_sidebar>
+        <.member_panel members={@session_members} />
+      </:right_sidebar>
+    </IdeShell.ide_shell>
     """
+  end
+
+  defp count_alive_agents do
+    Ezagent.KindRegistry.list_all()
+    |> Enum.count(fn {uri_str, _pid} -> String.starts_with?(uri_str, "entity://agent/") end)
+  end
+
+  defp ezagent_version do
+    case Application.spec(:ezagent_core, :vsn) do
+      nil -> "dev"
+      vsn -> to_string(vsn)
+    end
   end
 
   # --- Helpers ----------------------------------------------------------
