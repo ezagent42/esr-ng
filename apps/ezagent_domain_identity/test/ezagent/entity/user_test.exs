@@ -3,11 +3,12 @@ defmodule Ezagent.Entity.UserTest do
   alias Ezagent.Entity.User
   alias Ezagent.Capability
 
-  test "admin_uri/0 returns user://admin" do
+  test "admin_uri/0 returns entity://user/admin" do
     uri = User.admin_uri()
     assert %URI{} = uri
-    assert uri.scheme == "user"
-    assert uri.host == "admin"
+    assert uri.scheme == "entity"
+    assert uri.host == "user"
+    assert uri.path == "/admin"
   end
 
   test "admin_caps/0 returns a MapSet containing exactly the structural all-caps cap" do
@@ -19,8 +20,10 @@ defmodule Ezagent.Entity.UserTest do
     assert cap.kind == :any
     assert cap.behavior == :any
     assert cap.instance == :any
+    # PR #141 SPEC v2 §5.1: system://bootstrap → system://bootstrap/default
     assert cap.granted_by.scheme == "system"
     assert cap.granted_by.host == "bootstrap"
+    assert cap.granted_by.path == "/default"
   end
 
   test "admin_caps cap matches any invocation" do
@@ -29,7 +32,7 @@ defmodule Ezagent.Entity.UserTest do
     assert Capability.matches?(cap, %{
              kind: :random,
              behavior: SomeMod,
-             instance: URI.parse("agent://anything")
+             instance: URI.parse("entity://agent/test_anything")
            })
   end
 

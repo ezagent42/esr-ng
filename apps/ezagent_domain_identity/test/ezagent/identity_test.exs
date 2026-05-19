@@ -3,7 +3,7 @@ defmodule Ezagent.IdentityTest do
 
   describe "list_caps_for/1" do
     test "returns empty MapSet for not-yet-spawned user" do
-      uri = URI.parse("user://never-spawned-#{System.unique_integer([:positive])}")
+      uri = URI.parse("entity://user/never-spawned-#{System.unique_integer([:positive])}")
       caps = Ezagent.Identity.list_caps_for(uri)
       assert %MapSet{} = caps
       assert MapSet.size(caps) == 0

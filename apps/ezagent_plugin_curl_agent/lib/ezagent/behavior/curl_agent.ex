@@ -6,7 +6,7 @@ defmodule Ezagent.Behavior.CurlAgent do
 
   Registered for `(Ezagent.Entity.CurlAgent, :receive)` in
   `EzagentPluginCurlAgent.Application`. The chat router targets
-  `agent://curl/<name>/behavior/chat/receive`; the dispatcher pattern-
+  `entity://agent/curl_<name>/behavior/chat/receive`; the dispatcher pattern-
   matches behavior_module to land here.
 
   ## Slice (state_slice :curl_agent)
@@ -69,7 +69,7 @@ defmodule Ezagent.Behavior.CurlAgent do
       model: Map.get(args, :model, "deepseek-chat"),
       system_prompt: Map.get(args, :system_prompt),
       max_history: Map.get(args, :max_history, 20),
-      owner_uri: Map.get(args, :owner_uri, URI.parse("user://admin")),
+      owner_uri: Map.get(args, :owner_uri, URI.parse("entity://user/admin")),
       conversation: [],
       last_error: nil,
       last_tokens: nil
@@ -81,7 +81,7 @@ defmodule Ezagent.Behavior.CurlAgent do
     # Loop prevention: ignore messages we sent ourselves. Without this,
     # an `{:always}` routing rule pointing at this agent would feed
     # the agent's own reply back in → infinite chat-completion loop.
-    # (Belt + suspenders to operator using `{:from, user://...}` rules
+    # (Belt + suspenders to operator using `{:from, entity://user/...}` rules
     # which would also break the cycle on the routing side.)
     self_uri_str = URI.to_string(ctx.self_uri)
     sender_str = URI.to_string(msg.sender)

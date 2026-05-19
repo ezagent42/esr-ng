@@ -7,7 +7,7 @@ defmodule Ezagent.Users.CliTokenTest do
   alias Ezagent.Users
 
   setup do
-    uri = "user://cli-token-test-#{System.unique_integer([:positive])}"
+    uri = "entity://user/cli-token-test-#{System.unique_integer([:positive])}"
     {:ok, _} = Users.create(uri, "p@ss", [])
     {:ok, uri: uri}
   end
@@ -39,7 +39,7 @@ defmodule Ezagent.Users.CliTokenTest do
   end
 
   test "rotate on unknown user returns :not_found" do
-    assert {:error, :not_found} = Users.rotate_cli_token("user://nope")
+    assert {:error, :not_found} = Users.rotate_cli_token("entity://user/nope")
   end
 
   test "lookup with empty / nil / random string returns :error" do

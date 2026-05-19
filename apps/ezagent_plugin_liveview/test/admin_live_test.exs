@@ -29,7 +29,7 @@ defmodule EzagentPluginLiveview.AdminLiveTest do
     assert html =~ "Manual Dispatch"
     assert html =~ "Audit Log"
     # Caller URI is shown in the header.
-    assert html =~ "user://admin"
+    assert html =~ "entity://user/admin"
   end
 
   test "Echo button triggers dispatch and audit stream updates", %{conn: conn} do
@@ -40,7 +40,7 @@ defmodule EzagentPluginLiveview.AdminLiveTest do
     Process.sleep(50)
     html = render(lv)
 
-    assert html =~ "agent://echo/default/behavior/echo/say"
+    assert html =~ "entity://agent/echo_default/behavior/echo/say"
     # Phase 3d hard flip: :stub_grant is gone; admin's all-cap matches
     # produce "granted" in the audit column.
     assert html =~ "granted"
@@ -51,7 +51,7 @@ defmodule EzagentPluginLiveview.AdminLiveTest do
 
     form_data = %{
       "manual_dispatch" => %{
-        "target" => "agent://echo/default/behavior/echo/say",
+        "target" => "entity://agent/echo_default/behavior/echo/say",
         "args" => ~s({"msg": "via-form"}),
         "mode" => "call"
       }
@@ -61,7 +61,7 @@ defmodule EzagentPluginLiveview.AdminLiveTest do
 
     Process.sleep(50)
     html = render(lv)
-    assert html =~ "agent://echo/default/behavior/echo/say"
+    assert html =~ "entity://agent/echo_default/behavior/echo/say"
   end
 
   test "Session members section shows admin User as online (Phase 2 boot)", %{conn: conn} do
@@ -71,7 +71,7 @@ defmodule EzagentPluginLiveview.AdminLiveTest do
     assert html =~ "session://main"
 
     # admin URI listed
-    assert html =~ "user://admin"
+    assert html =~ "entity://user/admin"
 
     # admin is online (boot post-spawn dispatched chat/join)
     assert html =~ "online"
@@ -95,7 +95,7 @@ defmodule EzagentPluginLiveview.AdminLiveTest do
     html = render(lv)
 
     assert html =~ text
-    assert html =~ "user://admin"
+    assert html =~ "entity://user/admin"
   end
 
   test "Chat row shape identical for admin vs agent senders (CSS-level diff only)", %{conn: conn} do
@@ -115,7 +115,7 @@ defmodule EzagentPluginLiveview.AdminLiveTest do
     assert wait_until_html(lv, admin_text)
 
     # Simulate an agent reply landing via the chat_message broadcast.
-    agent_uri = URI.new!("agent://test-#{System.unique_integer([:positive])}")
+    agent_uri = URI.new!("entity://agent/test_test-#{System.unique_integer([:positive])}")
     agent_msg = Ezagent.Message.new(agent_uri, %{text: "agent reply test", attachments: []})
 
     Phoenix.PubSub.broadcast(
@@ -154,7 +154,7 @@ defmodule EzagentPluginLiveview.AdminLiveTest do
     for i <- 1..100 do
       msg =
         Ezagent.Message.new(
-          URI.new!("user://admin"),
+          URI.new!("entity://user/admin"),
           %{text: "histmsg-#{i}", attachments: []},
           inserted_at: DateTime.add(base, i, :second)
         )

@@ -19,11 +19,11 @@ defmodule Mix.Tasks.Ezagent.Routing.AddRule do
 
       # text_contains rule: any urgent message → oncall session
       mix ezagent.routing.add_rule EzagentDomainChat.Routing.MentionRouting \\
-          text_contains:urgent receivers:session://oncall
+          text_contains:urgent receivers:session://default/oncall
 
-      # mention rule: @cc-builder → architect session
+      # mention rule: @cc_builder → architect session
       mix ezagent.routing.add_rule EzagentDomainChat.Routing.MentionRouting \\
-          mention:agent://cc-builder receivers:session://architect
+          mention:entity://agent/cc_builder receivers:session://default/architect
 
   ## Behavior
 

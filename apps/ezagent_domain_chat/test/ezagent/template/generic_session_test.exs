@@ -21,7 +21,7 @@ defmodule Ezagent.Template.GenericSessionTest do
                GenericSession.validate(%{
                  "class" => "session.generic",
                  "session_name" => "demo",
-                 "members" => ["user://admin", "agent://x"]
+                 "members" => ["entity://user/admin", "entity://agent/test_x"]
                })
     end
 
@@ -83,7 +83,7 @@ defmodule Ezagent.Template.GenericSessionTest do
       tmpl = %{
         "class" => "session.generic",
         "session_name" => session_name,
-        "members" => ["user://admin"]
+        "members" => ["entity://user/admin"]
       }
 
       assert {:ok, [session_uri]} =

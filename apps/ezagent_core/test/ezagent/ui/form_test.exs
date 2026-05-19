@@ -27,11 +27,11 @@ defmodule Ezagent.UI.FormTest do
     test "adds class field from template_name/0" do
       out =
         Form.default_form_to_args(Ezagent.PluginCc.Template.CcAgent, %{
-          "agent_uri" => "agent://cc/x"
+          "agent_uri" => "entity://agent/cc_x"
         })
 
       assert out["class"] == "cc.agent"
-      assert out["agent_uri"] == "agent://cc/x"
+      assert out["agent_uri"] == "entity://agent/cc_x"
     end
   end
 
@@ -63,13 +63,13 @@ defmodule Ezagent.UI.FormTest do
       out =
         Ezagent.Template.GenericSession.form_to_args(%{
           "session_name" => "foo",
-          "members_csv" => "user://admin, agent://x ,"
+          "members_csv" => "entity://user/admin, entity://agent/test_x ,"
         })
 
       assert out == %{
                "class" => "session.generic",
                "session_name" => "foo",
-               "members" => ["user://admin", "agent://x"]
+               "members" => ["entity://user/admin", "entity://agent/test_x"]
              }
     end
   end

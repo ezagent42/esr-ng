@@ -45,10 +45,11 @@ defmodule EzagentCore.EtsOwner do
     # shape (Decision #137 / PR 42). Ezagent.Entity.Agent.spawn/4
     # records here; CapBAC step 5.5 (future PR 46+) reads here.
     {Ezagent.AgentLineage, :set},
-    # PR #131 (Allen 2026-05-19): agent URI type-encoding registry.
-    # Each plugin registers its agent type (e.g. "cc", "curl", "echo")
-    # → spawn fn; the chat plugin's `agent://` SpawnRegistry fn
-    # delegates here based on the URI's `<type>` host segment.
+    # PR #141 (SPEC v2): agent flavor → spawn fn registry. Each plugin
+    # registers its agent flavor (e.g. "cc", "curl", "echo") → spawn
+    # fn; the chat plugin's `entity://` SpawnRegistry fn delegates here
+    # for `host = "agent"`, extracting flavor from the URI's name
+    # prefix `<flavor>_<rest>` (SPEC §5.14).
     {Ezagent.AgentTypeRegistry, :set}
   ]
 

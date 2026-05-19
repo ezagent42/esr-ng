@@ -27,11 +27,11 @@ defmodule Ezagent.DLQTest do
     )
 
     payload = %Ezagent.Invocation{
-      target: URI.parse("agent://echo/dlq-test/behavior/echo/say"),
+      target: URI.parse("entity://agent/echo_dlq-test/behavior/echo/say"),
       mode: :call,
       args: %{msg: "lost"},
       ctx: %{
-        caller: URI.parse("user://admin"),
+        caller: URI.parse("entity://user/admin"),
         caps: Ezagent.Entity.User.admin_caps(),
         reply: :ignore
       }

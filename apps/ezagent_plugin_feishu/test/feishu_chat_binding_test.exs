@@ -29,7 +29,7 @@ defmodule Ezagent.Template.FeishuChatBindingTest do
     assert {:error, _} =
              FeishuChatBinding.validate(%{
                "class" => "feishu.chat_binding",
-               "session_uri" => "user://x",
+               "session_uri" => "entity://user/x",
                "chat_id" => "oc_abc"
              })
 

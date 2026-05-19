@@ -14,7 +14,7 @@ defmodule Ezagent.Behavior.IdentityGrantTest do
       kind: :echo,
       behavior: :any,
       instance: :any,
-      granted_by: URI.parse("user://admin"),
+      granted_by: URI.parse("entity://user/admin"),
       granted_at: DateTime.utc_now()
     }
 
@@ -30,7 +30,7 @@ defmodule Ezagent.Behavior.IdentityGrantTest do
       kind: :echo,
       behavior: :any,
       instance: :any,
-      granted_by: URI.parse("user://admin"),
+      granted_by: URI.parse("entity://user/admin"),
       granted_at: DateTime.utc_now()
     }
 
@@ -48,7 +48,7 @@ defmodule Ezagent.Behavior.IdentityGrantTest do
       kind: :echo,
       behavior: :any,
       instance: :any,
-      granted_by: URI.parse("user://admin"),
+      granted_by: URI.parse("entity://user/admin"),
       granted_at: DateTime.utc_now()
     }
 

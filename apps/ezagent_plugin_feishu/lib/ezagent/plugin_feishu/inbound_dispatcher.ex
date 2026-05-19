@@ -71,7 +71,7 @@ defmodule EzagentPluginFeishu.InboundDispatcher do
     case SenderResolver.resolve(sender) do
       {:pending, open_id} ->
         Logger.info(
-          "Feishu inbound: open_id=#{open_id} unbound — pending. Run `mix ezagent.feishu.bind #{open_id} user://<name>` to attach."
+          "Feishu inbound: open_id=#{open_id} unbound — pending. Run `mix ezagent.feishu.bind #{open_id} entity://user/<name>` to attach."
         )
 
         # Allen 2026-05-17: lark react API rejected EYES with code

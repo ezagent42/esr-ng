@@ -4,7 +4,7 @@ defmodule EzagentCore.Repo.Migrations.PrD1RewriteLegacyUrisInMatcherData do
   segment). PR #131's migration only rewrote `workspaces.session_templates`
   and `routing_rules.receivers`. It missed `routing_rules.matcher_data`,
   which embeds URIs inside JSON matcher trees (e.g. `{"type": "mention",
-  "arg": "agent://demo-builder"}`). Result: rules created before
+  "arg": "entity://agent/test_demo-builder"}`). Result: rules created before
   PR #131 against the legacy un-typed URI silently stopped matching.
 
   ## What this fixes
@@ -22,7 +22,7 @@ defmodule EzagentCore.Repo.Migrations.PrD1RewriteLegacyUrisInMatcherData do
   ## What this does NOT touch
 
   - `messages.sender` / `messages.mentions` (historical audit data —
-    a 2026-05-18 message saying `agent://demo-builder` SAID that, full
+    a 2026-05-18 message saying `entity://agent/test_demo-builder` SAID that, full
     stop; rewriting it would falsify history).
   - `kind_snapshots` orphan rows from old un-typed agent URIs. These
     take disk space but don't break anything; the live agent is at
@@ -91,8 +91,8 @@ defmodule EzagentCore.Repo.Migrations.PrD1RewriteLegacyUrisInMatcherData do
 
   defp legacy_to_typed(_), do: nil
 
-  # `agent://cc/X` → legacy `agent://X` (the form PR-pre-#131 stored)
-  # `agent://curl/X` → legacy `agent://X` (the form an admin would have typed)
+  # `entity://agent/cc_X` → legacy `entity://agent/test_X` (the form PR-pre-#131 stored)
+  # `entity://agent/curl_X` → legacy `entity://agent/test_X` (the form an admin would have typed)
   # Also: anything else → returns as-is (no rewrite produced).
   defp legacy_form("agent://" <> rest, _type) do
     case String.split(rest, "/", parts: 2) do

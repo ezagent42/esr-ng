@@ -2,7 +2,7 @@ defmodule EzagentPluginLiveview.AgentDetailLive do
   @moduledoc """
   Phase 5 PR 3: per-agent PTY status detail at `/admin/agents/:uri`.
 
-  Path segment is URI-encoded `agent://...`. Auto-refresh every 2s
+  Path segment is URI-encoded `entity://agent/...`. Auto-refresh every 2s
   so operator sees stdout flowing without a manual reload.
 
   Restart button stops the PtyServer; DynamicSupervisor restarts it

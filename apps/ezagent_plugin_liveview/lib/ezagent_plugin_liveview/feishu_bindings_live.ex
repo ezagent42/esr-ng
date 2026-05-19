@@ -19,7 +19,7 @@ defmodule EzagentPluginLiveview.FeishuBindingsLive do
   def mount(_params, session, socket) do
     admin_uri =
       case Map.get(session || %{}, "current_user_uri") do
-        nil -> "user://admin"
+        nil -> "entity://user/admin"
         s -> s
       end
 
@@ -29,7 +29,7 @@ defmodule EzagentPluginLiveview.FeishuBindingsLive do
      |> assign(:bindings, UserBinding.list_all())
      |> assign(:flash_info, nil)
      |> assign(:flash_error, nil)
-     |> assign(:bind_form, to_form(%{"open_id" => "", "user_uri" => "user://"}, as: "bind"))}
+     |> assign(:bind_form, to_form(%{"open_id" => "", "user_uri" => "entity://user/"}, as: "bind"))}
   end
 
   @impl true
@@ -38,7 +38,7 @@ defmodule EzagentPluginLiveview.FeishuBindingsLive do
     user_uri = String.trim(user_uri)
 
     cond do
-      open_id == "" or user_uri == "" or user_uri == "user://" ->
+      open_id == "" or user_uri == "" or user_uri == "entity://user/" ->
         {:noreply, assign(socket, :flash_error, "open_id and user_uri are required")}
 
       true ->
@@ -51,7 +51,7 @@ defmodule EzagentPluginLiveview.FeishuBindingsLive do
              |> assign(:bindings, UserBinding.list_all())
              |> assign(:flash_info, "Bound #{open_id} → #{user_uri}")
              |> assign(:flash_error, nil)
-             |> assign(:bind_form, to_form(%{"open_id" => "", "user_uri" => "user://"}, as: "bind"))}
+             |> assign(:bind_form, to_form(%{"open_id" => "", "user_uri" => "entity://user/"}, as: "bind"))}
 
           {:error, reason} ->
             {:noreply, assign(socket, :flash_error, "bind failed: #{inspect(reason)}")}
@@ -105,7 +105,7 @@ defmodule EzagentPluginLiveview.FeishuBindingsLive do
             <input
               type="text"
               name="bind[user_uri]"
-              value="user://"
+              value="entity://user/"
               class="block w-full px-2 py-1 text-sm border border-zinc-300 rounded-md font-mono"
             />
           </label>

@@ -397,7 +397,7 @@ defmodule EzagentPluginLiveview.RoutingLive do
             <input
               type="text"
               name="rule[matcher_arg]"
-              placeholder="matcher arg (e.g. user://admin)"
+              placeholder="matcher arg (e.g. entity://user/admin)"
               style="padding: 6px 10px; border: 1px solid #d1d5da; border-radius: 4px;"
             />
           </div>
@@ -406,7 +406,7 @@ defmodule EzagentPluginLiveview.RoutingLive do
             <textarea
               name="rule[matcher_json]"
               rows="4"
-              placeholder={~s({"type":"and","items":[{"type":"mention","arg":"agent://x"},{"type":"from","arg":"user://admin"}]})}
+              placeholder={~s({"type":"and","items":[{"type":"mention","arg":"entity://agent/cc_x"},{"type":"from","arg":"entity://user/admin"}]})}
               style="width: 100%; padding: 6px 10px; border: 1px solid #d1d5da; border-radius: 4px; font-family: monospace; font-size: 12px;"
             ></textarea>
             <p style="font-size: 11px; color: #57606a; margin: 4px 0 0;">

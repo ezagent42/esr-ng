@@ -19,9 +19,9 @@ defmodule Ezagent.MessageSchemaTest do
   end
 
   test "insert + get round-trip preserves all 7 fields" do
-    sender = URI.new!("user://admin")
+    sender = URI.new!("entity://user/admin")
     session = URI.new!("session://main")
-    mention = URI.new!("agent://cc-builder")
+    mention = URI.new!("entity://agent/test_cc-builder")
     ref_uri = URI.new!("message://aabbccdd00000000")
     fixed_at = ~U[2026-05-16 07:00:00.000000Z]
 
@@ -51,7 +51,7 @@ defmodule Ezagent.MessageSchemaTest do
   end
 
   test "insert with empty mentions list" do
-    sender = URI.new!("user://admin")
+    sender = URI.new!("entity://user/admin")
     session = URI.new!("session://main")
 
     msg = Message.new(sender, %{text: "no mentions", attachments: []})
@@ -64,7 +64,7 @@ defmodule Ezagent.MessageSchemaTest do
   end
 
   test "insert with nil ref" do
-    sender = URI.new!("agent://cc-builder")
+    sender = URI.new!("entity://agent/test_cc-builder")
     session = URI.new!("session://main")
 
     msg = Message.new(sender, %{text: "no reply", attachments: []})

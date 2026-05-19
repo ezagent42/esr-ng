@@ -32,7 +32,7 @@ defmodule Ezagent.Routing.ResolverTest do
   end
 
   defp msg(text \\ "hello", mentions \\ []) do
-    Message.new(URI.new!("user://admin"), %{text: text, attachments: []}, mentions: mentions)
+    Message.new(URI.new!("entity://user/admin"), %{text: text, attachments: []}, mentions: mentions)
   end
 
   describe "resolve/2" do
@@ -41,7 +41,7 @@ defmodule Ezagent.Routing.ResolverTest do
     end
 
     test "mention(X) rule fires when message mentions X — returns receivers", %{table: t} do
-      target = URI.new!("agent://cc-builder")
+      target = URI.new!("entity://agent/test_cc-builder")
       :ok = RoutingRegistry.put(t, Matcher.mention(target), ["session://oncall"])
 
       result = Resolver.resolve(msg("hi", [target]), URI.new!("session://main"))
@@ -49,7 +49,7 @@ defmodule Ezagent.Routing.ResolverTest do
     end
 
     test "additive: multiple rules matching → union receivers, deduplicated", %{table: t} do
-      target = URI.new!("agent://X")
+      target = URI.new!("entity://agent/test_X")
 
       :ok = RoutingRegistry.put(t, Matcher.mention(target), ["session://A", "session://B"])
       :ok = RoutingRegistry.put(t, Matcher.always(), ["session://B", "session://C"])

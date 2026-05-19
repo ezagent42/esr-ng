@@ -5,7 +5,7 @@ defmodule EzagentDomainChat.ApplicationTest do
 
   These assertions run against the live KindRegistry / DynamicSupervisor
   populated at application boot — not test-spawned fixtures. The Phase 1
-  echo plugin uses the same pattern (its boot spawns `agent://echo` and
+  echo plugin uses the same pattern (its boot spawns `entity://agent/test_echo` and
   tests assert on the live registry entry).
   """
 
@@ -23,13 +23,13 @@ defmodule EzagentDomainChat.ApplicationTest do
     assert :ready = ReadyGate.status(uri_str)
   end
 
-  test "user://admin is registered in KindRegistry" do
+  test "entity://user/admin is registered in KindRegistry" do
     uri = Ezagent.Entity.User.admin_uri()
     assert {:ok, pid} = KindRegistry.lookup(uri)
     assert Process.alive?(pid)
   end
 
-  test "user://admin is marked :ready in ReadyGate" do
+  test "entity://user/admin is marked :ready in ReadyGate" do
     uri_str = URI.to_string(Ezagent.Entity.User.admin_uri())
     assert :ready = ReadyGate.status(uri_str)
   end

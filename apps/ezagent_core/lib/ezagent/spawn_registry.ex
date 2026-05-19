@@ -10,16 +10,16 @@ defmodule Ezagent.SpawnRegistry do
 
   Each plugin registers a spawn function for the URI schemes it owns:
 
-      Ezagent.SpawnRegistry.register("agent", fn uri ->
-        DynamicSupervisor.start_child(
-          EzagentDomainChat.AgentSupervisor,
-          {Ezagent.Kind.Server, {Ezagent.Entity.Agent, %{uri: uri}}}
-        )
+      Ezagent.SpawnRegistry.register("entity", fn uri ->
+        case uri.host do
+          "agent" -> ...
+          "user"  -> ...
+        end
       end)
 
-  When the Loader sees `agent://cc-builder` it calls
-  `Ezagent.SpawnRegistry.spawn(uri)` and ezagent_core never has to know about
-  `EzagentDomainChat.AgentSupervisor`.
+  When the Loader sees `entity://agent/cc_builder` it calls
+  `Ezagent.SpawnRegistry.spawn(uri)` and ezagent_core never has to know
+  about `EzagentDomainChat.AgentSupervisor`.
 
   ## Idempotency
 
@@ -32,9 +32,8 @@ defmodule Ezagent.SpawnRegistry do
   ## ETS layout
 
   `:ezagent_spawn_registry` set table owned by `EzagentCore.EtsOwner`. Keys
-  are scheme strings (e.g. `"agent"`), values are 0-arity functions
-  (returning a fn waste 1 indirection but keeps the table strictly
-  `{key, value}` shaped).
+  are scheme strings (e.g. `"entity"`), values are 1-arity functions
+  taking a `%URI{}`.
   """
 
   @table :ezagent_spawn_registry

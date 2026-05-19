@@ -7,7 +7,7 @@ defmodule Ezagent.Entity.RoutingAdmin do
   `Ezagent.Invocation.dispatch` to `routing-admin://default/behavior/routing_admin/<action>`,
   which fires the Phase 3d real CapBAC check at dispatch step 5.5.
 
-  - Admin (`user://admin` with triple-`:any` cap) — passes
+  - Admin (`entity://user/admin` with triple-`:any` cap) — passes
   - Non-admin without `routing_admin.routing_admin` cap — gets
     `{:error, :unauthorized}` and an audit row at `[:ezagent, :authz, :denied]`
 

@@ -35,14 +35,14 @@ defmodule EzagentWeb.SessionController do
     <form method="post" action="/login">
       <input type="hidden" name="_csrf_token" value="{{CSRF}}">
       <label for="user_uri">User URI</label>
-      <input type="text" id="user_uri" name="user_uri" placeholder="user://allen" required autofocus>
+      <input type="text" id="user_uri" name="user_uri" placeholder="entity://user/allen" required autofocus>
       <label for="password">Password</label>
       <input type="password" id="password" name="password" required>
       <button type="submit">Sign in</button>
     </form>
     <p class="hint">
-      First time? Admin runs <code>mix ezagent.user.set_password user://admin --password X</code>,
-      then sign in as <code>user://admin</code>.
+      First time? Admin runs <code>mix ezagent.user.set_password entity://user/admin --password X</code>,
+      then sign in as <code>entity://user/admin</code>.
     </p>
   </body>
   </html>

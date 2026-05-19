@@ -13,22 +13,22 @@ defmodule Ezagent.Entity.User do
     landed real snapshot impl; granted caps survive restart
 
   Non-admin Users (Phase 4-completion PR 4-5):
-  - Provisioned via `mix ezagent.user.create user://X --password Y --caps ...`
+  - Provisioned via `mix ezagent.user.create entity://user/X --password Y --caps ...`
   - Authenticated via `/login` (`EzagentWeb.SessionController` +
     `Ezagent.Users.verify_password/2`)
   - Their caps live in `Ezagent.Users.caps_json` SQLite column AND mirror
     into Identity slice via `init_slice/1`
   """
 
-  @admin_uri URI.parse("user://admin")
-  @system_bootstrap_uri URI.parse("system://bootstrap")
+  @admin_uri URI.parse("entity://user/admin")
+  @system_bootstrap_uri URI.parse("system://bootstrap/default")
 
   # Static granted_at — admin capability is a structural bootstrap, not
   # a time-varying grant. Same value across boots so tests/fixtures stay
   # deterministic.
   @admin_granted_at ~U[2026-01-01 00:00:00Z]
 
-  @doc "Bootstrap admin principal URI: `user://admin`."
+  @doc "Bootstrap admin principal URI: `entity://user/admin`."
   @spec admin_uri() :: URI.t()
   def admin_uri, do: @admin_uri
 
@@ -69,7 +69,7 @@ defmodule Ezagent.Entity.User do
   instance"; whether the message actually lands depends on session
   membership and routing rules, not on this cap. Admin's wildcard
   `admin_caps/0` is the only true escape hatch, and is granted only
-  to `user://admin`.
+  to `entity://user/admin`.
 
   **Behavior wildcard**: `:any` follows the existing project
   convention (cf. `feishu_chat:any` granted by `BindingPolicy`).

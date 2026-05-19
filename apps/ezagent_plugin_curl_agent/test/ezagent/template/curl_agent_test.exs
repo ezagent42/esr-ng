@@ -3,12 +3,12 @@ defmodule Ezagent.PluginCurlAgent.TemplateTest do
 
   alias Ezagent.PluginCurlAgent.Template
 
-  describe "validate/1 — PR #131 strict agent://curl/<name> shape" do
+  describe "validate/1 — PR #141 strict entity://agent/curl_<name> shape" do
     test "happy path" do
       assert :ok =
                Template.validate(%{
                  "class" => "curl.agent",
-                 "agent_uri" => "agent://curl/my-deepseek",
+                 "agent_uri" => "entity://agent/curl_my-deepseek",
                  "provider" => "deepseek",
                  "api_url" => "https://api.deepseek.com/chat/completions",
                  "model" => "deepseek-chat"
@@ -19,25 +19,25 @@ defmodule Ezagent.PluginCurlAgent.TemplateTest do
       assert {:error, {:wrong_class, "cc.pty"}} =
                Template.validate(%{
                  "class" => "cc.pty",
-                 "agent_uri" => "agent://curl/x",
+                 "agent_uri" => "entity://agent/curl_x",
                  "provider" => "deepseek",
                  "api_url" => "https://x.test/chat",
                  "model" => "x"
                })
     end
 
-    test "rejects un-typed legacy agent:// URI" do
-      assert {:error, {:missing_type_segment, _, _}} =
+    test "rejects entity://agent/<name> without flavor prefix (PR #141)" do
+      assert {:error, {:missing_flavor_prefix, _, _}} =
                Template.validate(%{
                  "class" => "curl.agent",
-                 "agent_uri" => "agent://just-a-name",
+                 "agent_uri" => "entity://agent/just-a-name",
                  "provider" => "deepseek",
                  "api_url" => "https://x.test/chat",
                  "model" => "x"
                })
     end
 
-    test "rejects legacy curl-agent:// scheme (PR #131 strict mode)" do
+    test "rejects legacy curl-agent:// scheme (PR #141 clean rebuild)" do
       assert {:error, {:bad_agent_uri, _}} =
                Template.validate(%{
                  "class" => "curl.agent",
@@ -48,11 +48,11 @@ defmodule Ezagent.PluginCurlAgent.TemplateTest do
                })
     end
 
-    test "rejects agent:// with wrong type" do
-      assert {:error, {:wrong_agent_type, "cc", expected: "curl"}} =
+    test "rejects entity:// with wrong agent flavor in name prefix" do
+      assert {:error, {:wrong_agent_flavor, "cc", expected: "curl"}} =
                Template.validate(%{
                  "class" => "curl.agent",
-                 "agent_uri" => "agent://cc/wrong-type",
+                 "agent_uri" => "entity://agent/cc_wrong-flavor",
                  "provider" => "deepseek",
                  "api_url" => "https://x.test/chat",
                  "model" => "x"
@@ -63,7 +63,7 @@ defmodule Ezagent.PluginCurlAgent.TemplateTest do
       assert {:error, {:bad_api_url, "ftp://nope"}} =
                Template.validate(%{
                  "class" => "curl.agent",
-                 "agent_uri" => "agent://curl/x",
+                 "agent_uri" => "entity://agent/curl_x",
                  "provider" => "deepseek",
                  "api_url" => "ftp://nope",
                  "model" => "x"
@@ -74,7 +74,7 @@ defmodule Ezagent.PluginCurlAgent.TemplateTest do
       assert {:error, :missing_model} =
                Template.validate(%{
                  "class" => "curl.agent",
-                 "agent_uri" => "agent://curl/x",
+                 "agent_uri" => "entity://agent/curl_x",
                  "provider" => "deepseek",
                  "api_url" => "https://x.test/chat"
                })

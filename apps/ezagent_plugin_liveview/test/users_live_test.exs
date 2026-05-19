@@ -21,13 +21,13 @@ defmodule EzagentPluginLiveview.UsersLiveTest do
   test "GET /admin/users renders existing admin row + create form", %{conn: conn} do
     {:ok, _lv, html} = live(conn, "/admin/users")
     assert html =~ "Users"
-    assert html =~ "user://admin"
+    assert html =~ "entity://user/admin"
     assert html =~ "Create user"
   end
 
   test "create_user persists + appears in list", %{conn: conn} do
     {:ok, lv, _html} = live(conn, "/admin/users")
-    uri = "user://lv-create-#{System.unique_integer([:positive])}"
+    uri = "entity://user/lv-create-#{System.unique_integer([:positive])}"
 
     lv
     |> form("#create-user form",
@@ -46,7 +46,7 @@ defmodule EzagentPluginLiveview.UsersLiveTest do
 
   test "create_user refuses '*' caps via UI (must use mix --allow-allcaps)", %{conn: conn} do
     {:ok, lv, _html} = live(conn, "/admin/users")
-    uri = "user://lv-allcaps-#{System.unique_integer([:positive])}"
+    uri = "entity://user/lv-allcaps-#{System.unique_integer([:positive])}"
 
     lv
     |> form("#create-user form",
@@ -67,7 +67,7 @@ defmodule EzagentPluginLiveview.UsersLiveTest do
     # Direct facade test — UI form submission with hidden field is
     # awkward in Phoenix.LiveViewTest; the facade is exercised in
     # PR 4 unit tests + the LV button is plain HTML POST.
-    uri = "user://lv-setpw-#{System.unique_integer([:positive])}"
+    uri = "entity://user/lv-setpw-#{System.unique_integer([:positive])}"
     {:ok, _} = Ezagent.Users.create(uri, nil, [])
     refute Ezagent.Users.verify_password(uri, "anything")
 

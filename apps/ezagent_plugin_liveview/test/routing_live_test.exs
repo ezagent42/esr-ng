@@ -36,7 +36,7 @@ defmodule EzagentPluginLiveview.RoutingLiveTest do
       rule: %{
         table: "Elixir.EzagentDomainChat.Routing.MentionRouting",
         matcher_type: "mention",
-        matcher_arg: "agent://lv-test-#{System.unique_integer([:positive])}",
+        matcher_arg: "entity://agent/test_lv-test-#{System.unique_integer([:positive])}",
         receivers: "session://lv-rcv-#{System.unique_integer([:positive])}"
       }
     )
@@ -44,7 +44,7 @@ defmodule EzagentPluginLiveview.RoutingLiveTest do
 
     html = render(lv)
     assert html =~ "mention"
-    assert html =~ "agent://lv-test"
+    assert html =~ "entity://agent/test_lv-test"
   end
 
   test "switch_table changes view", %{conn: conn} do
@@ -68,8 +68,8 @@ defmodule EzagentPluginLiveview.RoutingLiveTest do
       Jason.encode!(%{
         "type" => "and",
         "items" => [
-          %{"type" => "mention", "arg" => "agent://lv-combo"},
-          %{"type" => "from", "arg" => "user://admin"}
+          %{"type" => "mention", "arg" => "entity://agent/test_lv-combo"},
+          %{"type" => "from", "arg" => "entity://user/admin"}
         ]
       })
 
@@ -95,7 +95,7 @@ defmodule EzagentPluginLiveview.RoutingLiveTest do
       rule: %{
         table: "Elixir.EzagentDomainChat.Routing.MentionRouting",
         matcher_type: "mention",
-        matcher_arg: "agent://x",
+        matcher_arg: "entity://agent/test_x",
         receivers: ""
       }
     )

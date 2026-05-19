@@ -4,7 +4,7 @@ defmodule EzagentPluginFeishu.SenderResolver do
   dispatch identity.
 
   ## Three flows
-  1. **Bound** open_id → use bound `user://X` as caller; fetch caps
+  1. **Bound** open_id → use bound `entity://user/X` as caller; fetch caps
      from that User Kind's Identity slice. CapBAC at step 5.5 will
      accept anything that user is authorized for (BindingPolicy
      grants the standard feishu_chat cap on bind).

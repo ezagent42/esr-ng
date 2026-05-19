@@ -7,7 +7,7 @@ defmodule Mix.Tasks.Ezagent.Snapshot.Dump do
 
   Example:
 
-      mix ezagent.snapshot.dump user://admin
+      mix ezagent.snapshot.dump entity://user/admin
   """
   use Mix.Task
 

@@ -41,7 +41,7 @@ defmodule EzagentPluginEcho.Integration.F1DirectInvokeTest do
     :ok
   end
 
-  test "F1: dispatch :say to agent://echo, get reply, see audit event + SQLite row" do
+  test "F1: dispatch :say to entity://agent/test_echo, get reply, see audit event + SQLite row" do
     target = URI.parse("#{URI.to_string(EchoApp.default_uri())}/behavior/echo/say")
 
     inv = %Invocation{
@@ -64,7 +64,7 @@ defmodule EzagentPluginEcho.Integration.F1DirectInvokeTest do
     # Both arrive; we care about the :stop event's metadata.
     assert_receive {:audit_event, %{event: [:ezagent, :authz, :granted]}}, 500
     assert_receive {:audit_event, %{event: [:ezagent, :invoke, :stop]} = stop_event}, 500
-    assert stop_event.metadata.target == "agent://echo/default/behavior/echo/say"
+    assert stop_event.metadata.target == "entity://agent/echo_default/behavior/echo/say"
     assert stop_event.metadata.action == :say
 
     # Step 3: wait for Audit.Writer batch flush (100ms) + 50ms slack,
@@ -74,11 +74,11 @@ defmodule EzagentPluginEcho.Integration.F1DirectInvokeTest do
     rows =
       EzagentCore.Repo.query!(
         "SELECT target, action, authz, duration_us FROM invocations " <>
-          "WHERE target LIKE 'agent://echo%' ORDER BY id DESC LIMIT 1"
+          "WHERE target LIKE 'entity://agent/test_echo%' ORDER BY id DESC LIMIT 1"
       ).rows
 
     assert [[target_col, action_col, authz_col, duration_col]] = rows
-    assert target_col == "agent://echo/default/behavior/echo/say"
+    assert target_col == "entity://agent/echo_default/behavior/echo/say"
     assert action_col == "say"
     # Phase 3d: hard flip removed :stub_grant in favor of real "granted"
     # from cap check. invocations.authz column is "granted" for the

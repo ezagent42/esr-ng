@@ -12,12 +12,12 @@ defmodule Ezagent.Behavior.WorkspaceTest do
     end
 
     test "accepts members as list and converts to MapSet" do
-      slice = WB.init_slice(%{members: [URI.parse("user://admin"), URI.parse("agent://x")]})
+      slice = WB.init_slice(%{members: [URI.parse("entity://user/admin"), URI.parse("entity://agent/test_x")]})
       assert MapSet.size(slice.members) == 2
     end
 
     test "accepts members as MapSet directly" do
-      uris = MapSet.new([URI.parse("user://admin")])
+      uris = MapSet.new([URI.parse("entity://user/admin")])
       slice = WB.init_slice(%{members: uris})
       assert slice.members == uris
     end
@@ -25,7 +25,7 @@ defmodule Ezagent.Behavior.WorkspaceTest do
 
   describe "member actions" do
     test "list_members returns all member URIs" do
-      slice = WB.init_slice(%{members: [URI.parse("user://admin"), URI.parse("agent://x")]})
+      slice = WB.init_slice(%{members: [URI.parse("entity://user/admin"), URI.parse("entity://agent/test_x")]})
 
       assert {:ok, ^slice, %{members: members}} = WB.invoke(:list_members, slice, %{}, %{})
       assert length(members) == 2
@@ -33,14 +33,14 @@ defmodule Ezagent.Behavior.WorkspaceTest do
 
     test "add_member inserts a new URI" do
       slice = WB.init_slice(%{})
-      uri = URI.parse("user://admin")
+      uri = URI.parse("entity://user/admin")
 
       assert {:ok, new_slice} = WB.invoke(:add_member, slice, %{member: uri}, %{})
       assert MapSet.member?(new_slice.members, uri)
     end
 
     test "remove_member drops the URI" do
-      uri = URI.parse("user://admin")
+      uri = URI.parse("entity://user/admin")
       slice = WB.init_slice(%{members: [uri]})
 
       assert {:ok, new_slice} = WB.invoke(:remove_member, slice, %{member: uri}, %{})
@@ -51,7 +51,7 @@ defmodule Ezagent.Behavior.WorkspaceTest do
   describe "session_template actions" do
     test "add_template + list_templates round-trip" do
       slice = WB.init_slice(%{})
-      tmpl = %{members: ["user://admin"], routing_rules: []}
+      tmpl = %{members: ["entity://user/admin"], routing_rules: []}
 
       {:ok, slice2} = WB.invoke(:add_template, slice, %{name: "main", template: tmpl}, %{})
 
@@ -80,7 +80,7 @@ defmodule Ezagent.Behavior.WorkspaceTest do
 
   describe "instantiate (north-star action)" do
     test "returns child list with one entry per member" do
-      uris = [URI.parse("user://admin"), URI.parse("agent://cc-builder")]
+      uris = [URI.parse("entity://user/admin"), URI.parse("entity://agent/test_cc-builder")]
       slice = WB.init_slice(%{members: uris})
 
       assert {:ok, ^slice, %{children: children}} =

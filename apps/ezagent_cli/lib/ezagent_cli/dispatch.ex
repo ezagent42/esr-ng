@@ -92,7 +92,7 @@ defmodule EzagentCli.Dispatch do
   end
 
   # Phase 4 completion: scheme defaults to type_name. Echo overrides
-  # by using `agent://` for instances — but for CLI we use type_name
+  # by using `entity://agent/` for instances — but for CLI we use type_name
   # consistently. Phase 5+ can add scheme/0 callback on Kind if needed.
   defp scheme_for(type_name), do: to_string(type_name)
 

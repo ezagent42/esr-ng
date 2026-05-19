@@ -12,6 +12,11 @@ defmodule EzagentDomainChat.Application do
          Ezagent.Entity.User     → :receive               → Ezagent.Behavior.Chat
          Ezagent.Entity.Agent    → :receive               → Ezagent.Behavior.Chat
 
+     PR #141 (SPEC v2): User+Agent merged into the `entity://` scheme;
+     `Kind` modules are unchanged (`Ezagent.Entity.User` /
+     `Ezagent.Entity.Agent` keep their existing names — the URI shape
+     changed, not the OTP topology).
+
      Per Decision P2-D2 K-path: one Behavior module, multiple Kinds
      each picking the subset of actions it consumes.
 
@@ -19,13 +24,13 @@ defmodule EzagentDomainChat.Application do
      - `EzagentDomainChat.AgentSupervisor` — DynamicSupervisor for Agent
        Kinds, 0 children at boot (Agents materialize when a bridge
        announces; 2c-step 1 wires the controller).
-     - `Ezagent.Kind.Server` for `session://main` — the default Session.
-     - `Ezagent.Kind.Server` for `user://admin` — Phase 2 promotes the
+     - `Ezagent.Kind.Server` for `session://default/main` — the default Session.
+     - `Ezagent.Kind.Server` for `entity://user/admin` — Phase 2 promotes the
        admin User from a never-spawned stub to a live participant.
 
   3. **Post-boot admin join** — once Session and admin User are both
      alive, dispatch `session://main/behavior/chat/join` with
-     `member: user://admin`. Using `:cast` so this is non-blocking;
+     `member: entity://user/admin`. Using `:cast` so this is non-blocking;
      PendingDelivery absorbs the still-becoming-ready window (memory
      `feedback_let_it_crash_no_workarounds`: no defensive sleeps).
 
@@ -83,8 +88,10 @@ defmodule EzagentDomainChat.Application do
         :ok = admin_user_joins_default_session()
         :ok = EzagentDomainChat.DefaultRules.bootstrap()
 
-        # Phase 4c: chat plugin owns agent:// + session:// schemes.
-        # user:// spawn fn moved to ezagent_domain_identity in Phase 6 PR 2.
+        # PR #141 (SPEC v2): chat plugin now owns the unified `entity://`
+        # scheme + `session://`. The identity domain's user:// spawn fn
+        # is removed; identity's UserSupervisor is referenced by name
+        # from inside the entity:// dispatch in `register_spawn_fns/0`.
         :ok = register_spawn_fns()
 
         # Phase 4-completion: register Template Classes this plugin provides.
@@ -151,19 +158,38 @@ defmodule EzagentDomainChat.Application do
   end
 
   defp register_spawn_fns do
-    # PR #131 (Allen 2026-05-19): `agent://` URIs are now `agent://<type>/<name>`
-    # — the host segment encodes the agent flavour (cc / curl / echo / ...).
-    # Each plugin registers its own type via Ezagent.AgentTypeRegistry; the
-    # SpawnRegistry fn here delegates by URI host.
+    # PR #141 (SPEC v2): `user://` + `agent://` schemes are deleted;
+    # both merge into `entity://`. The chat plugin owns the unified
+    # `entity://` spawn fn — dispatch by `uri.host`:
+    #
+    # - `entity://user/<name>` → spawn `Ezagent.Entity.User` under
+    #   `EzagentDomainIdentity.Application.UserSupervisor` (identity
+    #   domain owns User Kind; chat references its supervisor by
+    #   module name per task spec).
+    # - `entity://agent/<flavor>_<name>` → delegate to
+    #   `Ezagent.AgentTypeRegistry.spawn/1` which extracts the flavor
+    #   from the name prefix and dispatches to the registered fn.
     :ok =
-      Ezagent.SpawnRegistry.register("agent", fn uri ->
-        Ezagent.AgentTypeRegistry.spawn(uri)
+      Ezagent.SpawnRegistry.register("entity", fn uri ->
+        case uri.host do
+          "user" ->
+            DynamicSupervisor.start_child(
+              EzagentDomainIdentity.Application.UserSupervisor,
+              {Ezagent.Kind.Server, {User, %{uri: uri, initial_caps: MapSet.new()}}}
+            )
+
+          "agent" ->
+            Ezagent.AgentTypeRegistry.spawn(uri)
+
+          other ->
+            {:error, {:unknown_entity_host, other}}
+        end
       end)
 
-    # Register type "cc" — the chat domain's Entity.Agent Kind backs all
-    # bridge-driven Claude Code agents (cc.pty + cc.channel_instance both
-    # produce `agent://cc/<name>` URIs). Chat owns this registration
-    # because chat owns Entity.Agent the Kind module.
+    # Register flavor "cc" — the chat domain's Entity.Agent Kind backs
+    # all bridge-driven Claude Code agents (cc.agent template both
+    # produces `entity://agent/cc_<name>` URIs). Chat owns this
+    # registration because chat owns Entity.Agent the Kind module.
     :ok =
       Ezagent.AgentTypeRegistry.register("cc", fn uri, _name ->
         DynamicSupervisor.start_child(
@@ -205,8 +231,6 @@ defmodule EzagentDomainChat.Application do
             {:error, {:unknown_template_host, other}}
         end
       end)
-
-    # Phase 6 PR 2: user:// spawn fn moved to ezagent_domain_identity.
 
     :ok
   end

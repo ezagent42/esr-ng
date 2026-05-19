@@ -3,8 +3,8 @@ defmodule Mix.Tasks.Ezagent.Feishu.Bind do
   @moduledoc """
   Phase 6 PR 15 — admin CLI for Feishu identity bindings.
 
-      mix ezagent.feishu.bind ou_6b11faf8e9... user://linyilun
-      mix ezagent.feishu.bind ou_xxx user://linyilun --admin user://admin
+      mix ezagent.feishu.bind ou_6b11faf8e9... entity://user/linyilun
+      mix ezagent.feishu.bind ou_xxx entity://user/linyilun --admin entity://user/admin
 
   After binding, the bound user receives an `Ezagent.Capability`
   authorizing dispatch into any `feishu_chat://` Kind (text / image
@@ -29,7 +29,7 @@ defmodule Mix.Tasks.Ezagent.Feishu.Bind do
 
     Mix.Task.run("app.start")
 
-    admin_uri = opts[:admin] || "user://admin"
+    admin_uri = opts[:admin] || "entity://user/admin"
 
     case UserBinding.bind(open_id, user_uri, admin_uri) do
       {:ok, _row} ->

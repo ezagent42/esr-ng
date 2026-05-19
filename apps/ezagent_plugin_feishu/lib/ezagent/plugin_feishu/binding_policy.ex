@@ -44,7 +44,7 @@ defmodule EzagentPluginFeishu.BindingPolicy do
   end
 
   # Bound user might not be live yet (admin types `mix ezagent.feishu.bind
-  # ou_xxx user://newcomer` for a brand-new user). Auto-spawn via
+  # ou_xxx entity://user/newcomer` for a brand-new user). Auto-spawn via
   # SpawnRegistry so the cap dispatch has a target.
   defp ensure_user_kind(user_uri) do
     uri = to_uri(user_uri)

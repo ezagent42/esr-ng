@@ -9,7 +9,9 @@ defmodule EzagentPluginEcho.Application do
      overwrite cleanly).
   2. Start the per-Kind DynamicSupervisor so future instances can be
      spawned without restart of the whole plugin.
-  3. Spawn the default `agent://echo` instance under that supervisor.
+  3. Spawn the default `entity://agent/echo_default` instance (PR #141
+     SPEC v2 — agent flavor lives in the name prefix) under that
+     supervisor.
 
   ## Why a DynamicSupervisor
 
@@ -30,9 +32,10 @@ defmodule EzagentPluginEcho.Application do
 
   use Application
 
-  # PR #131 (Allen 2026-05-19): agent URIs are `agent://<type>/<name>`.
-  # Echo's default instance moves from `agent://echo` → `agent://echo/default`.
-  @default_uri URI.parse("agent://echo/default")
+  # PR #141 (SPEC v2): `agent://` scheme deleted; merged into `entity://`.
+  # Agent flavor moves to free-form name prefix (SPEC §5.14):
+  # Echo's default instance is `entity://agent/echo_default`.
+  @default_uri URI.parse("entity://agent/echo_default")
 
   @impl true
   def start(_type, _args) do

@@ -5,7 +5,7 @@ defmodule Ezagent.PluginCurlAgent.Template do
 
   Form fields (auto-derived UI via `Ezagent.UI.Form`):
 
-  - `agent_uri` — `curl-agent://<name>` (the instance URI)
+  - `agent_uri` — `entity://agent/curl_<name>` (PR #141 SPEC v2)
   - `provider` — `"deepseek"` / `"openai"` / ... (matches the key
     provider stored on the owner User's `api_keys` slice)
   - `api_url` — full URL of the OpenAI-compatible
@@ -13,7 +13,7 @@ defmodule Ezagent.PluginCurlAgent.Template do
   - `model` — provider-specific model id
   - `system_prompt` — optional textarea
   - `max_history` — int, default 20
-  - `owner_uri` — `user://<uri>` whose api_key the agent uses
+  - `owner_uri` — `entity://user/<name>` whose api_key the agent uses
     (admin can set; LV pre-fills to caller_uri)
 
   ## On instantiate
@@ -56,22 +56,23 @@ defmodule Ezagent.PluginCurlAgent.Template do
   defp check_class(%{"class" => other}), do: {:error, {:wrong_class, other}}
   defp check_class(_), do: {:error, :missing_class_field}
 
-  # PR #131 (Allen 2026-05-19): strict `agent://curl/<name>` shape.
-  # The legacy `curl-agent://` scheme and the un-typed `agent://<name>`
-  # form are both rejected — operators must migrate to the new
-  # format (DB migration does this for the existing demo workspaces).
+  # PR #141 (SPEC v2 §5.14): strict `entity://agent/curl_<name>` shape.
+  # The legacy `agent://curl/<name>` and `curl-agent://` schemes are
+  # both rejected — clean rebuild per SPEC §5.11.
   defp check_agent_uri(%{"agent_uri" => uri_str}) when is_binary(uri_str) and uri_str != "" do
     case URI.new(uri_str) do
-      {:ok, %URI{scheme: "agent", host: "curl", path: "/" <> name}} when name != "" ->
-        :ok
+      {:ok, %URI{scheme: "entity", host: "agent", path: "/" <> name}} when name != "" ->
+        case String.split(name, "_", parts: 2) do
+          ["curl", rest] when rest != "" -> :ok
+          [flavor, _] -> {:error, {:wrong_agent_flavor, flavor, expected: "curl"}}
+          _ -> {:error, {:missing_flavor_prefix, uri_str,
+                         "agent URIs must be `entity://agent/curl_<name>` (PR #141)"}}
+        end
 
-      {:ok, %URI{scheme: "agent", host: other, path: "/" <> _}} ->
-        {:error, {:wrong_agent_type, other, expected: "curl"}}
-
-      {:ok, %URI{scheme: "agent"}} ->
+      {:ok, %URI{scheme: "entity"}} ->
         {:error,
-         {:missing_type_segment, uri_str,
-          "agent URIs must be `agent://curl/<name>` (PR #131)"}}
+         {:invalid_agent_uri, uri_str,
+          "agent URIs must be `entity://agent/curl_<name>` (PR #141)"}}
 
       _ ->
         {:error, {:bad_agent_uri, uri_str}}
@@ -148,13 +149,13 @@ defmodule Ezagent.PluginCurlAgent.Template do
 
   defp parse_int(_, default), do: default
 
-  defp parse_owner_uri(nil), do: URI.parse("user://admin")
-  defp parse_owner_uri(""), do: URI.parse("user://admin")
+  defp parse_owner_uri(nil), do: URI.parse("entity://user/admin")
+  defp parse_owner_uri(""), do: URI.parse("entity://user/admin")
 
   defp parse_owner_uri(s) when is_binary(s) do
     case URI.new(s) do
-      {:ok, %URI{scheme: "user"} = u} -> u
-      _ -> URI.parse("user://admin")
+      {:ok, %URI{scheme: "entity", host: "user"} = u} -> u
+      _ -> URI.parse("entity://user/admin")
     end
   end
 
@@ -166,9 +167,9 @@ defmodule Ezagent.PluginCurlAgent.Template do
       %{
         name: "agent_uri",
         type: :uri,
-        label: "Agent URI (use agent:// so it shows in mention/floating dropdowns)",
+        label: "Agent URI (entity://agent/curl_<name> — appears in mention/floating dropdowns)",
         required: true,
-        placeholder: "agent://curl/my-deepseek"
+        placeholder: "entity://agent/curl_my-deepseek"
       },
       %{
         name: "provider",
@@ -210,7 +211,7 @@ defmodule Ezagent.PluginCurlAgent.Template do
         type: :uri,
         label: "Owner user URI (whose api_key gets used)",
         required: false,
-        placeholder: "user://admin"
+        placeholder: "entity://user/admin"
       }
     ]
   end

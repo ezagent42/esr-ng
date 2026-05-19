@@ -37,7 +37,7 @@ defmodule EzagentPluginLiveview.AdminLive do
   import EzagentPluginLiveview.Admin.MemberPanel
   import EzagentPluginLiveview.Admin.DebugPanel
 
-  @echo_target URI.parse("agent://echo/default/behavior/echo/say")
+  @echo_target URI.parse("entity://agent/echo_default/behavior/echo/say")
   @main_session_uri URI.new!("session://main")
   @message_limit 50
 
@@ -500,7 +500,7 @@ defmodule EzagentPluginLiveview.AdminLive do
 
   defp list_agent_uris do
     Ezagent.KindRegistry.list_all()
-    |> Enum.filter(fn {uri_str, _pid} -> String.starts_with?(uri_str, "agent://") end)
+    |> Enum.filter(fn {uri_str, _pid} -> String.starts_with?(uri_str, "entity://agent/") end)
     |> Enum.map(fn {uri_str, _pid} -> uri_str end)
     |> Enum.sort()
   end
@@ -586,8 +586,8 @@ defmodule EzagentPluginLiveview.AdminLive do
 
   defp sender_kind(uri_str) do
     cond do
-      String.starts_with?(uri_str, "user://") -> :user
-      String.starts_with?(uri_str, "agent://") -> :agent
+      String.starts_with?(uri_str, "entity://user/") -> :user
+      String.starts_with?(uri_str, "entity://agent/") -> :agent
       true -> :other
     end
   end
@@ -667,7 +667,7 @@ defmodule EzagentPluginLiveview.AdminLive do
 
   defp safe_uri(s) when is_binary(s) do
     case URI.new(s) do
-      {:ok, %URI{scheme: nil}} -> {:error, "target must include a scheme (e.g. agent://...)"}
+      {:ok, %URI{scheme: nil}} -> {:error, "target must include a scheme (e.g. entity://agent/...)"}
       {:ok, uri} -> {:ok, uri}
       {:error, _} -> {:error, "malformed URI"}
     end

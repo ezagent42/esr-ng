@@ -108,7 +108,7 @@ defmodule EzagentPluginLiveview.WorkspaceDetailLive do
         end
 
       _ ->
-        {:noreply, assign(socket, :flash_error, "URI must include a scheme (e.g. agent://x)")}
+        {:noreply, assign(socket, :flash_error, "URI must include a scheme (e.g. entity://agent/cc_x)")}
     end
   end
 
@@ -296,7 +296,7 @@ defmodule EzagentPluginLiveview.WorkspaceDetailLive do
             type="text"
             name="add_member[member_uri]"
             id="add_member_uri"
-            placeholder="agent://cc-architect"
+            placeholder="entity://agent/cc_architect"
             style="flex: 1; padding: 6px 10px; border: 1px solid #d1d5da; border-radius: 4px; font-family: monospace; font-size: 12px;"
           />
           <button

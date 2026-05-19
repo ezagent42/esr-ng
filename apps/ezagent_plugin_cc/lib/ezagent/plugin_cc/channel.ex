@@ -17,7 +17,7 @@ defmodule EzagentPluginCc.Channel do
       2. ensures the `Ezagent.Entity.Agent` Kind for `agent_uri` exists by
          dispatching to `Ezagent.SpawnRegistry.spawn/1`. Mirrors what the
          v1 announce controller did — without this step, inbound
-         dispatches against `agent://...` URIs have no Kind pid to
+         dispatches against `entity://agent/...` URIs have no Kind pid to
          receive on and silently drop.
 
   - `handle_in("reply", %{...})` — Python bridge POSTs Claude's `reply`
@@ -141,7 +141,7 @@ defmodule EzagentPluginCc.Channel do
         :ok
 
       {:error, {:no_spawn_fn, scheme}} ->
-        # The agent:// spawn fn is registered by ezagent_domain_chat at
+        # The entity:// spawn fn is registered by ezagent_domain_chat at
         # boot. If it's missing, the chat plugin failed to start — log
         # but don't fail the bridge join (the inbound path would also
         # be broken; surfacing :ok at least lets reply traffic flow).

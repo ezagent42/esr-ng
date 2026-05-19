@@ -10,7 +10,7 @@ defmodule Ezagent.Message do
   ## Phase 2 shape(P2-D1 决策)
 
       uri:         "message://<uuid16>"  # identity reference,by new/3 auto-gen
-      sender:      %URI{}                # 谁创建(`user://...` / `agent://...`)
+      sender:      %URI{}                # 谁创建(`entity://user/...` / `entity://agent/...`)
       mentions:    [%URI{}]              # @-targets
       body:        %{text: String.t(), attachments: [%URI{}]}  # 结构化
       ref:         %URI{} | nil          # ^reply-to 另一条 message URI
