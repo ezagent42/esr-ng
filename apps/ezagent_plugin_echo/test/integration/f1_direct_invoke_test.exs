@@ -41,7 +41,7 @@ defmodule EzagentPluginEcho.Integration.F1DirectInvokeTest do
     :ok
   end
 
-  test "F1: dispatch :say to entity://agent/test_echo, get reply, see audit event + SQLite row" do
+  test "F1: dispatch :say to entity://agent/echo_default, get reply, see audit event + SQLite row" do
     target = URI.parse("#{URI.to_string(EchoApp.default_uri())}/behavior/echo/say")
 
     inv = %Invocation{
@@ -74,7 +74,7 @@ defmodule EzagentPluginEcho.Integration.F1DirectInvokeTest do
     rows =
       EzagentCore.Repo.query!(
         "SELECT target, action, authz, duration_us FROM invocations " <>
-          "WHERE target LIKE 'entity://agent/test_echo%' ORDER BY id DESC LIMIT 1"
+          "WHERE target LIKE 'entity://agent/echo_default%' ORDER BY id DESC LIMIT 1"
       ).rows
 
     assert [[target_col, action_col, authz_col, duration_col]] = rows
