@@ -43,8 +43,8 @@ defmodule EzagentPluginLiveview.AgentDetailLive do
   end
 
   defp load_status(agent_uri) do
-    case Ezagent.PluginCcPty.PtyServer.find_by_agent_uri(agent_uri) do
-      {:ok, pid} -> {:alive, Ezagent.PluginCcPty.PtyServer.status(pid)}
+    case Ezagent.PluginCc.PtyServer.find_by_agent_uri(agent_uri) do
+      {:ok, pid} -> {:alive, Ezagent.PluginCc.PtyServer.status(pid)}
       :error -> :not_found
     end
   end
@@ -56,7 +56,7 @@ defmodule EzagentPluginLiveview.AgentDetailLive do
 
   @impl true
   def handle_event("restart", _params, socket) do
-    case Ezagent.PluginCcPty.PtyServer.find_by_agent_uri(socket.assigns.agent_uri) do
+    case Ezagent.PluginCc.PtyServer.find_by_agent_uri(socket.assigns.agent_uri) do
       {:ok, pid} ->
         # Supervisor terminates → restart via :permanent restart spec.
         # GenServer.stop(:normal) would suppress restart; use :shutdown

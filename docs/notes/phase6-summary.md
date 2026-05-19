@@ -25,8 +25,8 @@ apps/
   ezagent_domain_ui/                     ← shadcn-like HEEx primitives
   ezagent_domain_python/                 ← Python plugin contract (placeholder)
   esr_plugin_ezagent/                ← default admin LV pages (was ezagent_web_liveview)
-  ezagent_plugin_cc_channel/             ← CC channel registry + tokens
-  ezagent_plugin_cc_pty/                 ← PTY-managed claude processes
+  ezagent_plugin_cc/             ← CC channel registry + tokens
+  ezagent_plugin_cc/                 ← PTY-managed claude processes
   ezagent_plugin_cc_bridge_v1_prototype/ ← legacy (still wired; v2 cut-over deferred)
   ezagent_plugin_feishu/                 ← Feishu/Lark adapter
   ezagent_plugin_echo/                   ← demo plugin

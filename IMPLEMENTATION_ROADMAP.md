@@ -334,7 +334,7 @@ Deliverable 项:
 > | Deliverable | Status | PRs |
 > |---|---|---|
 > | 5a Feishu adapter (LV-integrated) | ✅ done — `Ezagent.Entity.FeishuChat` Receiver Kind + `WebhookPlug` + lark API client + session↔chat_id binding via Template + routing rule | #42, #45, #46, #51 |
-> | 5b CC channel production | ⚠️ **partial** — `ezagent_plugin_cc_channel` Template Class + connect-token persistence shipped (#41); Phase 1 v1_prototype HTTP/SSE wire continues to be production transport. Full WS rewrite still TODO | #41, #49 |
+> | 5b CC channel production | ⚠️ **partial** — `ezagent_plugin_cc` Template Class + connect-token persistence shipped (#41); Phase 1 v1_prototype HTTP/SSE wire continues to be production transport. Full WS rewrite still TODO | #41, #49 |
 > | 5c Pty-Web | ✅ done — xterm.js + dispatch path invariant test | #40 |
 > | (4 post-Phase-5 follow-ups Allen drove same day) | ✅ | #43 (hotfix), #45 (Receiver Kind drift correction), #48 then #50 (CLI HTTP→RPC pivot), #49 (PtyServer agent_uri via mcp.json) |
 >
@@ -346,7 +346,7 @@ Deliverable 项:
 
 **3. Deliverables**（3 sub-step,顺序 5a → 5b → 5c;全部 plugin 代码,ezagent_core 不变）：
 - **5a Feishu adapter** — `ezagent_plugin_feishu`（Elixir adapter + Python feishu bot）/ §10.7 的 4 张参考表落到 production
-- **5b CC channel production** — `ezagent_plugin_cc_channel`（Elixir adapter + Python channel server）—— **重写 Phase 1 的 `_v1_prototype` stdio bridge 为 v2,完全替换不修改 v1** / WS connect token 验证 + CapBAC 完整接入 / `RoutingRegistry.CCInstanceConnection` 表（多 CC 实例支持）
+- **5b CC channel production** — `ezagent_plugin_cc`（Elixir adapter + Python channel server）—— **重写 Phase 1 的 `_v1_prototype` stdio bridge 为 v2,完全替换不修改 v1** / WS connect token 验证 + CapBAC 完整接入 / `RoutingRegistry.CCInstanceConnection` 表（多 CC 实例支持）
 - **5c Pty-Web** — `esr_plugin_pty_web`（工程师命名可调）/ `:ex_pty` 集成 / 输出走 `<pty_session_uri>:output` PubSub topic,LiveView 用 xterm.js 渲染 / 输入反向 dispatch `Ezagent.Behavior.Pty.input`,**走 Ezagent 标准路径不裸 PubSub（满足不变式 #1）**
 - 内部 tag `phase5a/5b/5c`
 
@@ -378,7 +378,7 @@ Deliverable 项:
 
 | 原计划项 | 状态 | 备注 |
 |---|---|---|
-| **6a CC channel v1 → v2 wire swap** | ⚠️ 部分(deferred to Phase 7) | v2 `EzagentPluginCcChannel`(Phoenix.Socket + BridgeRegistry)Phase 6 PR 4 落地,runtime 优先查 v2 binding;但实际 `agent://cc-demo` 仍走 v1_prototype HTTP/SSE 链路。完整 cutover 留到 Phase 7 |
+| **6a CC channel v1 → v2 wire swap** | ⚠️ 部分(deferred to Phase 7) | v2 `EzagentPluginCc`(Phoenix.Socket + BridgeRegistry)Phase 6 PR 4 落地,runtime 优先查 v2 binding;但实际 `agent://cc-demo` 仍走 v1_prototype HTTP/SSE 链路。完整 cutover 留到 Phase 7 |
 | **6b EZAGENT_HOME DB 迁移** | ❌ 未做 | 仍在 repo root |
 | **6c CLI token-based auth** | ❌ 未做 | CLI 仍 admin-all-cap |
 | **6d Workspace-scoped routing** | ❌ 未做 | routing_rules 仍 global |

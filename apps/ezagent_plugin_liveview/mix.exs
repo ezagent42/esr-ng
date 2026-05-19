@@ -45,13 +45,10 @@ defmodule EzagentPluginLiveview.MixProject do
       # cc-bridge coupling — Phase 3+ may abstract the LV's "what
       # session UI to show" via configuration rather than direct dep.
       {:ezagent_domain_chat, in_umbrella: true},
-      # Phase 4 PR 8: cc-pty Template Class — registers via
-      # TemplateRegistry; needed at LV mount to render add-template
-      # form fields and PTY status pages.
-      {:ezagent_plugin_cc_pty, in_umbrella: true},
-      # Phase 5 PR 5: cc-channel registration plugin — Template Class
-      # for CC instance registration (token-based bridge auth).
-      {:ezagent_plugin_cc_channel, in_umbrella: true},
+      # ezagent_plugin_cc — unified CC plugin (merged from cc_pty +
+      # cc_channel in PR #130). Provides cc.pty Template Class +
+      # PtyServer + BridgeRegistry surface used by admin LV.
+      {:ezagent_plugin_cc, in_umbrella: true},
       # Phase 5 PR 6: Feishu adapter — Template Class for
       # session ↔ chat_id binding + outbound subscriber + webhook plug.
       # Direct dep ensures Application.start fires + WebhookPlug compiles.

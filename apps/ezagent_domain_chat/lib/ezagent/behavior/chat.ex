@@ -26,7 +26,7 @@ defmodule Ezagent.Behavior.Chat do
   - `Ezagent.Entity.User` — broadcast to `esr:user:<self_uri>:events`. LV
     subscribes for admin inbox / mention notifications.
   - `Ezagent.Entity.Agent` — wires bridge push via
-    `EzagentPluginCcChannel.BridgeRegistry.lookup(agent_uri)` →
+    `EzagentPluginCc.BridgeRegistry.lookup(agent_uri)` →
     `send(channel_pid, {:to_claude, payload})`. If no v2 bridge is
     bound, the call is a silent no-op (telemetry-only).
 
@@ -216,7 +216,7 @@ defmodule Ezagent.Behavior.Chat do
 
         payload = %{"content" => text_with_hint, "meta" => meta}
 
-        case EzagentPluginCcChannel.BridgeRegistry.lookup(ctx.self_uri) do
+        case EzagentPluginCc.BridgeRegistry.lookup(ctx.self_uri) do
           {:ok, channel_pid} ->
             send(channel_pid, {:to_claude, payload})
 

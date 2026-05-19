@@ -227,7 +227,7 @@ Tempted to `Phoenix.PubSub.broadcast(EzagentCore.PubSub, "slack:incoming", msg)`
 
 - `apps/ezagent_plugin_echo/` — smallest, simplest. Read this first.
 - `apps/ezagent_plugin_feishu/` — fullest production plugin. Inbound + outbound + WS sidecar + user binding + react path + cap delegation.
-- `apps/ezagent_plugin_cc_pty/` — non-IM plugin (terminal PTY). Different shape but same plugin contract.
+- `apps/ezagent_plugin_cc/` — non-IM plugin (terminal PTY). Different shape but same plugin contract.
 
 ## When you're done
 

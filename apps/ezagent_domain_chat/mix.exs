@@ -38,7 +38,7 @@ defmodule EzagentDomainChat.MixProject do
       # BridgeRegistry. v1 prototype dep + fallback branch removed in
       # PR 32c (rebrand-4) after PtyServer cutover landed in PR 32b.
       # layer-violation-exempt: cc-bridge production wire
-      {:ezagent_plugin_cc_channel, in_umbrella: true}
+      {:ezagent_plugin_cc, in_umbrella: true}
     ]
   end
 end

@@ -74,7 +74,7 @@ defmodule EzagentWeb.MixProject do
       # Phase 6 PR 4: CC channel v2 WS Socket is mounted in
       # EzagentWeb.Endpoint. The plugin compiles first so the Socket
       # module is loadable when the endpoint boots.
-      {:ezagent_plugin_cc_channel, in_umbrella: true},
+      {:ezagent_plugin_cc, in_umbrella: true},
       # PR #126: curl-agent plugin (remote LLM completion proxy with
       # per-user API keys). Application boot registers the Template
       # Class so it shows up in the workspace add-template form.

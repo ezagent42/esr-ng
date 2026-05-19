@@ -37,12 +37,12 @@ defmodule EzagentPluginLiveview.AgentsLiveTest do
 
   test "list_agents returns empty list when supervisor has no children", %{conn: _conn} do
     # Direct assertion — no PtyServers spawned in test env unless explicitly started.
-    agents = Ezagent.PluginCcPty.PtyServer.list_agents()
+    agents = Ezagent.PluginCc.PtyServer.list_agents()
     assert is_list(agents)
   end
 
   test "find_by_agent_uri returns :error for unknown URI", %{conn: _conn} do
-    assert :error = Ezagent.PluginCcPty.PtyServer.find_by_agent_uri(URI.parse("agent://nonexistent"))
+    assert :error = Ezagent.PluginCc.PtyServer.find_by_agent_uri(URI.parse("agent://nonexistent"))
   end
 
   test "find_by_agent_uri + status work for a spawned PtyServer (test_mode)", %{conn: conn} do
@@ -50,14 +50,14 @@ defmodule EzagentPluginLiveview.AgentsLiveTest do
 
     {:ok, _pid} =
       DynamicSupervisor.start_child(
-        EzagentPluginCcPty.PtyServerSupervisor,
-        {Ezagent.PluginCcPty.PtyServer, %{agent_uri: agent_uri, cwd: File.cwd!(), test_mode: true}}
+        EzagentPluginCc.PtyServerSupervisor,
+        {Ezagent.PluginCc.PtyServer, %{agent_uri: agent_uri, cwd: File.cwd!(), test_mode: true}}
       )
 
     Process.sleep(50)
 
-    assert {:ok, pid} = Ezagent.PluginCcPty.PtyServer.find_by_agent_uri(agent_uri)
-    status = Ezagent.PluginCcPty.PtyServer.status(pid)
+    assert {:ok, pid} = Ezagent.PluginCc.PtyServer.find_by_agent_uri(agent_uri)
+    status = Ezagent.PluginCc.PtyServer.status(pid)
     assert status.agent_uri == agent_uri
     assert status.test_mode == true
     assert status.running == true
