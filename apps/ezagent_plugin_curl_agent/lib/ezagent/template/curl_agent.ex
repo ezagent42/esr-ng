@@ -56,18 +56,25 @@ defmodule Ezagent.PluginCurlAgent.Template do
   defp check_class(%{"class" => other}), do: {:error, {:wrong_class, other}}
   defp check_class(_), do: {:error, :missing_class_field}
 
-  # PR #129 (Allen 2026-05-19 03:10): accept both `agent://` (preferred,
-  # uniform with the rest of the system — floating-agents dropdown and
-  # @-mention dropdown filter on `agent://` scheme) AND `curl-agent://`
-  # (legacy, kept for back-compat with rows created before this PR).
-  # The Kind module (Entity.CurlAgent) differentiates behaviour from
-  # the bridge-backed Entity.Agent — URI scheme is just a namespace
-  # for routing.
+  # PR #131 (Allen 2026-05-19): strict `agent://curl/<name>` shape.
+  # The legacy `curl-agent://` scheme and the un-typed `agent://<name>`
+  # form are both rejected — operators must migrate to the new
+  # format (DB migration does this for the existing demo workspaces).
   defp check_agent_uri(%{"agent_uri" => uri_str}) when is_binary(uri_str) and uri_str != "" do
     case URI.new(uri_str) do
-      {:ok, %URI{scheme: scheme}} when scheme in ["agent", "curl-agent"] -> :ok
-      {:ok, %URI{scheme: scheme}} -> {:error, {:bad_agent_uri_scheme, scheme}}
-      _ -> {:error, {:bad_agent_uri, uri_str}}
+      {:ok, %URI{scheme: "agent", host: "curl", path: "/" <> name}} when name != "" ->
+        :ok
+
+      {:ok, %URI{scheme: "agent", host: other, path: "/" <> _}} ->
+        {:error, {:wrong_agent_type, other, expected: "curl"}}
+
+      {:ok, %URI{scheme: "agent"}} ->
+        {:error,
+         {:missing_type_segment, uri_str,
+          "agent URIs must be `agent://curl/<name>` (PR #131)"}}
+
+      _ ->
+        {:error, {:bad_agent_uri, uri_str}}
     end
   end
 
@@ -161,39 +168,39 @@ defmodule Ezagent.PluginCurlAgent.Template do
         type: :uri,
         label: "Agent URI (use agent:// so it shows in mention/floating dropdowns)",
         required: true,
-        placeholder: "agent://my-deepseek"
+        placeholder: "agent://curl/my-deepseek"
       },
       %{
         name: "provider",
-        type: :string,
+        type: :text,
         label: "Provider (selects which api_keys entry to use)",
         required: true,
         placeholder: "deepseek"
       },
       %{
         name: "api_url",
-        type: :string,
+        type: :text,
         label: "API URL (OpenAI-compatible /chat/completions endpoint)",
         required: true,
         placeholder: "https://api.deepseek.com/chat/completions"
       },
       %{
         name: "model",
-        type: :string,
+        type: :text,
         label: "Model",
         required: true,
         placeholder: "deepseek-chat"
       },
       %{
         name: "system_prompt",
-        type: :string,
+        type: :text,
         label: "System prompt (optional)",
         required: false,
         placeholder: "You are a concise, helpful assistant."
       },
       %{
         name: "max_history",
-        type: :string,
+        type: :text,
         label: "Max history turns",
         required: false,
         placeholder: "20"

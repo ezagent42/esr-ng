@@ -21,11 +21,11 @@ defmodule Ezagent.Template.CcChannelInstanceTest do
     {:ok, tmp: tmp}
   end
 
-  test "validate/1 enforces agent:// scheme" do
+  test "validate/1 enforces agent://cc/<name> shape (PR #131 strict)" do
     assert :ok =
              Ezagent.Template.CcChannelInstance.validate(%{
                "class" => "cc.channel_instance",
-               "agent_uri" => "agent://x"
+               "agent_uri" => "agent://cc/instance-x"
              })
 
     assert {:error, {:bad_agent_uri, _}} =
@@ -34,12 +34,26 @@ defmodule Ezagent.Template.CcChannelInstanceTest do
                "agent_uri" => "user://x"
              })
 
+    # PR #131: un-typed legacy agent:// is rejected
+    assert {:error, {:missing_type_segment, _, _}} =
+             Ezagent.Template.CcChannelInstance.validate(%{
+               "class" => "cc.channel_instance",
+               "agent_uri" => "agent://just-a-name"
+             })
+
+    # Wrong type segment is rejected
+    assert {:error, {:wrong_agent_type, "curl", expected: "cc"}} =
+             Ezagent.Template.CcChannelInstance.validate(%{
+               "class" => "cc.channel_instance",
+               "agent_uri" => "agent://curl/wrong"
+             })
+
     assert {:error, :missing_agent_uri} =
              Ezagent.Template.CcChannelInstance.validate(%{"class" => "cc.channel_instance"})
   end
 
   test "instantiate mints + persists token + idempotent re-instantiate", %{tmp: tmp} do
-    uri = URI.parse("agent://cc-instance-test")
+    uri = URI.parse("agent://cc/cc-instance-test")
 
     assert {:ok, [^uri]} =
              Ezagent.Template.CcChannelInstance.instantiate(
@@ -51,7 +65,7 @@ defmodule Ezagent.Template.CcChannelInstanceTest do
     file = Path.join([tmp, "default/credentials/cc-channels.yaml"])
     assert File.exists?(file)
     body = File.read!(file)
-    assert body =~ "agent://cc-instance-test"
+    assert body =~ "agent://cc/cc-instance-test"
     assert body =~ "token: \"tok_"
 
     # Re-instantiate → same token

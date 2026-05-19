@@ -25,7 +25,7 @@ defmodule EzagentPluginCurlAgent.Application do
 
   use Application
 
-  alias Ezagent.{BehaviorRegistry, SpawnRegistry, TemplateRegistry}
+  alias Ezagent.{BehaviorRegistry, TemplateRegistry}
   alias Ezagent.Behavior.CurlAgent, as: CurlAgentBehavior
   alias Ezagent.Entity.CurlAgent, as: CurlAgentKind
   alias Ezagent.PluginCurlAgent.Template, as: CurlAgentTemplate
@@ -41,6 +41,11 @@ defmodule EzagentPluginCurlAgent.Application do
         :ok = register_behaviors()
         :ok = register_spawn_fn()
         :ok = register_template_class()
+        # Decision #112 boot-ordering: when chat plugin ran
+        # Workspace.Loader.load_all/0 before this plugin registered
+        # its Template Class, curl.agent templates were skipped.
+        # Re-run here so those workspaces get instantiated.
+        _ = Ezagent.Workspace.Loader.load_all()
         {:ok, sup_pid}
 
       other ->
@@ -57,8 +62,13 @@ defmodule EzagentPluginCurlAgent.Application do
   end
 
   defp register_spawn_fn do
+    # PR #131 (Allen 2026-05-19): agent URIs now embed the type via
+    # `agent://<type>/<name>`. Register "curl" type → Entity.CurlAgent
+    # in the AgentTypeRegistry; chat plugin's `agent://` SpawnRegistry
+    # fn delegates here. The legacy `curl-agent://` scheme is no longer
+    # registered — old data must be migrated to `agent://curl/<name>`.
     :ok =
-      SpawnRegistry.register("curl-agent", fn uri ->
+      Ezagent.AgentTypeRegistry.register("curl", fn uri, _name ->
         DynamicSupervisor.start_child(
           EzagentPluginCurlAgent.InstanceSupervisor,
           {Ezagent.Kind.Server, {CurlAgentKind, %{uri: uri}}}
