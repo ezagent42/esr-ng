@@ -22,8 +22,8 @@ No remaining orphan modules. `grep -rn 'CliController\|InvokeController\|Outboun
 apps/ezagent_core/lib                          6918
 apps/ezagent_cli/lib                            938
 apps/esr_plugin_chat                       1186
-apps/ezagent_plugin_cc_pty                      753
-apps/ezagent_plugin_cc_channel                  277
+apps/ezagent_plugin_cc                      753
+apps/ezagent_plugin_cc                  277
 apps/ezagent_plugin_cc_bridge_v1_prototype      462
 apps/ezagent_plugin_echo                        144
 apps/ezagent_plugin_feishu                      773

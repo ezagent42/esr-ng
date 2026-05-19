@@ -36,8 +36,8 @@ defmodule EzagentCore.Invariants.ReceiverKindPatternTest do
   @plugin_dirs ~w(
     apps/ezagent_domain_chat
     apps/ezagent_plugin_cc_bridge_v1_prototype
-    apps/ezagent_plugin_cc_channel
-    apps/ezagent_plugin_cc_pty
+    apps/ezagent_plugin_cc
+    apps/ezagent_plugin_cc
     apps/ezagent_plugin_echo
     apps/ezagent_plugin_feishu
   )

@@ -151,7 +151,7 @@ Caller 构造 `%Ezagent.Message{}` struct 然后 dispatch 时,InterfaceValidator
 |---|---|---|
 | **#88** | **Chat Behavior K 路径实施落地**:actions menu `[:send, :receive, :join, :leave]`(Phase 2);per-Kind register subset(Session 接 send/join/leave;Agent/User 接 receive);Process.monitor + last_seen offline 状态机替代独立 pending queue | impl |
 | **#89** | **MessageStore = chat history single source of truth**;Session.Chat state slice 仅 ephemeral 在线状态(members/online/last_seen/monitors);BEAM 重启历史保留 + 在线状态重置;rejoin 从 MessageStore.in_session_since 派生 replay(不维护 pending) | impl |
-| **#90** | **Agent Kind 动态 spawn 机制(Phase 2)**:bridge announce → controller spawn via DynamicSupervisor;agent_uri 由 bridge 自报(env `EZAGENT_AGENT_URI`);disconnect → terminate;Phase 5 `ezagent_plugin_cc_channel` 升级时 wholesale replace | impl |
+| **#90** | **Agent Kind 动态 spawn 机制(Phase 2)**:bridge announce → controller spawn via DynamicSupervisor;agent_uri 由 bridge 自报(env `EZAGENT_AGENT_URI`);disconnect → terminate;Phase 5 `ezagent_plugin_cc` 升级时 wholesale replace | impl |
 
 **ARCHITECTURE.md §3.5 微调**:Message struct 文本写 5 字段;Phase 2 实施加 `uri` 第 6 字段(identity reference)。架构师可在 §3.5 末尾加 note:"实施期 Decision #88:`uri` 字段在 `Ezagent.Message.new/3` 时 UUID 生成,identity invariant 锁原 5 字段不变。"
 

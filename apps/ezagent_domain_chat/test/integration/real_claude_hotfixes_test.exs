@@ -18,7 +18,7 @@ defmodule EzagentDomainChat.Integration.RealClaudeHotfixesTest do
   `the v1 prototype Server` and subscribed to its per-bridge
   PubSub topic. The v2 path bypasses PubSub entirely: the bound
   channel pid receives `{:to_claude, payload}` directly. This test
-  binds the test process pid into `EzagentPluginCcChannel.BridgeRegistry`
+  binds the test process pid into `EzagentPluginCc.BridgeRegistry`
   and uses `assert_receive` to capture the same payload.
 
   ## Fix #2 (dropped)
@@ -34,7 +34,7 @@ defmodule EzagentDomainChat.Integration.RealClaudeHotfixesTest do
   alias Ezagent.{Message}
   alias Ezagent.Behavior.Chat
   alias Ezagent.Entity.User
-  alias EzagentPluginCcChannel.BridgeRegistry
+  alias EzagentPluginCc.BridgeRegistry
 
   setup do
     :ok = Ecto.Adapters.SQL.Sandbox.checkout(EzagentCore.Repo)

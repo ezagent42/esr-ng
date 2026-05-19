@@ -32,7 +32,7 @@ defmodule EzagentPluginLiveview.PtyTerminalLive do
         if connected?(socket) do
           Phoenix.PubSub.subscribe(
             EzagentCore.PubSub,
-            Ezagent.PluginCcPty.PtyServer.output_topic(agent_uri)
+            Ezagent.PluginCc.PtyServer.output_topic(agent_uri)
           )
 
           # PR #128 — ttyd-style initial render. Two complementary
@@ -105,14 +105,14 @@ defmodule EzagentPluginLiveview.PtyTerminalLive do
   # isn't a live PtyServer (e.g. v2-only Channel-bridged agents
   # with no local PTY).
   def handle_info({:initial_render, agent_uri}, socket) do
-    case Ezagent.PluginCcPty.PtyServer.snapshot_buffer(agent_uri) do
+    case Ezagent.PluginCc.PtyServer.snapshot_buffer(agent_uri) do
       {:ok, buf} when byte_size(buf) > 0 ->
         socket = push_event(socket, "pty_chunk", %{bytes: buf})
-        _ = Ezagent.PluginCcPty.PtyServer.trigger_redraw(agent_uri)
+        _ = Ezagent.PluginCc.PtyServer.trigger_redraw(agent_uri)
         {:noreply, socket}
 
       _ ->
-        _ = Ezagent.PluginCcPty.PtyServer.trigger_redraw(agent_uri)
+        _ = Ezagent.PluginCc.PtyServer.trigger_redraw(agent_uri)
         {:noreply, socket}
     end
   end

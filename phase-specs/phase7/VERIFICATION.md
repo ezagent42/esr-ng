@@ -137,7 +137,7 @@ Each must be observably true with **no Allen involvement**.
 3. **Zero orphan sidecar processes.** After `mix phx.server` → `kill -TERM <phx_pid>` → wait 5s, `pgrep -fla "node.*ws_sidecar"` returns nothing (or only sidecars from sibling phx instances).
 4. **Workspace isolation in routing.** A routing rule scoped to `workspace://A` is never invoked for messages in `workspace://B`. CI test asserts.
 5. **`mix ezagent.bootstrap` one-command setup.** Fresh clone + 1 command → ready-to-serve Ezagent. CI gate runs the bootstrap on a clean checkout.
-6. **CC channel v2 is the only path.** All currently-bound agents use `EzagentPluginCcChannel.BridgeRegistry`; the v1 `Ezagent.Bridge.V1Prototype.Server` lookup is unreachable (returns `:error` always — module deleted).
+6. **CC channel v2 is the only path.** All currently-bound agents use `EzagentPluginCc.BridgeRegistry`; the v1 `Ezagent.Bridge.V1Prototype.Server` lookup is unreachable (returns `:error` always — module deleted).
 7. **CLI uses per-user token auth.** `mix esr <cmd>` requires `~/.ezagent/<profile>/credentials/cli-token`; admin shortcut only for admin-owned tokens.
 8. **Session persistence flip.** `Ezagent.Entity.Session.persistence/0 == {:snapshot, :on_change}`. Pre-Phase-7 ephemeral sessions migrate cleanly (existing snapshot tests pass).
 

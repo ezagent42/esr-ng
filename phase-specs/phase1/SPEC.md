@@ -109,7 +109,7 @@
 - v1_prototype 阶段:**agent 自己跑 `bash scripts/cc-bridge-attach.sh`(后台启动)**,然后 agent-browser 看 LV /admin 显示 connected
 - Phase 5 升级:`Ezagent.Behavior.OSProcess` 接管 PTY 启动,无 bash 脚本
 
-**整 Phase 5 替换路径**:`ezagent_plugin_cc_bridge_v1_prototype/` 整个 app 在 Phase 5 由 `ezagent_plugin_cc_channel/`(完整 channel + WS + CapBAC + 完整 MCP tool surface)wholesale replace;v1 不修改,直接删。
+**整 Phase 5 替换路径**:`ezagent_plugin_cc_bridge_v1_prototype/` 整个 app 在 Phase 5 由 `ezagent_plugin_cc/`(完整 channel + WS + CapBAC + 完整 MCP tool surface)wholesale replace;v1 不修改,直接删。
 
 **为什么不是 Phoenix Channel WebSocket**(老 esr 路径):
 - cc-openclaw 实证可用,ezagent 优先沿用工作中的 reference
@@ -149,6 +149,6 @@ Phase 0(`phase0` tag)的:
 - ❌ Workspace / Template Class / Template Instance —— Phase 3
 - ❌ Agent Kind / Identity Behavior / 真实 CapBAC(authz_check 仍是 stub permissive)—— Phase 3d
 - ❌ View behaviour / Optimus CLI auto-derive —— Phase 4
-- ❌ Feishu adapter / ezagent_plugin_cc_channel(完整版)/ Pty-Web —— Phase 5
+- ❌ Feishu adapter / ezagent_plugin_cc(完整版)/ Pty-Web —— Phase 5
 
 **v1_prototype 命名约定**:1b 的 CC bridge 任何文件都带 `_v1_prototype` 后缀(目录名 + 内部模块名),Phase 5 整体 wholesale replace 时清晰可识别。

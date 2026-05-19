@@ -19,7 +19,7 @@ After Phase 6, a small team can:
 |---|---|---|
 | **core** | Protocols + mechanisms only. URI / Invocation / Behavior contract / Kind contract / 4 Registry / Snapshot.Writer / Audit / ReadyGate / Idempotency / Capability struct / **UI.Form behaviour** / Ezagent.Runtime / Ezagent.Home / CCEvents / Routing.Matcher AST / Resolver / RuleStore | Ezagent team — plugin authors don't read it |
 | **domain** | Canonical biz primitives + canonical operator surfaces. Chat / Identity / Workspace / RoutingAdmin / concrete matchers / DefaultRules / MentionRouting+SessionRouting tables / **CLI engine + Mix.Tasks.Esr shell** / **LV base components + auto-derive engine** / **JSON API auto-derive** / **Python execution contract** | Ezagent team — plugin authors import but cannot change |
-| **plugin** | Adapters + instances + UI implementations. ezagent_plugin_feishu / ezagent_plugin_cc_pty / ezagent_plugin_cc_channel / ezagent_plugin_echo / **esr_plugin_ezagent** (default admin UI, distinct from base LV components) / future esr_plugin_python_sdk / future custom UI plugins | Anyone — adding/removing one doesn't affect others |
+| **plugin** | Adapters + instances + UI implementations. ezagent_plugin_feishu / ezagent_plugin_cc / ezagent_plugin_cc / ezagent_plugin_echo / **esr_plugin_ezagent** (default admin UI, distinct from base LV components) / future esr_plugin_python_sdk / future custom UI plugins | Anyone — adding/removing one doesn't affect others |
 
 ## App layout after Phase 6
 
@@ -34,8 +34,8 @@ apps/
 ├── ezagent_domain_ui/                  — Base LV components (Card/Button/Table/Modal/etc) + AutoForm + AutoList/Detail/Edit
 ├── ezagent_domain_python/              — Ezagent.Python skeleton + README contract (impl Phase 7)
 ├── esr_plugin_ezagent/             — Current admin LV pages, rewritten with ezagent_domain_ui shadcn-style components
-├── ezagent_plugin_cc_pty/              — PtyServer for local claude (unchanged)
-├── ezagent_plugin_cc_channel/          — CC v2 Phoenix.Channel WS endpoint (v1_prototype DELETED in 6a)
+├── ezagent_plugin_cc/              — PtyServer for local claude (unchanged)
+├── ezagent_plugin_cc/          — CC v2 Phoenix.Channel WS endpoint (v1_prototype DELETED in 6a)
 ├── ezagent_plugin_feishu/              — Feishu Receiver Kind + WebhookPlug + multi-app support (6d)
 └── ezagent_plugin_echo/                — Test agent (unchanged)
 ```

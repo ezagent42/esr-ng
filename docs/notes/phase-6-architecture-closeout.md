@@ -19,7 +19,7 @@ started; the actual delivery diverged. Honest accounting:
 
 | §9 deliverable | Status |
 | --- | --- |
-| 6a CC channel v1 → v2 wire swap | Partial. v2 `EzagentPluginCcChannel` (Phoenix.Socket + BridgeRegistry) shipped in PR 4 and is the binding target the runtime checks first; v1_prototype is still the live transport for `agent://cc-demo` end-to-end. Full v2 cutover deferred to Phase 7. |
+| 6a CC channel v1 → v2 wire swap | Partial. v2 `EzagentPluginCc` (Phoenix.Socket + BridgeRegistry) shipped in PR 4 and is the binding target the runtime checks first; v1_prototype is still the live transport for `agent://cc-demo` end-to-end. Full v2 cutover deferred to Phase 7. |
 | 6b EZAGENT_HOME DB migration | Not done. Still on the to-do list. |
 | 6c CLI token-based auth | Not done. CLI still uses admin-all-cap via cookie. |
 | 6d Workspace-scoped routing | Not done. Routing remains global. |

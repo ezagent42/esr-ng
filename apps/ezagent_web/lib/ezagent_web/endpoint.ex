@@ -18,7 +18,7 @@ defmodule EzagentWeb.Endpoint do
   # Phase 6 PR 4: production CC channel WS. Replaces v1_prototype's
   # HTTP /api/cc-bridge/announce + SSE /api/cc-bridge/events with one
   # full-duplex WS. Token auth via TokenStore at connect.
-  socket "/cc_socket", EzagentPluginCcChannel.Socket,
+  socket "/cc_socket", EzagentPluginCc.Socket,
     websocket: [check_origin: false],
     longpoll: false
 

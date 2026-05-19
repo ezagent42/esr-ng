@@ -1,4 +1,4 @@
-# Phase 4 Completion — Spec 03: CC PTY Plugin (`ezagent_plugin_cc_pty`)
+# Phase 4 Completion — Spec 03: CC PTY Plugin (`ezagent_plugin_cc`)
 
 **Status:** DRAFT for Allen review. NO CODE YET.
 **Closes:** Decision #56 split (cc_pty vs cc_channel) — lands the `cc_pty` half.
@@ -35,13 +35,13 @@ This is also the **first non-chat plugin** that exercises Phase 4's plugin-isola
 
 ## 2. Plugin shape
 
-**New umbrella app:** `apps/ezagent_plugin_cc_pty/`
+**New umbrella app:** `apps/ezagent_plugin_cc/`
 
 ```
-apps/ezagent_plugin_cc_pty/
+apps/ezagent_plugin_cc/
 ├── mix.exs                                    # deps: ezagent_core, esr_plugin_chat, :erlexec
 ├── lib/
-│   ├── ezagent_plugin_cc_pty/
+│   ├── ezagent_plugin_cc/
 │   │   ├── application.ex                     # Application.start — register stuff
 │   │   ├── process_supervisor.ex              # DynamicSupervisor for per-instance Servers
 │   │   └── default_workspace.ex               # OPTIONAL seed: a demo Workspace using cc-pty
@@ -50,7 +50,7 @@ apps/ezagent_plugin_cc_pty/
 │   │   │   └── cc_pty.ex                      # Ezagent.Behavior.CcPty — owns PTY slice + spawn/write/resize
 │   │   └── template/
 │   │       └── cc_pty_session.ex              # Ezagent.Template.CcPtySession (Class for #01)
-│   └── ezagent_plugin_cc_pty.ex                   # convenience aliases
+│   └── ezagent_plugin_cc.ex                   # convenience aliases
 └── test/
     ├── esr/behavior/cc_pty_test.exs           # unit (mock claude binary = echo script)
     ├── esr/template/cc_pty_session_test.exs
@@ -63,7 +63,7 @@ Application boot order becomes:
 1. `ezagent_core` — registries, repo, supervisors
 2. `ezagent_web` — endpoint
 3. `esr_plugin_chat` — registers `agent`/`session`/`user` schemes, registers Template Class for `session.generic` (per spec #01), spawns admin User + default Session, runs `Workspace.Loader.load_all/0`
-4. **`ezagent_plugin_cc_pty`** — registers Template Class for `cc-pty.session`, registers a *second* spawn fn for `agent://` URIs whose query string carries `?managed_by=cc-pty` (see §3 below), boots its `ProcessSupervisor`. **Does NOT call `Loader.load_all/0`** — that's chat plugin's responsibility per spec #01 deferral discussion. Instead cc_pty walks already-loaded Workspaces and triggers any cc-pty Template Class instantiations.
+4. **`ezagent_plugin_cc`** — registers Template Class for `cc-pty.session`, registers a *second* spawn fn for `agent://` URIs whose query string carries `?managed_by=cc-pty` (see §3 below), boots its `ProcessSupervisor`. **Does NOT call `Loader.load_all/0`** — that's chat plugin's responsibility per spec #01 deferral discussion. Instead cc_pty walks already-loaded Workspaces and triggers any cc-pty Template Class instantiations.
 5. `ezagent_web_liveview` — UI layer
 
 **Worry signal:** step 4's "re-walk after loader" is the "second-pass Loader" gate from spec #01 Q4. If we settle on (a) "log + skip now," cc_pty's templates simply won't instantiate when first declared in a Workspace that loaded before cc_pty registered its Template Class. **See decision Q1.**
@@ -80,7 +80,7 @@ This is the architectural commit that ripples through everything else. Options:
 
 **Implementation:** cc_pty plugin does NOT register an `agent://` spawn fn (that would collide with chat's). Instead, cc_pty's Template Class `instantiate/3`:
 1. Calls `Ezagent.SpawnRegistry.spawn(agent_uri)` — chat's spawn fn lights up an Agent Kind (empty Identity slice).
-2. Then immediately starts a sidecar `EzagentPluginCcPty.ProcessServer` (a GenServer in cc_pty's DynamicSupervisor) bound to that agent's URI. The ProcessServer holds the erlexec port, captures stdout, writes stdin.
+2. Then immediately starts a sidecar `EzagentPluginCc.ProcessServer` (a GenServer in cc_pty's DynamicSupervisor) bound to that agent's URI. The ProcessServer holds the erlexec port, captures stdout, writes stdin.
 3. ProcessServer **monitors** the Agent pid (`Process.monitor`). If Agent dies, ProcessServer kills its claude and exits. If claude dies, ProcessServer broadcasts `:claude_crashed` and the cc-pty supervisor restarts it (one-for-one within ProcessServer's restart policy); the Agent Kind survives.
 
 **Plus:**
@@ -153,7 +153,7 @@ Two paths, both technically feasible:
 
 Ezagent spawns `claude --dangerously-load-development-channels server:esr-cc-pty --mcp-config <path>` via PTY. The mcp.json points claude at an **Ezagent-internal MCP server** that speaks JSON-RPC on stdio. This server isn't a separate Python process — it's an Elixir GenServer wired into a stdio-handler port (because the MCP config writer hands claude `command: "elixir"` or `command: "<built escript>"` that talks JSON-RPC). When claude calls the `reply` tool, the Elixir side translates that into the same `forward_reply_to_agent` path v1_prototype uses.
 
-**Concretely:** cc_pty writes a per-instance mcp.json (one per cc-pty agent, NOT a single shared file like v1) pointing at an escript or `mix run` invocation that runs `EzagentPluginCcPty.McpStdioServer.main/0`. That server reads stdio JSON-RPC, dispatches `tools/call reply` → `Ezagent.Bridge.V1Prototype.Server.forward_reply_to_agent/4` (yes, reusing the existing module — see §6 coexistence).
+**Concretely:** cc_pty writes a per-instance mcp.json (one per cc-pty agent, NOT a single shared file like v1) pointing at an escript or `mix run` invocation that runs `EzagentPluginCc.McpStdioServer.main/0`. That server reads stdio JSON-RPC, dispatches `tools/call reply` → `Ezagent.Bridge.V1Prototype.Server.forward_reply_to_agent/4` (yes, reusing the existing module — see §6 coexistence).
 
 **Plus:**
 - Reply traffic flows through the **same wire format** v1_prototype proves out. We don't ship a second comms path.
@@ -184,7 +184,7 @@ Skip MCP. Spawn `claude` with no channel flags, capture its TUI output stream, p
 **Sub-decision (Q4):** does cc_pty's MCP stdio server **reuse** `Ezagent.Bridge.V1Prototype.Server` for the `forward_reply_to_agent` plumbing, or does cc_pty get its own copy?
 
 - **Reuse:** keeps v1 + cc_pty using the same Server state for bridge↔agent binding. Risk: muddies the "v1_prototype is a separate replaceable plugin" boundary.
-- **Own copy:** cc_pty has `EzagentPluginCcPty.AgentBindings` GenServer (~100 LOC). Independent lifecycle from v1. Clean. Pays a duplication cost.
+- **Own copy:** cc_pty has `EzagentPluginCc.AgentBindings` GenServer (~100 LOC). Independent lifecycle from v1. Clean. Pays a duplication cost.
 
 **My recommendation: own copy.** v1_prototype's name advertises its disposability; cc_pty should not depend on a soon-to-be-deleted module. Yes, ~80 LOC of duplication. Worth it.
 
@@ -195,8 +195,8 @@ Skip MCP. Spawn `claude` with no channel flags, capture its TUI output stream, p
 Once decisions A/Q3/Q4 above are committed: per-instance process tree for one cc-pty agent at URI `agent://architect`:
 
 ```
-EzagentPluginCcPty.ProcessSupervisor (DynamicSupervisor, one_for_one)
-  └─ EzagentPluginCcPty.ProcessServer (GenServer, transient restart, max_restarts: 3 in 60s)
+EzagentPluginCc.ProcessSupervisor (DynamicSupervisor, one_for_one)
+  └─ EzagentPluginCc.ProcessServer (GenServer, transient restart, max_restarts: 3 in 60s)
        │ Owns:
        │   - erlexec_port (the claude PTY process)
        │   - mcp_config_path (per-instance .mcp.json absolute path)
@@ -287,14 +287,14 @@ validate/1 checks:
 instantiate/3:
   1. Parse agent_uri.
   2. Ezagent.SpawnRegistry.spawn(agent_uri)  # chat plugin's "agent" handler
-  3. EzagentPluginCcPty.ProcessSupervisor.start_for(agent_uri, %{cwd, model, args, env})
+  3. EzagentPluginCc.ProcessSupervisor.start_for(agent_uri, %{cwd, model, args, env})
      — idempotent: if already running, return existing pid
   4. Return {:ok, [agent_uri]}  # the Agent URI is what the Workspace tracks
 ```
 
 The two-step instantiate (spawn Agent Kind, then spawn ProcessServer) lets the Agent Kind survive ProcessServer restarts — its chat slice + Identity slice stay live across claude crashes.
 
-**Registration:** `EzagentPluginCcPty.Application.start/2` calls `Ezagent.TemplateRegistry.register(Ezagent.Template.CcPtySession)`.
+**Registration:** `EzagentPluginCc.Application.start/2` calls `Ezagent.TemplateRegistry.register(Ezagent.Template.CcPtySession)`.
 
 **Workspace declaration** (from operator's perspective — see §9 UX):
 ```json
@@ -328,7 +328,7 @@ Note: `agent://architect` appears in *both* `members` and the template. The Load
    - Chat plugin calls `Loader.load_all/0`. For workspace `ng-dev`: `:instantiate` returns `[{:member, agent://architect}, {:template, "architect-on-ezagent", %{...}}]`.
    - Loader walks members → `SpawnRegistry.spawn(agent://architect)` → chat's fn spawns the Agent Kind. Idempotent.
    - cc_pty plugin starts (after chat). Walks already-loaded workspaces (via `Workspace.Store.list_all`) looking for `cc-pty.session` template entries. Finds `architect-on-ezagent`. Calls `CcPtySession.instantiate/3` → spawns ProcessServer → `:exec.run(...)` boots claude with PTY.
-   - claude boots, reads its mcp.json, spawns Ezagent's stdio MCP server, sends `initialize` → Ezagent's MCP server posts to `EzagentPluginCcPty.AgentBindings.bind(agent_uri, server_pid)` → binding is live.
+   - claude boots, reads its mcp.json, spawns Ezagent's stdio MCP server, sends `initialize` → Ezagent's MCP server posts to `EzagentPluginCc.AgentBindings.bind(agent_uri, server_pid)` → binding is live.
 5. Operator opens `/admin` LiveView. Workspace `ng-dev` shows:
    - Members: `agent://architect` ✓ alive, `user://admin` ✓ alive
    - Templates: `architect-on-ezagent` (class: cc-pty.session) ✓ process running, pid 12345, started 13s ago, restarts: 0
@@ -342,12 +342,12 @@ Note: `agent://architect` appears in *both* `members` and the template. The Load
 
 A plugin author writing a new PTY-backed plugin (e.g., `esr_plugin_codex_pty`) after cc_pty ships:
 
-1. Pattern from `ezagent_plugin_cc_pty`: a Template Class implementing `Ezagent.Kind.Template`.
+1. Pattern from `ezagent_plugin_cc`: a Template Class implementing `Ezagent.Kind.Template`.
 2. `instantiate/3` body is the recipe — spawn the Agent URI via SpawnRegistry, then spawn the per-instance ProcessServer.
 3. Their own DynamicSupervisor + ProcessServer. Their own erlexec invocation. Their own stdio MCP server if needed.
 4. Register Template Class in their `Application.start/2`. One line.
 
-**They never modify `ezagent_core`, `esr_plugin_chat`, or `ezagent_plugin_cc_pty`.** The contract surface is `Ezagent.Kind.Template` + `Ezagent.SpawnRegistry` + `Ezagent.TemplateRegistry`. That's it.
+**They never modify `ezagent_core`, `esr_plugin_chat`, or `ezagent_plugin_cc`.** The contract surface is `Ezagent.Kind.Template` + `Ezagent.SpawnRegistry` + `Ezagent.TemplateRegistry`. That's it.
 
 **This is the north star validation.** If cc_pty can be written without touching anything else, codex-pty's author writes their plugin without touching anything else.
 
@@ -372,7 +372,7 @@ A plugin author writing a new PTY-backed plugin (e.g., `esr_plugin_codex_pty`) a
 | Q1 | **Agent Kind reuse vs new Kind** (§3). Confirm Option 1 (reuse `Ezagent.Entity.Agent`, two-process pair via `Process.monitor`)?                                                                                                                                                                                                                                | Option 1. New Kind is a north-star violation (forces chat-plugin changes).                                                                          |
 | Q2 | **MCP-over-stdio vs raw-TUI-parse** (§5). Confirm Path A (MCP)?                                                                                                                                                                                                                                                                                            | Path A. Path B is a research project.                                                                                                              |
 | Q3 | **PTY library** (§4). Confirm `:erlexec`?                                                                                                                                                                                                                                                                                                                  | `:erlexec`. Old-esr production wisdom inheritable.                                                                                                  |
-| Q4 | **Reuse v1's `Ezagent.Bridge.V1Prototype.Server` for cc_pty's agent bindings, or own copy** (§5 sub-decision)?                                                                                                                                                                                                                                                | Own copy (`EzagentPluginCcPty.AgentBindings`). ~80 LOC duplication worth the boundary.                                                                  |
+| Q4 | **Reuse v1's `Ezagent.Bridge.V1Prototype.Server` for cc_pty's agent bindings, or own copy** (§5 sub-decision)?                                                                                                                                                                                                                                                | Own copy (`EzagentPluginCc.AgentBindings`). ~80 LOC duplication worth the boundary.                                                                  |
 | Q5 | **Restart intensity** (§6). 3 restarts in 60s, then operator-driven? Or stricter (3 in 300s)?                                                                                                                                                                                                                                                              | 3 in 60s. Aggressive enough to recover transient crashes; quick failure surface for real bugs.                                                       |
 | Q6 | **TUI output handling** (§7). Path (c) discard+log this PR, (b) PubSub→xterm.js next PR?                                                                                                                                                                                                                                                                   | (c) now, (b) later.                                                                                                                                |
 | Q7 | **MCP server: native Elixir vs spawn-the-Python-bridge** (§11 worry #1 fallback). Build native Elixir stdio MCP server, OR (cheaper) have cc_pty spawn `esr_mcp_bridge_v1_prototype.py` as claude's MCP subprocess (i.e., literally hand cc_pty's per-instance mcp.json pointing at the same Python script v1 already uses)?                                | Build native Elixir. The Python path is a coward's fallback — works, but locks Ezagent's deploy story to having `uv` available everywhere.              |
@@ -388,7 +388,7 @@ A plugin author writing a new PTY-backed plugin (e.g., `esr_plugin_codex_pty`) a
 | Existing v1_prototype users (operator runs `cc-bridge-attach.sh`)                                                     | **Unchanged.** v1_prototype keeps working; `Ezagent.Bridge.V1Prototype.Server` keeps its HTTP routes. cc_pty does NOT delete or modify v1.                                                                                                                                  |
 | Workspace today has `members: [agent://cc-builder]` (v1-attached agent) AND a new `cc-pty.session` template for `agent://architect` | Both Agents coexist. cc-builder is brought up only when the operator runs the bridge script (today's UX, unchanged). architect is brought up by Ezagent on boot. The router treats them identically.                                                                       |
 | Operator currently uses `cc-bridge-attach.sh` for everything — wants to migrate to cc_pty                              | Per-agent migration: declare the same agent URI via cc-pty.session template, stop running the bridge script. v1_prototype announce HTTP routes still exist; operator can drop the migration mid-stream and revert.                                                       |
-| Phase 5 introduces `ezagent_plugin_cc_channel` (the "external-attach v2")                                                  | cc_channel deprecates v1_prototype; cc_pty is unaffected (it's the "Ezagent-spawns-claude" path, orthogonal). The Decision #56 split holds: cc_pty stays for managed-process, cc_channel for external-attach. Both can coexist.                                              |
+| Phase 5 introduces `ezagent_plugin_cc` (the "external-attach v2")                                                  | cc_channel deprecates v1_prototype; cc_pty is unaffected (it's the "Ezagent-spawns-claude" path, orthogonal). The Decision #56 split holds: cc_pty stays for managed-process, cc_channel for external-attach. Both can coexist.                                              |
 
 ---
 
@@ -396,14 +396,14 @@ A plugin author writing a new PTY-backed plugin (e.g., `esr_plugin_codex_pty`) a
 
 | Test                                                                          | Location                                                                                | Asserts                                                                                                                                                                                            |
 | ----------------------------------------------------------------------------- | --------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `Ezagent.Template.CcPtySession` validate                                          | `apps/ezagent_plugin_cc_pty/test/esr/template/cc_pty_session_test.exs`                       | Rejects bad URIs, missing cwd, nonexistent cwd, invalid model, unknown top-level keys                                                                                                                |
+| `Ezagent.Template.CcPtySession` validate                                          | `apps/ezagent_plugin_cc/test/esr/template/cc_pty_session_test.exs`                       | Rejects bad URIs, missing cwd, nonexistent cwd, invalid model, unknown top-level keys                                                                                                                |
 | `Ezagent.Template.CcPtySession` instantiate (with mock binary)                    | same file                                                                               | With `claude_binary_path: "<repo>/test/support/fake_claude.sh"` (a 5-line shell script that prints a fixed `initialize` response then sleeps): asserts Agent Kind + ProcessServer both alive, mock binary OS pid live |
-| `ProcessServer` crash → restart                                               | `apps/ezagent_plugin_cc_pty/test/esr/process_server_test.exs`                                | Mock binary exits with code 1; assert ProcessServer restarts within DynamicSupervisor intensity; restart_count telemetry fires                                                                       |
+| `ProcessServer` crash → restart                                               | `apps/ezagent_plugin_cc/test/esr/process_server_test.exs`                                | Mock binary exits with code 1; assert ProcessServer restarts within DynamicSupervisor intensity; restart_count telemetry fires                                                                       |
 | `ProcessServer` restart exhaustion                                            | same                                                                                    | Mock binary always exits 1; after 3 restarts in 60s, supervisor stops it; LV telemetry shows `:restart_exhausted`                                                                                     |
 | `ProcessServer` stdin write                                                   | same                                                                                    | Spawn mock binary that echoes stdin to a file; write via ProcessServer; assert file contents                                                                                                         |
-| Stdio MCP server unit                                                         | `apps/ezagent_plugin_cc_pty/test/ezagent_plugin_cc_pty/mcp_stdio_server_test.exs`                | `initialize` response shape; `tools/list` shape; `tools/call reply` dispatches to AgentBindings; `notifications/claude/channel` emitted on PubSub event                                              |
-| End-to-end integration (mock claude binary) ★                                  | `apps/ezagent_plugin_cc_pty/test/integration/cc_pty_lifecycle_test.exs`                      | Declare a Workspace with cc-pty.session template (mock binary) → Loader runs → ProcessServer alive → simulate MCP `reply` from mock binary → assert message lands in session://main with sender = agent URI |
-| **Phase 4 invariant test EXTENSION** ★★                                      | `apps/ezagent_core/test/integration/plugin_isolation_workspace_test.exs` (extend, again)    | Inline a `FakeCcPtyTemplate` Class (modeled after the spec #01 ProbeTemplate); declare in a Workspace; verify after teardown+`Loader.load_all/0` the spawned URIs are alive — **all from cc_pty plugin, zero references in ezagent_core or esr_plugin_chat to `EzagentPluginCcPty`.** |
+| Stdio MCP server unit                                                         | `apps/ezagent_plugin_cc/test/ezagent_plugin_cc/mcp_stdio_server_test.exs`                | `initialize` response shape; `tools/list` shape; `tools/call reply` dispatches to AgentBindings; `notifications/claude/channel` emitted on PubSub event                                              |
+| End-to-end integration (mock claude binary) ★                                  | `apps/ezagent_plugin_cc/test/integration/cc_pty_lifecycle_test.exs`                      | Declare a Workspace with cc-pty.session template (mock binary) → Loader runs → ProcessServer alive → simulate MCP `reply` from mock binary → assert message lands in session://main with sender = agent URI |
+| **Phase 4 invariant test EXTENSION** ★★                                      | `apps/ezagent_core/test/integration/plugin_isolation_workspace_test.exs` (extend, again)    | Inline a `FakeCcPtyTemplate` Class (modeled after the spec #01 ProbeTemplate); declare in a Workspace; verify after teardown+`Loader.load_all/0` the spawned URIs are alive — **all from cc_pty plugin, zero references in ezagent_core or esr_plugin_chat to `EzagentPluginCc`.** |
 
 ★ The mock-binary end-to-end IS the production-flow validation per memory `feedback_e2e_faces_production`. Don't substitute the supervisor with a stub.
 
@@ -415,16 +415,16 @@ A plugin author writing a new PTY-backed plugin (e.g., `esr_plugin_codex_pty`) a
 
 | File                                                                                          | New / Δ | LOC      |
 | --------------------------------------------------------------------------------------------- | ------- | -------- |
-| `apps/ezagent_plugin_cc_pty/mix.exs`                                                              | New     | ~40      |
-| `apps/ezagent_plugin_cc_pty/lib/ezagent_plugin_cc_pty/application.ex`                                 | New     | ~80      |
-| `apps/ezagent_plugin_cc_pty/lib/ezagent_plugin_cc_pty/process_supervisor.ex`                          | New     | ~60      |
-| `apps/ezagent_plugin_cc_pty/lib/ezagent_plugin_cc_pty/process_server.ex`                              | New     | ~280     |
-| `apps/ezagent_plugin_cc_pty/lib/ezagent_plugin_cc_pty/mcp_stdio_server.ex` (Q7-Elixir)                | New     | ~250     |
-| `apps/ezagent_plugin_cc_pty/lib/ezagent_plugin_cc_pty/agent_bindings.ex` (Q4-own-copy)                | New     | ~100     |
-| `apps/ezagent_plugin_cc_pty/lib/ezagent_plugin_cc_pty/mcp_config_writer.ex` (per-instance)            | New     | ~70      |
-| `apps/ezagent_plugin_cc_pty/lib/esr/template/cc_pty_session.ex`                                   | New     | ~120     |
-| `apps/ezagent_plugin_cc_pty/lib/ezagent_plugin_cc_pty/ansi_strip.ex` (Q6-(c))                         | New     | ~30      |
-| `apps/ezagent_plugin_cc_pty/lib/mix/tasks/esr.cc_pty.status.ex` (Q9)                              | New     | ~50      |
+| `apps/ezagent_plugin_cc/mix.exs`                                                              | New     | ~40      |
+| `apps/ezagent_plugin_cc/lib/ezagent_plugin_cc/application.ex`                                 | New     | ~80      |
+| `apps/ezagent_plugin_cc/lib/ezagent_plugin_cc/process_supervisor.ex`                          | New     | ~60      |
+| `apps/ezagent_plugin_cc/lib/ezagent_plugin_cc/process_server.ex`                              | New     | ~280     |
+| `apps/ezagent_plugin_cc/lib/ezagent_plugin_cc/mcp_stdio_server.ex` (Q7-Elixir)                | New     | ~250     |
+| `apps/ezagent_plugin_cc/lib/ezagent_plugin_cc/agent_bindings.ex` (Q4-own-copy)                | New     | ~100     |
+| `apps/ezagent_plugin_cc/lib/ezagent_plugin_cc/mcp_config_writer.ex` (per-instance)            | New     | ~70      |
+| `apps/ezagent_plugin_cc/lib/esr/template/cc_pty_session.ex`                                   | New     | ~120     |
+| `apps/ezagent_plugin_cc/lib/ezagent_plugin_cc/ansi_strip.ex` (Q6-(c))                         | New     | ~30      |
+| `apps/ezagent_plugin_cc/lib/mix/tasks/esr.cc_pty.status.ex` (Q9)                              | New     | ~50      |
 | `apps/ezagent_web_liveview/lib/ezagent_web_liveview/workspace_detail_live.ex` (process status badges) | Δ       | +60      |
 | **Subtotal impl**                                                                             |         | **~1140**|
 | Tests (per §14)                                                                               | New + Δ | ~520     |

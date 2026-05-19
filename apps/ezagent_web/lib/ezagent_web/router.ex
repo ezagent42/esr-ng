@@ -80,7 +80,7 @@ defmodule EzagentWeb.Router do
   # Phase 7 PR 32c (rebrand-4): v1 prototype CC bridge HTTP routes
   # deleted alongside their controller. Production CC bridges connect
   # via the v2 `/cc_socket` Phoenix.Channel (token-authenticated by
-  # EzagentPluginCcChannel.TokenStore), defined in EzagentWeb.Endpoint.
+  # EzagentPluginCc.TokenStore), defined in EzagentWeb.Endpoint.
   scope "/api", EzagentWeb do
     pipe_through :api
 

@@ -491,14 +491,14 @@ defmodule EzagentPluginLiveview.AdminLive do
   defp bridge_topic_safely do
     # Phase 7 PR 32c: v1 prototype deleted; v2 BridgeRegistry is the
     # only source of connect/disconnect events.
-    EzagentPluginCcChannel.BridgeRegistry.topic()
+    EzagentPluginCc.BridgeRegistry.topic()
   end
 
   defp list_bridges_safely do
     # v2 returns [{agent_uri :: URI.t(), %{pid, connected_at, info}}].
     # The debug panel's table renderer adapts to the shape — see
     # ezagent_plugin_liveview/admin/debug_panel.ex.
-    EzagentPluginCcChannel.BridgeRegistry.list_connected()
+    EzagentPluginCc.BridgeRegistry.list_connected()
   end
 
   defp load_recent_invocations(n) do

@@ -211,8 +211,8 @@ defmodule Ezagent.Behavior.ChatTest do
 
       msg = Message.new(sender, %{text: "plain text", attachments: []})
 
-      :ok = EzagentPluginCcChannel.BridgeRegistry.bind(agent_uri, self())
-      on_exit(fn -> EzagentPluginCcChannel.BridgeRegistry.unbind(agent_uri) end)
+      :ok = EzagentPluginCc.BridgeRegistry.bind(agent_uri, self())
+      on_exit(fn -> EzagentPluginCc.BridgeRegistry.unbind(agent_uri) end)
 
       ctx = %{self_uri: agent_uri, kind_module: Ezagent.Entity.Agent, caller: session_uri}
 
@@ -249,8 +249,8 @@ defmodule Ezagent.Behavior.ChatTest do
           ]
         })
 
-      :ok = EzagentPluginCcChannel.BridgeRegistry.bind(agent_uri, self())
-      on_exit(fn -> EzagentPluginCcChannel.BridgeRegistry.unbind(agent_uri) end)
+      :ok = EzagentPluginCc.BridgeRegistry.bind(agent_uri, self())
+      on_exit(fn -> EzagentPluginCc.BridgeRegistry.unbind(agent_uri) end)
 
       ctx = %{self_uri: agent_uri, kind_module: Ezagent.Entity.Agent, caller: session_uri}
 
@@ -286,8 +286,8 @@ defmodule Ezagent.Behavior.ChatTest do
         | body: string_keyed_body
       }
 
-      :ok = EzagentPluginCcChannel.BridgeRegistry.bind(agent_uri, self())
-      on_exit(fn -> EzagentPluginCcChannel.BridgeRegistry.unbind(agent_uri) end)
+      :ok = EzagentPluginCc.BridgeRegistry.bind(agent_uri, self())
+      on_exit(fn -> EzagentPluginCc.BridgeRegistry.unbind(agent_uri) end)
 
       ctx = %{self_uri: agent_uri, kind_module: Ezagent.Entity.Agent, caller: session_uri}
 

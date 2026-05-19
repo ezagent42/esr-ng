@@ -235,14 +235,14 @@ Phase 1(tag `phase1b` @ `f14e84f`,merged to main `22ebb72`)的所有:
 - ❌ **Identity Behavior**(Phase 3d)— Phase 2 admin User Kind 升级为持 Chat 但**仍是 stub**:admin_caps 继续返回 all-caps(per Phase 1 P1-D5),authz_check 仍是 stub_grant(per Decision #82)。Phase 3d 才有真 Identity + 真 cap check
 - ❌ **Attachments(file URIs)**(§10.5 G)— Phase 5。Phase 2 `body.attachments` 字段保留但 LV form 不允许添加(永远是空 list)。spec 设计预留,实现 deferred
 - ❌ **多 session / Cross-session routing**— Phase 3。Phase 2 单 session(`session://main`)
-- ❌ **CC channel 完整 plugin `ezagent_plugin_cc_channel`**— Phase 5。Phase 2 继续用 v1_prototype(但 controller reply 路径升级走 Agent Kind,这部分被 Phase 5 wholesale replace 时一并替换)
+- ❌ **CC channel 完整 plugin `ezagent_plugin_cc`**— Phase 5。Phase 2 继续用 v1_prototype(但 controller reply 路径升级走 Agent Kind,这部分被 Phase 5 wholesale replace 时一并替换)
 - ❌ **Permission relay(`claude/channel/permission`)**— Phase 5
 - ❌ **多 claude session 同时连接**— Phase 5。Phase 2 boundary:技术上多 bridge 可以同 announce(每个走不同 agent URI),都加入同 session://main,但 LV / Chat 行为是否 production-ready 不验证;Phase 2 唯一 demo path 是 1 个 claude
 - ❌ **Permission gating on Chat send**— Phase 3d cap 真化后才加;Phase 2 send 永远走 stub_grant
 
 ## v1_prototype 命名约定(沿用)
 
-`apps/ezagent_plugin_cc_bridge_v1_prototype/` 整 plugin 保留 `_v1_prototype` 后缀,Phase 5 由 `ezagent_plugin_cc_channel` wholesale replace。Phase 2 在该 plugin 内的改动(controller reply 路径走 Agent Kind 等)Phase 5 替换时一并扔。
+`apps/ezagent_plugin_cc_bridge_v1_prototype/` 整 plugin 保留 `_v1_prototype` 后缀,Phase 5 由 `ezagent_plugin_cc` wholesale replace。Phase 2 在该 plugin 内的改动(controller reply 路径走 Agent Kind 等)Phase 5 替换时一并扔。
 
 ## 跟 architect 后续 sync 点
 

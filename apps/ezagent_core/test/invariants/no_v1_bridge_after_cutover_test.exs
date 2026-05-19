@@ -68,7 +68,7 @@ defmodule EzagentCore.Invariants.NoV1BridgeAfterCutoverTest do
 
            Decision #144: after Phase 7 PR 32c the v1 prototype is
            deleted; no production code may name it. If you need
-           bridge surface, use EzagentPluginCcChannel.{Channel,
+           bridge surface, use EzagentPluginCc.{Channel,
            BridgeRegistry, McpConfigWriter, TokenStore}.
            """
   end
@@ -108,7 +108,7 @@ defmodule EzagentCore.Invariants.NoV1BridgeAfterCutoverTest do
            v1 plugin directory resurrected at #{v1_dir}.
 
            Decision #144: PR 32c deleted apps/ezagent_plugin_cc_bridge_v1_prototype/
-           and the production CC bridge is now EzagentPluginCcChannel
+           and the production CC bridge is now EzagentPluginCc
            (Phoenix.Channel over WebSocket). Re-introducing the v1
            prototype reverts the cutover.
            """
