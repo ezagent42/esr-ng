@@ -112,15 +112,28 @@ defmodule EzagentPluginLiveview.UsersLive do
     :ok
   end
 
+  alias EzagentDomainUi.IdeShell
+
   @impl true
   def render(assigns) do
+    # Phase 8 阶段 E: shallow wrap in IdeShell (preserves main body).
+    assigns =
+      assign_new(assigns, :current_entity_uri_str, fn ->
+        URI.to_string(assigns.current_entity_uri || URI.parse("entity://user/admin"))
+      end)
+
     ~H"""
-    <div style="max-width: 1000px; margin: 0 auto; padding: 24px; font-family: -apple-system, sans-serif;">
-      <header>
+    <IdeShell.ide_shell
+      current_entity_uri={@current_entity_uri_str}
+      current_path="/admin/users"
+      status={%{agents_alive: 0, bridges: 0, debug_events: 0, version: "dev"}}
+    >
+      <:main_window>
+        <div class="flex-1 overflow-auto px-6 py-6">
+        <header>
         <h1 style="font-size: 22px; font-weight: 600;">Users</h1>
         <p style="font-size: 13px; color: #666;">
           Provisioned principals (independent of User Kind snapshot per Q-MU-2).
-          <a href="/admin" style="margin-left: 16px; color: #0969da;">← /admin</a>
         </p>
       </header>
 
@@ -204,7 +217,9 @@ defmodule EzagentPluginLiveview.UsersLive do
         <p :if={@flash_error} style="color: #cf222e; font-size: 12px; margin-top: 8px;">{@flash_error}</p>
         <p :if={@flash_info} style="color: #1f883d; font-size: 12px; margin-top: 8px;">{@flash_info}</p>
       </section>
-    </div>
+        </div>
+      </:main_window>
+    </IdeShell.ide_shell>
     """
   end
 end
