@@ -1,18 +1,22 @@
 defmodule EzagentPluginFeishu.InboundDispatcher do
   @moduledoc """
-  Phase 6 PR 15 — single entry point shared by `WebhookPlug` and the
-  upcoming `WsClient`. Decoupled from transport.
+  Single entry point shared by `WebhookPlug` and `WsClient`.
+  Decoupled from transport.
 
   Responsibilities (in order):
 
     1. Resolve sender via `SenderResolver`.
-    2. If pending → log + react `:eyes` emoji so the human sees ESR
+    2. If pending → log + react `THUMBSDOWN` so the human sees ESR
        got the message but ops needs to bind their identity.
-    3. If bound → look up session for chat_id, dispatch into it.
-       On success, react `:OK` emoji as ergonomic ack (Allen
-       2026-05-17 "受到了信息" 反馈).
-    4. On dispatch error → send a Feishu text back into the source
-       chat explaining what happened, then THUMBSDOWN react. The
+    3. If bound → look up session_uri for chat_id via
+       `EzagentPluginFeishu.SessionBinding.resolve/1` (PR #144 SPEC v2
+       §5.8 — replaces the prior routing-rule reverse-lookup that
+       depended on the deleted `feishu://oc_xxx` Kind).
+    4. On bound + session-bound → dispatch
+       `<session_uri>/behavior/chat/send`. On success, react `OK`
+       emoji (Allen 2026-05-17 "受到了信息" 反馈).
+    5. On dispatch error → send a Feishu text back into the source
+       chat explaining what happened, then `THUMBSDOWN` react. The
        bound user IS the delegate; if cap denial or other failure
        happens, surface it to the human, don't silently drop.
        (Allen 2026-05-18 "silent down 不可接受" — PR 27.)
@@ -24,35 +28,20 @@ defmodule EzagentPluginFeishu.InboundDispatcher do
   the WS module trivial — it just constructs the keyword args list
   and calls `dispatch/1`.
 
-  ## Dispatch mode: `:call`, not `:cast` (PR 27, Decision #134)
+  ## Dispatch mode: `:call`, not `:cast` (Decision #134)
 
   `Ezagent.Behavior.Chat.@interface[:send]` declares `:send` as `:cast`
   (fire-and-forget). This module dispatches with `mode: :call`
   anyway, so cap-denial or other dispatch failures return
   synchronously as `{:error, _}` and can be surfaced to the human
-  via `send_dispatch_error/3`.
-
-  This is a **legitimate transport-level override** of the
-  `@interface` default. `Ezagent.Invocation.dispatch/1` accepts any
-  mode the caller passes; the `@interface` mode declaration is a
-  *default transport behavior hint*, not a contract callers must
-  obey. Future transports (Slack / Discord / email) implementing
-  inbound should use the same pattern: `mode: :call`, decompose
-  the result, send an error message back through the originating
-  channel on failure.
-
-  **What to NOT do**: do not copy `mode: :cast` from another call
-  site into this module "to match the interface declaration."
-  Silent-drop on cap denial is the bug we're fixing.
-
-  See ARCHITECTURE.md Decision #134 and
-  `docs/notes/phase-6-architecture-closeout.md` §2.2 for the
-  forensic record.
+  via `send_dispatch_error/3`. Legitimate transport-level override
+  of the `@interface` default; see Decision #134 +
+  `docs/notes/phase-6-architecture-closeout.md` §2.2.
   """
 
   require Logger
 
-  alias EzagentPluginFeishu.{Client, SenderResolver}
+  alias EzagentPluginFeishu.{Client, SenderResolver, SessionBinding}
 
   @type opts :: [
           chat_id: String.t(),
@@ -74,15 +63,15 @@ defmodule EzagentPluginFeishu.InboundDispatcher do
           "Feishu inbound: open_id=#{open_id} unbound — pending. Run `mix ezagent.feishu.bind #{open_id} entity://user/<name>` to attach."
         )
 
-        # Allen 2026-05-17: lark react API rejected EYES with code
-        # 231001 "reaction type is invalid" — lark only accepts a
-        # curated emoji set. THUMBSDOWN is on the supported list and
-        # is visually distinct from the OK success react below.
+        # lark react API rejected EYES with code 231001 "reaction type
+        # is invalid" — lark only accepts a curated emoji set.
+        # THUMBSDOWN is on the supported list and visually distinct
+        # from the OK success react below.
         react_safe(message_id, "THUMBSDOWN")
         :ok
 
       {:ok, caller_uri, caps} ->
-        case lookup_session_for_chat(chat_id) do
+        case SessionBinding.resolve(chat_id) do
           {:ok, session_uri} ->
             case do_dispatch(session_uri, caller_uri, caps, body) do
               :ok ->
@@ -90,13 +79,9 @@ defmodule EzagentPluginFeishu.InboundDispatcher do
                 :ok
 
               {:error, :unauthorized} ->
-                # PR 27 (Allen 2026-05-18 "silent down 不可接受"): cap
-                # denial reaches the human via a text in the original
-                # chat + THUMBSDOWN react, not a void log line. The
-                # bound user IS the delegate; if they're missing the
-                # cap, the right answer is to tell them, not silently
-                # drop. Reverse-leg matchers + crash bubbling are
-                # tracked in docs/futures/todo.md.
+                # Allen 2026-05-18 "silent down 不可接受": cap denial
+                # reaches the human via a text in the original chat +
+                # THUMBSDOWN react, not a void log line.
                 Logger.info(
                   "Feishu inbound: cap denied for #{URI.to_string(caller_uri)} → " <>
                     "#{URI.to_string(session_uri)}/chat/send; sending text back"
@@ -140,36 +125,20 @@ defmodule EzagentPluginFeishu.InboundDispatcher do
     end
   end
 
-  # Reverse lookup chat_id → session_uri via routing_rules (same shape
-  # as the prior WebhookPlug version — Plan B routing rule
-  # `in_session(session_uri) → [feishu://<chat_id>]`).
-  defp lookup_session_for_chat(chat_id) do
-    feishu_uri_str = "feishu://" <> chat_id
-
-    Ezagent.Routing.RuleStore.list(EzagentDomainChat.Routing.MentionRouting)
-    |> Enum.find_value(:error, fn row ->
-      cond do
-        not (feishu_uri_str in row.receivers) ->
-          nil
-
-        true ->
-          case row.matcher_data do
-            %{"type" => "in_session", "arg" => session_uri_str} ->
-              {:ok, URI.parse(session_uri_str)}
-
-            _ ->
-              nil
-          end
-      end
-    end)
-  end
-
   defp do_dispatch(session_uri, caller_uri, caps, body) do
     # Phase 6 PR 15: download attachments to local paths so recipients
     # (CC bridge, LV chat thread, future viewers) can show content
     # rather than just metadata. Best-effort — download failure keeps
     # the attachment with type+name only.
     body = Map.update(body, :attachments, [], fn list -> Enum.map(list, &maybe_download/1) end)
+
+    # PR #144 (SPEC v2 §5.8) — origin tag so the FeishuOutbound mirror
+    # can detect "this message came IN from Feishu" and skip echoing
+    # back to Feishu. The flag is stamped on the body map (which Ecto
+    # persists as JSON; key survives round-trip). String key form
+    # because MessageStore's load path decodes JSON with string keys
+    # and FeishuOutbound matches both shapes.
+    body = Map.put(body, :_feishu_origin, true)
 
     # Phase 6 PR 16: extract @mentions from text (B2 route per Allen
     # 2026-05-17). Resolved live agent URIs go into Message.mentions
@@ -181,7 +150,7 @@ defmodule EzagentPluginFeishu.InboundDispatcher do
 
     target = URI.parse("#{URI.to_string(session_uri)}/behavior/chat/send")
 
-    # PR 27 (Allen 2026-05-18): mode :call so cap-denial bubbles back
+    # Allen 2026-05-18: mode :call so cap-denial bubbles back
     # synchronously; the caller (dispatch/1) sends a text message to
     # the human explaining the failure. :cast would silently drop —
     # no audit feedback to the sender.
@@ -199,8 +168,8 @@ defmodule EzagentPluginFeishu.InboundDispatcher do
     end
   end
 
-  # PR 27: send a Feishu text back to the source chat when ESR
-  # dispatch can't proceed, so the human sees the failure instead of
+  # Send a Feishu text back to the source chat when ESR dispatch
+  # can't proceed, so the human sees the failure instead of
   # waiting in silence. THUMBSDOWN react paired with the explanation
   # text mirrors the existing :pending → THUMBSDOWN pattern: emoji
   # for at-a-glance status, text for the "why."

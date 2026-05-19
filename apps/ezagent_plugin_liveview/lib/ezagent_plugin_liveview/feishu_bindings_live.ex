@@ -80,7 +80,9 @@ defmodule EzagentPluginLiveview.FeishuBindingsLive do
       <.page_header title="Feishu user bindings">
         <:subtitle>
           Map a Feishu open_id to a local ESR user URI. The bound user
-          receives the standard feishu_chat:* capability via BindingPolicy.
+          gets the default session-participation caps via BindingPolicy.
+          (chat_id ↔ session bindings live in a separate table — manage
+          them with `mix ezagent.feishu.chat.bind`.)
           <a href="/admin" class="text-zinc-600 underline hover:text-zinc-900 ml-1">← /admin</a>
         </:subtitle>
       </.page_header>

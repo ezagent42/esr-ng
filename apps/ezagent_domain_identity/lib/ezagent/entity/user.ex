@@ -72,8 +72,8 @@ defmodule Ezagent.Entity.User do
   to `entity://user/admin`.
 
   **Behavior wildcard**: `:any` follows the existing project
-  convention (cf. `feishu_chat:any` granted by `BindingPolicy`).
-  Modeling specific behaviors here would require ezagent_domain_identity
+  convention. Modeling specific behaviors here would require
+  ezagent_domain_identity
   to depend on ezagent_domain_chat (circular), or runtime
   BehaviorRegistry lookups at user-creation time (boot-order
   fragile). `:any` plus a narrow `:kind` scope is the consistent

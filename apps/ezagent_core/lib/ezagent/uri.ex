@@ -54,14 +54,14 @@ defmodule Ezagent.URI do
 
   ## Deferred-deletion schemes
 
-  `feishu`, `message`, `routing-admin`, `pty-input` remain in
+  `message`, `routing-admin`, `pty-input` remain in
   `@known_schemes` for now — later PRs trim them:
-  - PR #143 deletes `feishu`
-  - PR #144 deletes `routing-admin` + `pty-input`
+  - PR #144 deleted `feishu` (DONE — Feishu plugin re-shaped per SPEC §5.8)
+  - PR #145 deletes `routing-admin` + `pty-input`
   - PR #147 deletes `message`
   """
 
-  @known_schemes ~w(entity workspace session template resource system feishu message routing-admin pty-input)
+  @known_schemes ~w(entity workspace session template resource system message routing-admin pty-input)
 
   @doc """
   Parse a binary URI into a stdlib `%URI{}`. Raises on malformed input
@@ -130,9 +130,9 @@ defmodule Ezagent.URI do
 
   def instance(%URI{path: _path} = uri) do
     # Legacy 1-segment-authority schemes (session/workspace/template/
-    # resource/system/routing-admin/pty-input/feishu/message) —
+    # resource/system/routing-admin/pty-input/message) —
     # entire path is sub-resource. Migrated to uniform split in
-    # later PRs (#143/#144/#146).
+    # later PRs (#145/#146).
     %URI{uri | path: nil, query: nil, fragment: nil}
   end
 
