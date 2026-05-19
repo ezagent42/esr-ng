@@ -351,4 +351,164 @@ But: this is my read, not a decision. Allen's question is structural and deserve
 
 ## §5 Final spec
 
-(Empty until consensus reached.)
+Consensus shape after Rounds 1-3 (Allen 2026-05-19). This section is **normative**. Every claim here is a constraint that downstream PRs (#139-#145) and future code must satisfy.
+
+### §5.1 Authority — uniform 2-segment
+
+Every Ezagent URI has the same authority shape:
+
+    <scheme>://<type>/<name>
+
+- `<scheme>` is a registered Ezagent scheme (see §5.6).
+- `<type>` is a registered sub-type within that scheme. For schemes that today look "flat" (`user://admin`), the `<type>` is the literal string `default` (so the canonical form is `user://default/admin`). **No shorthand** — operators must type the canonical form (Allen 2026-05-19: no backward compatibility, see §5.11).
+- `<name>` is the instance identity within `<scheme>/<type>`. UUIDs, human names, hashes all OK — opaque to the parser.
+
+**Forbidden**: 1-segment authorities (`user://admin` without canonicalization), 3+ segment paths (`agent://cc/X/extra`), per-plugin top-level schemes (see §5.6).
+
+### §5.2 Sub-resource — query string for action; path is identity
+
+Action invocation uses a query parameter, not a path suffix:
+
+    <scheme>://<type>/<name>?action=<behavior>.<action>
+
+- `?action=<behavior>.<action>` selects the Behavior + action to invoke (e.g. `?action=chat.send`).
+- Path stays the identity. The previous `/behavior/<kind>/<action>` syntax is deprecated and migrated by PR #144.
+- Args to the action travel in the Invocation struct, NOT in the URL. The URL identifies the target + the verb; args are payload.
+
+**Path attributes (sub-resources on the resource itself, e.g. `/quota`, `/acl`) are NOT allowed.** Such attributes become Behaviors on the Kind, accessed via the action query string (`?action=quota.get`).
+
+### §5.3 Content addressing — templates only
+
+Templates carry a `@<hash>` suffix on the name segment:
+
+    template://session/<name>@<hash>
+    template://agent/<name>@<hash>
+
+This is the ONLY sanctioned use of `@<hash>`. Other Kinds use opaque identity (UUID, human name, ETS-assigned).
+
+### §5.4 Scope hierarchy — global ⊂ workspace ⊂ session
+
+Routing rules are scoped to exactly one of three levels:
+
+| Scope | `routing_rules` column shape | Where rules apply |
+|---|---|---|
+| Global | `workspace_uri IS NULL`, `session_uri IS NULL` | Every dispatch in the cluster |
+| Workspace | `workspace_uri = "workspace://X"`, `session_uri IS NULL` | Every dispatch in any session bound to workspace X |
+| Session | `workspace_uri IS NULL`, `session_uri = "session://Y"` | Every dispatch in session Y |
+
+Rules at different scopes COMPOSE additively at dispatch time (the rule evaluator walks all three layers).
+
+**Matcher conditions** (`caller = user://Z`, `mention = agent://X`, etc.) are SEPARATE from scope and live in `matcher_data`. Per-user / per-resource filtering is a matcher condition, not a scope level.
+
+### §5.5 Workspace = Deployment Unit (not folder, not container)
+
+A Workspace is the **bootable configuration unit** — the declaration of what entities should be alive and what templates/rules should be installed after `mix phx.server`. Analogous to a Kubernetes Namespace or a tenant root.
+
+Workspace is NOT:
+- A folder (it has runtime semantics; folders don't)
+- A container OWNING its members (a session belongs to a workspace via WorkspaceRegistry.bind, but the session can be unbound and rebound without destruction)
+- Per-type (one Workspace Kind, not SessionWorkspace + AgentWorkspace + UserWorkspace)
+
+Most clusters have ONE Workspace. Multi-tenant deployments have N.
+
+### §5.6 Scheme allowlist — `@known_schemes` is the source of truth
+
+`Ezagent.URI.@known_schemes` is the single canonical list. The list is fed at runtime by `SpawnRegistry.register/2` (so plugins extending it is a deliberate, audited act). `Ezagent.URI.parse!/1` rejects URIs whose scheme is not in the list.
+
+Schemes that exist in this canonical list (post-PR-#143):
+
+| Scheme | Purpose | Type segments registered today |
+|---|---|---|
+| `agent://` | Conversational entities | `cc`, `curl`, `echo` |
+| `user://` | Human entities | `default` (canonical) |
+| `session://` | Chat rooms | `default` (canonical) |
+| `workspace://` | Deployment units | `default` (canonical) |
+| `template://` | Content-addressed recipes | `agent`, `session` |
+| `resource://` | Platform-level addressable assets | `uploads`, future: `snapshots`, `logs` |
+| `message://` | Message envelopes | `default` (canonical, UUID name) |
+| `system://` | Platform sentinels | `routing`, future: `bootstrap`, `migration-<id>` |
+
+**Plugins MUST NOT introduce a new top-level scheme.** Plugin Kinds are either:
+- A flavor of an existing entity (register a new `<type>` under `agent://`, `user://`, etc.)
+- A side-channel binding on an existing entity (no URI; metadata in the entity's slice)
+
+This kills the `feishu://` anti-pattern (see §5.8).
+
+### §5.7 Synthetic singletons — dissolved
+
+The `routing-admin://default` and `pty-input://default` "synthetic singleton Kind" pattern is removed:
+
+- Routing rule mutation dispatches to the rule's actual scope-owning Kind:
+  - Workspace rules → `workspace://default/X?action=routing.add_rule`
+  - Session rules → `session://default/Y?action=routing.add_rule`
+  - Global rules → `system://routing/default?action=add_rule`
+- PTY input dispatches to the target agent: `agent://cc/X?action=pty.write`.
+
+Workspace, Session, System, and Agent Kinds each acquire the relevant Behavior. The cap check naturally scopes to the rule's actual target instead of a synthetic placeholder.
+
+### §5.8 Feishu re-shape (and the general plugin-side-channel rule)
+
+A plugin that connects Ezagent to an external system (Feishu, Slack, etc.) MUST NOT own a top-level scheme. The plugin:
+
+- Registers a Behavior on the existing core Kind (User for per-user channels, Session for per-room channels).
+- Stores its external-system identifier (feishu_open_id, slack_user_id, etc.) as metadata — either in the entity's slice or in a side join table.
+- Receives + sends through the core Kind's existing dispatch path.
+
+Concrete target shape for Feishu:
+
+- Sending to a user via Feishu: `user://default/X?action=chat.send` with `feishu_id` in the Invocation args.
+- Sending to a room via Feishu: `session://default/Y?action=chat.send`; the feishu plugin's outbound side-channel looks up the room's binding.
+
+`feishu://oc_xxx` Kind is deleted (PR #141). Existing routing rules / KindRegistry entries / audit-log mentions are migrated.
+
+### §5.9 Resource — flat URI; soft workspace binding via slice field
+
+Resources are platform-level addressable assets: `resource://<type>/<id>` (e.g. `resource://uploads/<filename>`).
+
+- **URI shape is always flat.** No scope or workspace embedded in the URI path/query.
+- **Soft workspace binding (when needed)**: the resource's slice/snapshot carries an optional `workspace_uri` field. Allen-confirmed pattern. Dispatch can read it for quota / ACL / cleanup decisions. URI stays flat; the binding is metadata.
+- Attributes (quota, ACL, lifetime) become Behaviors on the resource Kind, accessed via `?action=quota.get` etc. NOT path sub-segments.
+- **Hard binding (deferred)**: should a future requirement demand strict workspace isolation at the URI layer (e.g. cluster-wide tenant separation), migrate to `workspace://default/X/resource/<type>/<id>`. Out of scope for v1.
+
+### §5.10 Singleton naming — `default`
+
+The canonical placeholder name for a singleton instance of a Kind is `default`. (E.g. `user://default/admin` if Allen ever supports an "admin user type", or `system://routing/default` for the global routing-rule mutator.)
+
+`bootstrap` is reserved for cap-bearing sentinels where the name carries meaning: `system://routing/bootstrap` would imply a special migration-time variant.
+
+### §5.11 No backward compatibility — clean rebuild
+
+Allen 2026-05-19: existing DB data is wiped + rebuilt; no operator ergonomic shorthand, no legacy URI form accepted anywhere. Every URI everywhere — CLI input, LV form input, stored data, audit log, KindRegistry, routing matchers — is canonical (`<scheme>://<type>/<name>`) from day 1.
+
+Concrete consequences:
+
+- `Ezagent.URI.parse!/1` rejects un-canonical input (no `default`-injection logic).
+- LV form fields show only the canonical form; placeholders are canonical.
+- The SPEC migration PRs (#140-#146) carry **no legacy-URI rewrite migrations**. They carry schema changes (add columns, drop tables) and code changes. To pick up the new schema on existing dev DBs: `mix ezagent.db.reset` (drops + recreates + reseeds).
+
+The earlier "operator ergonomic shorthand" exception is retracted.
+
+---
+
+## §6 Migration sequence
+
+Each PR is independently shippable + reversible (data) / forward-only (code) where noted.
+
+| PR | Title | Scope | Reversible? |
+|---|---|---|---|
+| #139 | Entity-agnostic load-bearing 3-piece (S-1+S-2+S-3) | login/cap/token + naming | Code: yes (rename + new fn); data: no schema change |
+| #140 | Scope hierarchy + session-scoped rules + SessionTemplate fork replay (S-9+S-10) | `routing_rules.session_uri` column + spawn_from_template install + UI unify | Code: yes; data: yes (additive column) |
+| #141 | Feishu re-shape (Q6) | delete `feishu://` Kind; Receiver Behavior on User | Code: NO (removes Kind); data: rewrite migration |
+| #142 | Delete synthetic singletons (Q5 + PR-G) | routing-admin + pty-input deleted; Behaviors moved to Workspace/Session/System/Agent | Code: yes if staged; data: rewrite migration |
+| #143 | `@known_schemes` runtime ETS + parse!/1 lockdown (Q8) | SoT enforcement | Code: yes; no data |
+| #144 | Query-string action syntax (Q3) | `/behavior/X/Y` → `?action=X.Y` everywhere | Code: yes (large); data: rewrite migration for stored URIs |
+| #145 | Polish — S-4..S-8 from reflection §4 | mention dropdown, /admin/entities, docstrings, etc. | Code: yes; no data |
+
+**Sequencing rationale**:
+- #139-140 are foundation (entity vocab + scope model) — must land first; everything else builds on them.
+- #141-142 are deletes that depend on §5.6 + §5.7 being agreed.
+- #143 locks in §5.6 once all schemes are stable.
+- #144 is the biggest code change — last so it has the fewest dependencies still moving.
+- #145 is polish — any-time, low-priority.
+
+**Cross-cutting**: ARCHITECTURE.md + GLOSSARY.md + IMPLEMENTATION_ROADMAP.md + prototype-design-prompt.md (EN+ZH) get updated alongside the matching PR. They're not their own PR — they ship with the code change they document.
