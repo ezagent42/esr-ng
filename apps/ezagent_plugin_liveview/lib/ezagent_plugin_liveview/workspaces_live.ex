@@ -17,6 +17,7 @@ defmodule EzagentPluginLiveview.WorkspacesLive do
   """
 
   use Phoenix.LiveView
+  alias EzagentDomainUi.IdeShell
   use EzagentDomainUi.Components
   import Phoenix.Component
 
@@ -64,12 +65,36 @@ defmodule EzagentPluginLiveview.WorkspacesLive do
 
   @impl true
   def render(assigns) do
+    # Phase 8 阶段 C: wrap in IdeShell; old standalone page_header replaced
+    # by IDE Shell's top command bar + activity bar.
+    assigns =
+      assign_new(assigns, :current_entity_uri_str, fn ->
+        URI.to_string(assigns.current_entity_uri || URI.parse("entity://user/admin"))
+      end)
+
     ~H"""
-    <div class="max-w-5xl mx-auto px-6 py-8 font-sans text-zinc-900">
-      <.page_header title="Workspaces">
+    <IdeShell.ide_shell
+      current_entity_uri={@current_entity_uri_str}
+      current_path="/admin/workspaces"
+      status={%{agents_alive: 0, bridges: 0, debug_events: 0, version: "dev"}}
+    >
+      <:resource_panel>
+        <div class="p-3">
+          <div class="text-[10px] uppercase tracking-wide text-zinc-500 mb-2">Workspaces</div>
+          <a
+            :for={ws <- @workspaces}
+            href={"/admin/workspaces/#{ws.name}"}
+            class="block px-2 py-1 text-xs hover:bg-zinc-100 rounded font-mono text-zinc-700"
+          >
+            {ws.name}
+          </a>
+        </div>
+      </:resource_panel>
+      <:main_window>
+        <div class="flex-1 overflow-auto px-6 py-6 text-zinc-900">
+        <.page_header title="Workspaces">
         <:subtitle>
           Persisted cluster configurations — members + session templates + routing rules.
-          <a href="/admin" class="text-zinc-600 underline hover:text-zinc-900 ml-1">← /admin</a>
         </:subtitle>
       </.page_header>
 
@@ -128,7 +153,9 @@ defmodule EzagentPluginLiveview.WorkspacesLive do
           </table>
         </.card>
       </section>
-    </div>
+        </div>
+      </:main_window>
+    </IdeShell.ide_shell>
     """
   end
 end

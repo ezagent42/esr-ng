@@ -35,6 +35,7 @@ defmodule EzagentPluginLiveview.RoutingLive do
   """
 
   use Phoenix.LiveView
+  alias EzagentDomainUi.IdeShell
   import Phoenix.Component
 
   alias Ezagent.Routing.{Matcher, RuleStore}
@@ -293,13 +294,43 @@ defmodule EzagentPluginLiveview.RoutingLive do
 
   @impl true
   def render(assigns) do
+    # Phase 8 阶段 C: wrap in IdeShell.
+    assigns =
+      assign_new(assigns, :current_entity_uri_str, fn ->
+        URI.to_string(assigns.current_entity_uri || URI.parse("entity://user/admin"))
+      end)
+
     ~H"""
-    <div style="max-width: 1000px; margin: 0 auto; padding: 24px; font-family: -apple-system, sans-serif;">
-      <header>
+    <IdeShell.ide_shell
+      current_entity_uri={@current_entity_uri_str}
+      current_path="/admin/routing"
+      status={%{agents_alive: 0, bridges: 0, debug_events: 0, version: "dev"}}
+    >
+      <:resource_panel>
+        <div class="p-3 flex flex-col gap-1">
+          <div class="text-[10px] uppercase tracking-wide text-zinc-500 mb-1">Tables</div>
+          <button
+            :for={{label, mod} <- @tables}
+            type="button"
+            phx-click="switch_table"
+            phx-value-table={Atom.to_string(mod)}
+            class={[
+              "text-left px-2 py-1 text-xs rounded font-mono",
+              @current_table == mod
+                && "bg-zinc-100 text-zinc-900"
+                || "text-zinc-600 hover:bg-zinc-100"
+            ]}
+          >
+            {label}
+          </button>
+        </div>
+      </:resource_panel>
+      <:main_window>
+        <div class="flex-1 overflow-auto px-6 py-6 text-zinc-900">
+        <header>
         <h1 style="font-size: 22px; font-weight: 600;">Routing Rules</h1>
         <p style="font-size: 13px; color: #666;">
           Global RoutingRegistry tables. Per-workspace routing_rules stay config-only metadata (visible on Workspace detail page).
-          <a href="/admin" style="margin-left: 16px; color: #0969da;">← /admin</a>
         </p>
       </header>
 
@@ -449,7 +480,9 @@ defmodule EzagentPluginLiveview.RoutingLive do
 
         <p :if={@flash_error} style="color: #cf222e; font-size: 13px; margin-top: 8px;">{@flash_error}</p>
       </section>
-    </div>
+        </div>
+      </:main_window>
+    </IdeShell.ide_shell>
     """
   end
 
