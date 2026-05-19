@@ -34,6 +34,17 @@ defmodule EzagentPluginLiveview.PtyTerminalLive do
             EzagentCore.PubSub,
             Ezagent.PluginCcPty.PtyServer.output_topic(agent_uri)
           )
+
+          # PR #128 — ttyd-style initial render. Two complementary
+          # nudges so the operator never sees a black terminal:
+          # (1) replay the PtyServer's recent buffer so the LAST
+          # ANSI-rendered screen the TUI emitted shows immediately
+          # (sufficient for most cases — claude's full screen is
+          # almost always within the last 64KB of output);
+          # (2) trigger a winsize nudge so the TUI redraws fresh
+          # output through the live PubSub path, covering the case
+          # where the last redraw is older than the buffer window.
+          send(self(), {:initial_render, agent_uri})
         end
 
         {:ok,
@@ -87,6 +98,26 @@ defmodule EzagentPluginLiveview.PtyTerminalLive do
   def handle_info({:pty_output, _agent_uri, chunk}, socket) do
     {:noreply, push_event(socket, "pty_chunk", %{bytes: chunk})}
   end
+
+  # PR #128 — push the PtyServer's accumulated stdout buffer to
+  # xterm immediately on mount, then trigger a winsize nudge to
+  # provoke a fresh TUI redraw. Both fail silently if the agent
+  # isn't a live PtyServer (e.g. v2-only Channel-bridged agents
+  # with no local PTY).
+  def handle_info({:initial_render, agent_uri}, socket) do
+    case Ezagent.PluginCcPty.PtyServer.snapshot_buffer(agent_uri) do
+      {:ok, buf} when byte_size(buf) > 0 ->
+        socket = push_event(socket, "pty_chunk", %{bytes: buf})
+        _ = Ezagent.PluginCcPty.PtyServer.trigger_redraw(agent_uri)
+        {:noreply, socket}
+
+      _ ->
+        _ = Ezagent.PluginCcPty.PtyServer.trigger_redraw(agent_uri)
+        {:noreply, socket}
+    end
+  end
+
+  def handle_info(_other, socket), do: {:noreply, socket}
 
   @impl true
   def handle_event("pty_input", %{"bytes" => bytes}, socket) when is_binary(bytes) do
