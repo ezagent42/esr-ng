@@ -8,8 +8,17 @@ defmodule EzagentPluginCurlAgent.Application do
      Kind.Server children spawned by the Template Class)
   2. Register `(Entity.CurlAgent, :receive)`, `(Entity.CurlAgent, :reset_conversation)`,
      `(Entity.CurlAgent, :configure)` → `Behavior.CurlAgent` in BehaviorRegistry
-  3. Register `curl-agent://` scheme spawn fn in SpawnRegistry so any
-     dispatch against `curl-agent://x` materializes a Kind on demand
+  3. Register `curl-agent://` scheme spawn fn for **back-compat only** —
+     PR #129 (Allen 2026-05-19) made `agent://` the preferred scheme
+     for new curl-agent instances so they appear in the standard
+     floating-agents + @-mention dropdowns (those filter on
+     `agent://`). Existing `curl-agent://...` rows keep working via
+     this spawn fn; the chat plugin's `agent://` spawn fn handles
+     normal cc-bridge agents, and `agent://my-deepseek`-style
+     curl-agent URIs are spawned directly by the Template Class
+     into KindRegistry at workspace load time (so SpawnRegistry's
+     KindRegistry-first lookup returns the existing CurlAgent pid
+     before chat's fn would create an Entity.Agent — no collision).
   4. Register `curl.agent` Template Class so workspaces can declare
      instances via the standard add-template UI
   """

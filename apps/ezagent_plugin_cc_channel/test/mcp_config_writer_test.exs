@@ -47,7 +47,11 @@ defmodule EzagentPluginCcChannel.McpConfigWriterTest do
     config = path |> File.read!() |> Jason.decode!()
 
     assert config["mcpServers"]["esr-bridge"]["command"] == "uv"
-    assert config["mcpServers"]["esr-bridge"]["args"] == ["run", "python3", "/fake/path/ezagent_mcp_bridge.py"]
+    # PR #129: uv run --script <path> triggers PEP 723 metadata reading
+    # so the websockets dep auto-installs on first run. `uv run python3 <path>`
+    # invokes Python directly and skips PEP 723 → ModuleNotFoundError.
+    assert config["mcpServers"]["esr-bridge"]["args"] ==
+             ["run", "--script", "/fake/path/ezagent_mcp_bridge.py"]
 
     env = config["mcpServers"]["esr-bridge"]["env"]
     assert env["EZAGENT_AGENT_URI"] == agent_uri

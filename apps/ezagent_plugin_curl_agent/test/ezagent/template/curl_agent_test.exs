@@ -26,11 +26,33 @@ defmodule Ezagent.PluginCurlAgent.TemplateTest do
                })
     end
 
-    test "rejects non-curl-agent URI scheme" do
-      assert {:error, {:bad_agent_uri_scheme, "agent"}} =
+    test "accepts agent:// scheme (PR #129 — preferred so it shows in mention/floating dropdowns)" do
+      assert :ok =
                Template.validate(%{
                  "class" => "curl.agent",
-                 "agent_uri" => "agent://wrong-scheme",
+                 "agent_uri" => "agent://my-deepseek",
+                 "provider" => "deepseek",
+                 "api_url" => "https://x.test/chat",
+                 "model" => "x"
+               })
+    end
+
+    test "accepts curl-agent:// scheme (back-compat for rows created pre-PR-129)" do
+      assert :ok =
+               Template.validate(%{
+                 "class" => "curl.agent",
+                 "agent_uri" => "curl-agent://legacy",
+                 "provider" => "deepseek",
+                 "api_url" => "https://x.test/chat",
+                 "model" => "x"
+               })
+    end
+
+    test "rejects unsupported URI scheme" do
+      assert {:error, {:bad_agent_uri_scheme, "user"}} =
+               Template.validate(%{
+                 "class" => "curl.agent",
+                 "agent_uri" => "user://wrong-scheme",
                  "provider" => "deepseek",
                  "api_url" => "https://x.test/chat",
                  "model" => "x"

@@ -56,9 +56,16 @@ defmodule Ezagent.PluginCurlAgent.Template do
   defp check_class(%{"class" => other}), do: {:error, {:wrong_class, other}}
   defp check_class(_), do: {:error, :missing_class_field}
 
+  # PR #129 (Allen 2026-05-19 03:10): accept both `agent://` (preferred,
+  # uniform with the rest of the system — floating-agents dropdown and
+  # @-mention dropdown filter on `agent://` scheme) AND `curl-agent://`
+  # (legacy, kept for back-compat with rows created before this PR).
+  # The Kind module (Entity.CurlAgent) differentiates behaviour from
+  # the bridge-backed Entity.Agent — URI scheme is just a namespace
+  # for routing.
   defp check_agent_uri(%{"agent_uri" => uri_str}) when is_binary(uri_str) and uri_str != "" do
     case URI.new(uri_str) do
-      {:ok, %URI{scheme: "curl-agent"}} -> :ok
+      {:ok, %URI{scheme: scheme}} when scheme in ["agent", "curl-agent"] -> :ok
       {:ok, %URI{scheme: scheme}} -> {:error, {:bad_agent_uri_scheme, scheme}}
       _ -> {:error, {:bad_agent_uri, uri_str}}
     end
@@ -152,9 +159,9 @@ defmodule Ezagent.PluginCurlAgent.Template do
       %{
         name: "agent_uri",
         type: :uri,
-        label: "Agent URI",
+        label: "Agent URI (use agent:// so it shows in mention/floating dropdowns)",
         required: true,
-        placeholder: "curl-agent://my-deepseek"
+        placeholder: "agent://my-deepseek"
       },
       %{
         name: "provider",
