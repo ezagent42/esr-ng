@@ -216,6 +216,60 @@ This is the **plugin isolation north star** rule made specific to URIs.
 
 (Discussion appended here as it progresses. Newest entry at top within this section.)
 
+### 2026-05-19 — Round 2: Workspace X confirmed + routing-admin rethink + feishu confirmation
+
+**Workspace → X (Deployment Unit) ✓**
+
+Allen confirms X and extends the scope hierarchy: `global ⊂ workspace ⊂ session ⊂ user/resource/...`
+
+**Clarifying note on the extension.** "session ⊂ user/resource/..." conflates two ideas worth separating:
+
+- **Scope = "where the rule applies"** — global / workspace / session. These are containment relationships (a session is inside a workspace; a workspace is inside global). A rule scoped to session://Y fires only when the dispatch is "within" Y.
+- **Matcher condition = "what the rule matches on"** — caller URI, receiver URI, mention, etc. These filter WHICH dispatches inside a scope fire. `{type: mention, arg: agent://X}` is a matcher; it doesn't need user:// to be a scope level.
+
+Today's `routing_rules.matcher_data` already lets a rule say "fires only when caller is user://Z" via the `from` matcher. So "user/resource as a scope level" is already expressible as a matcher condition WITHIN session/workspace/global. Adding them as scope levels would duplicate.
+
+**Recommendation: scope levels stay 3 (global ⊂ workspace ⊂ session). Per-user / per-resource targeting stays a matcher condition.** Cleaner separation of concerns, no duplication.
+
+If Allen actually wants user-scoped rules (e.g. "user Z has their own private rule table independent of any session"), that's a different feature — call it user preferences or per-user routing overrides — and worth designing as such, not by overloading scope.
+
+**Q5 routing-admin rethink ✓ (Allen's alternative is cleaner)**
+
+Allen: "为什么需要 routing-admin singleton 注入，而不是 `workspace://xxx/routing?action=add_rule&operator=xxx`?"
+
+He's right — the singleton was a v1 expedient. Better model:
+
+- **Workspace-scoped rule mutation**: dispatch to `workspace://X?action=routing.add_rule` (under Q3 query string). Cap check naturally scoped (caller needs `routing.add_rule` cap on `workspace://X`).
+- **Global rule mutation**: dispatch to `system://routing?action=add_rule`. `system://` is already in @known_schemes; carries "this is platform-level, requires platform caps".
+- **Session-scoped (per S-10)**: dispatch to `session://Y?action=routing.add_rule`.
+
+**`routing-admin://default` synthetic singleton goes away.** Workspace + Session + System Kinds acquire a `routing` Behavior. Cleaner, eliminates a synthetic Kind, makes cap-scoping match the rule's actual scope.
+
+Same logic applies to `pty-input://default` — it's another v1 synthetic singleton. PTY input dispatch could be `agent://cc/X?action=pty.write` (the input goes to the agent it targets, not to a global PTY-input singleton). PR-G candidate.
+
+**Q6 feishu re-shape confirmed ✓**
+
+Allen: "本来的考虑就是最好是向 `user://xxx/?feishu_id=oc_xxx` 发送，从而能复用 user/agent 本来已有的 behavior"
+
+Exactly the target. The shape:
+
+- **Sending to a user via feishu**: `user://X?action=chat.send&feishu_id=oc_xxx` (or, cleaner, the feishu_id is metadata in the Invocation args, not the URI query). The user binding lookup happens in the feishu plugin's outbound Behavior; the URI just identifies the user.
+- **Sending to a session via feishu**: `session://Y?action=chat.send`. The session's feishu binding (the chat_id) is a sub-resource OR a UserBinding lookup — feishu plugin handles the side-channel.
+- **`feishu://oc_xxx` Kind**: deleted. Receiver Behavior moves to register on User Kind (or Session Kind, for room-targeted receives).
+
+**What this means concretely:**
+- No more "feishu_user_bindings table is the source of truth for feishu_id → user_uri." That table stays as-is (a join table), but the URI shape changes.
+- Existing routing rules referencing `feishu://oc_xxx` get rewritten by migration to the user/session URI form.
+- KindRegistry entries for `feishu://*` go away.
+
+Impact: substantial migration + plugin refactor. Worth doing in PR-F as planned. Risk is BroadcastInvariantTests for the feishu fan-out path — the plugin's Receiver Kind is currently a Process that holds an inbox; if Behavior moves to User, the inbox semantics need re-homing on the User process (which already has Identity Behavior — add Feishu Behavior alongside).
+
+**Q4 (resource:// namespace) — now answerable under X + Q1 outcomes:**
+
+Resources are platform-level downloadable assets that don't belong to any one workspace (uploads, snapshots, logs all cross workspaces). Resource URI shape per Q1: `resource://<type>/<id>`. Today: `resource://uploads/<filename>`. Future: `resource://snapshots/<id>`, `resource://logs/<id>`. ResourceNamespaceRegistry mirroring AgentTypeRegistry — plugin registers a `<type>` + fetcher. Decision A from §3 Q4.
+
+---
+
 ### 2026-05-19 — Round 1: Allen's first pass
 
 **Allen's verdicts on the 8 questions:**
