@@ -49,6 +49,12 @@ defmodule EzagentCore.Application do
     # Attach telemetry handlers after the writer is up. Idempotent on restart.
     :ok = Ezagent.Audit.attach()
 
+    # PR #145 (SPEC v2 §5.6 §5.11) — seed the runtime URI scheme allowlist
+    # BEFORE any code path that calls `Ezagent.URI.parse!/1` or
+    # `Ezagent.SpawnRegistry.register/2` (which now co-registers schemes).
+    # EtsOwner already created the table; this populates the 6 core schemes.
+    :ok = seed_uri_schemes()
+
     # PR #146 (SPEC v2 §5.7) — synthetic singleton `routing-admin://default`
     # dissolved. `Ezagent.Behavior.Routing` is registered against the
     # scope-owning Kinds (Workspace + Session + System) in their respective
@@ -71,6 +77,21 @@ defmodule EzagentCore.Application do
     Code.ensure_loaded?(Mix) and Mix.env() == :test
   rescue
     _ -> false
+  end
+
+  # PR #145 — seed the 6 SPEC §5.6 schemes into SchemeRegistry. Idempotent
+  # (`:ets.insert/2` overwrites the same key), safe on supervisor restart.
+  # Idempotent `SchemeRegistry.init/0` covers the rare case where EtsOwner
+  # has not yet finished initializing on a hot path — in normal boot,
+  # EtsOwner is child ① in the supervision tree so the table is ready.
+  defp seed_uri_schemes do
+    :ok = Ezagent.URI.SchemeRegistry.init()
+
+    Enum.each(~w(entity workspace session template resource system), fn s ->
+      :ok = Ezagent.URI.SchemeRegistry.register(s)
+    end)
+
+    :ok
   end
 
   # PR #146 — register Routing Behavior on the System Kind, spawn the

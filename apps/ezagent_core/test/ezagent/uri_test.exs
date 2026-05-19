@@ -29,20 +29,20 @@ defmodule Ezagent.URITest do
     end
 
     test "raises on unknown scheme" do
-      assert_raise ArgumentError, ~r/not in known set/, fn ->
+      assert_raise ArgumentError, ~r/not registered/, fn ->
         Ezagent.URI.parse!("http://example.com")
       end
     end
 
     test "rejects deleted user:// scheme" do
-      assert_raise ArgumentError, ~r/not in known set/, fn ->
+      assert_raise ArgumentError, ~r/not registered/, fn ->
         # NOTE: literal `user://admin` — the deleted scheme is the point.
         Ezagent.URI.parse!("user" <> "://admin")
       end
     end
 
     test "rejects deleted agent:// scheme" do
-      assert_raise ArgumentError, ~r/not in known set/, fn ->
+      assert_raise ArgumentError, ~r/not registered/, fn ->
         # NOTE: literal `agent://cc/demo` — the deleted scheme is the point.
         Ezagent.URI.parse!("agent" <> "://cc/demo")
       end

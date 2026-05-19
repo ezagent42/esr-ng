@@ -45,10 +45,18 @@ defmodule Ezagent.SpawnRegistry do
 
   Plugins call this in their `Application.start/2`. Re-registration
   is intentional — late-binding plugins win.
+
+  ## PR #145 — co-registers scheme into `Ezagent.URI.SchemeRegistry`
+
+  This is the **lockdown** (SPEC v2 §5.6 §5.11): plugins can extend
+  the URI scheme allowlist ONLY through this audited path. A plugin
+  cannot write directly to `:ezagent_scheme_registry` ETS in normal
+  code, so any new scheme has a registered spawn fn to back it.
   """
   @spec register(String.t(), (URI.t() -> {:ok, pid()} | {:error, term()})) :: :ok
   def register(scheme, spawn_fn) when is_binary(scheme) and is_function(spawn_fn, 1) do
     :ets.insert(@table, {scheme, spawn_fn})
+    :ok = Ezagent.URI.SchemeRegistry.register(scheme)
     :ok
   end
 
