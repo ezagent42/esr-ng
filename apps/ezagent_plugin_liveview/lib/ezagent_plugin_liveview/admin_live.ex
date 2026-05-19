@@ -99,6 +99,14 @@ defmodule EzagentPluginLiveview.AdminLive do
       |> assign(:compose_form, to_form(%{"text" => "", "agent_uri" => ""}, as: "chat"))
       |> assign(:new_session_form, to_form(%{"short_name" => ""}, as: "new_session"))
       |> assign(:cc_events, [])
+      # PR-B: file uploads. 5 files * 10 MB cap; matches Feishu's outbound
+      # send_file limit (so what we accept here can be forwarded without
+      # post-hoc rejection). :any extension — admin trusts the operator.
+      |> allow_upload(:attachments,
+        accept: :any,
+        max_entries: 5,
+        max_file_size: 10 * 1024 * 1024
+      )
 
     {:ok, socket}
   end
@@ -189,16 +197,55 @@ defmodule EzagentPluginLiveview.AdminLive do
     end
   end
 
+  # PR-B: phx-change for the compose form — needed for live_file_input to
+  # report upload progress + errors back to the LV.
+  def handle_event("validate_compose", _params, socket) do
+    {:noreply, socket}
+  end
+
+  def handle_event("cancel_upload", %{"ref" => ref}, socket) do
+    {:noreply, cancel_upload(socket, :attachments, ref)}
+  end
+
   def handle_event("chat_compose", %{"chat" => %{"text" => text} = params}, socket)
-      when is_binary(text) and text != "" do
+      when is_binary(text) do
     mentions =
       case Map.get(params, "agent_uri", "") do
         "" -> []
         uri_str -> [URI.new!(uri_str)]
       end
 
+    # PR-B: consume any uploaded files. Move each to $EZAGENT_HOME/uploads/
+    # under a uuid-prefixed name; record the resource:// URI for later
+    # display + (future) plugin forwarding.
+    File.mkdir_p!(Ezagent.Home.path("uploads"))
+
+    attachments =
+      consume_uploaded_entries(socket, :attachments, fn %{path: tmp_path}, entry ->
+        uuid = Ecto.UUID.generate()
+        safe_name = sanitize_filename(entry.client_name)
+        stored_name = "#{uuid}-#{safe_name}"
+        dest = Path.join(Ezagent.Home.path("uploads"), stored_name)
+        File.cp!(tmp_path, dest)
+        {:ok, URI.parse("resource://uploads/#{stored_name}")}
+      end)
+
+    if text == "" and attachments == [] do
+      {:noreply,
+       assign(socket, :flash_error, "Message text or at least one attachment is required.")}
+    else
+      send_chat_message(socket, text, attachments, mentions)
+    end
+  end
+
+  def handle_event("chat_compose", _params, socket) do
+    {:noreply, assign(socket, :flash_error, "Message text or at least one attachment is required.")}
+  end
+
+  defp send_chat_message(socket, text, attachments, mentions) do
     msg =
-      Ezagent.Message.new(socket.assigns.caller_uri, %{text: text, attachments: []},
+      Ezagent.Message.new(socket.assigns.caller_uri,
+        %{text: text, attachments: attachments},
         mentions: mentions
       )
 
@@ -227,10 +274,6 @@ defmodule EzagentPluginLiveview.AdminLive do
       {:error, reason} ->
         {:noreply, assign(socket, :flash_error, friendly_error("Send", reason))}
     end
-  end
-
-  def handle_event("chat_compose", _params, socket) do
-    {:noreply, assign(socket, :flash_error, "Message text is required.")}
   end
 
   # Phase 4-completion Spec 05 §A.2.4 — friendly flash for cap-deny.
@@ -394,6 +437,7 @@ defmodule EzagentPluginLiveview.AdminLive do
           compose_form={@compose_form}
           flash_error={@flash_error}
           oldest_cursor={@oldest_cursor}
+          uploads={@uploads}
         />
 
         <.member_panel members={@session_members} />
@@ -535,6 +579,7 @@ defmodule EzagentPluginLiveview.AdminLive do
       sender: sender_str,
       sender_kind: sender_kind(sender_str),
       text: body_text(msg.body),
+      attachments: body_attachments(msg.body),
       at: msg.inserted_at
     }
   end
@@ -550,6 +595,33 @@ defmodule EzagentPluginLiveview.AdminLive do
   defp body_text(%{text: t}) when is_binary(t), do: t
   defp body_text(%{"text" => t}) when is_binary(t), do: t
   defp body_text(_), do: ""
+
+  # PR-B: render-side attachment representation. Each entry becomes
+  # `{display_name, download_path}` where the path resolves to a
+  # GET /admin/uploads/:filename route (UploadsController).
+  defp body_attachments(%{attachments: list}) when is_list(list), do: Enum.map(list, &att_to_link/1)
+  defp body_attachments(%{"attachments" => list}) when is_list(list),
+    do: Enum.map(list, &att_to_link/1)
+
+  defp body_attachments(_), do: []
+
+  # `resource://uploads/<filename>` → host="uploads", path="/<filename>"
+  defp att_to_link(%URI{scheme: "resource", host: "uploads", path: "/" <> filename}),
+    do: {display_name(filename), "/admin/uploads/#{filename}"}
+
+  defp att_to_link(%URI{} = uri),
+    do: {URI.to_string(uri), URI.to_string(uri)}
+
+  defp att_to_link(s) when is_binary(s) do
+    case URI.parse(s) do
+      %URI{} = uri -> att_to_link(uri)
+      _ -> {s, s}
+    end
+  end
+
+  # Stored as `<uuid>-<original>`. Drop the uuid prefix for display.
+  defp display_name(<<_uuid::binary-size(36), "-", rest::binary>>), do: rest
+  defp display_name(other), do: other
 
   defp ctx(socket) do
     %{
@@ -618,4 +690,20 @@ defmodule EzagentPluginLiveview.AdminLive do
   defp safe_mode("call"), do: {:ok, :call}
   defp safe_mode("cast"), do: {:ok, :cast}
   defp safe_mode(other), do: {:error, "unsupported mode: #{inspect(other)}"}
+
+  # PR-B: strip path separators + any chars that misbehave in URLs/filesystems.
+  # We prepend a uuid anyway so collisions aren't a concern; this is purely
+  # about keeping the stored filename printable + safe for HTTP serving.
+  defp sanitize_filename(name) when is_binary(name) do
+    name
+    |> Path.basename()
+    |> String.replace(~r/[^\w\.\-]+/, "_")
+    |> String.slice(0, 200)
+    |> case do
+      "" -> "file"
+      s -> s
+    end
+  end
+
+  defp sanitize_filename(_), do: "file"
 end
