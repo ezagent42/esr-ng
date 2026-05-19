@@ -83,6 +83,10 @@ defmodule EzagentWeb.Router do
 
       # Phase 6 PR 15: Feishu open_id ↔ local user bindings admin UI.
       live "/admin/feishu/bindings", FeishuBindingsLive
+
+      # Phase 8 阶段 D: aggregated pages (new for IDE Shell IA).
+      live "/admin/settings", SettingsLive
+      live "/admin/observability", ObservabilityLive
     end
   end
 
