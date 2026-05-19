@@ -8,61 +8,65 @@ Treat this document as the contract. Iterate on visuals and microcopy however yo
 
 ## 1. Usage logic — what ezagent IS
 
-ezagent is a **multi-agent orchestration platform**. Three things matter:
+ezagent is a **multi-agent orchestration platform**. Four things matter:
 
-1. **Humans talk to agents.** A person opens the admin, types into a chat, and an LLM-backed (or scripted) agent replies.
-2. **Agents talk to other agents.** An agent can `@mention` another agent in a chat room; the platform routes the message accordingly.
-3. **Everything is mediated by Sessions.** A `Session` is a chat room. Anyone — human or agent — who is a member of the Session sees its messages.
+1. **Entity-type-agnostic.** Whether the participant is a human or an agent, they reach the system through the same surfaces — humans via the browser, agents via automation tools like agent-browser — and through the same API and the same CLI. There is no surface that is reserved for humans only or for agents only.
+2. **Humans talk to agents.** A person opens the admin, types into a chat, and an LLM-backed (or scripted) agent replies.
+3. **Agents talk to other agents.** An agent can `@mention` another agent in a chat room; the platform routes the message accordingly.
+4. **Everything is mediated by Sessions.** A `Session` is a chat room. Anyone — human or agent — who is a member of the Session sees its messages.
 
-Today (v1, just reached this evening) the system is a multi-user, multi-agent IM platform with PTY-in-browser support and a remote API for non-PTY agents. The admin UI is operator-facing: an operator (a person logged in with a `user://` URI) configures Workspaces, opens chats, observes routing, and pokes at agents directly when needed.
+Today (v1, just reached this evening) the system is a multi-user, multi-agent IM platform with PTY-in-browser support and a remote API for non-PTY agents. ezagent is the integration of all of it: an **Entity** (a person or agent that signs in with a `user://` or `agent://` URI) configures Workspaces, opens chats, observes routing, and pokes at other Entities directly when needed.
 
-### Vocabulary the operator sees everywhere
+### Vocabulary every Entity sees everywhere
 
 | Term | What it is | Example URI |
 |---|---|---|
-| **User** | A human principal that can log in | `user://allen` |
-| **Agent** | A non-human participant in chat (LLM, script, bridge) | `agent://cc-architect`, `curl-agent://deepseek-coder` |
-| **Session** | A chat room — has members + messages + routing | `session://review-room` |
-| **DM** | An implicit 1:1 Session between a user and an agent | `session://allen-cc-architect-dm` |
+| **Entity** | Any first-class participant — human or agent — that can hold caps, join Sessions, and dispatch | `user://allen`, `agent://cc/cc-architect` |
+| **User** | An Entity sub-type whose principal is a human (logs in with password) | `user://allen` |
+| **Agent** | An Entity sub-type that is non-human (LLM, script, bridge). URI is typed: `agent://<type>/<name>` per PR #131 | `agent://cc/cc-architect`, `agent://curl/deepseek-coder` |
+| **Session** | A chat room — has members + messages + routing. Members are URIs, regardless of Entity sub-type | `session://review-room` |
+| **DM** | An implicit 1:1 Session between two Entities | `session://allen-cc-architect-dm` |
 | **Workspace** | A persisted cluster config: members + session_templates + routing_rules | `workspace://research` |
 | **Kind** | The type identifier for any Live thing (User, Session, Agent, Workspace) | — |
 | **Behavior** | A capability surface an instance implements (e.g. `chat.send`) | — |
-| **Capability (cap)** | A signed grant letting a user invoke `kind.behavior` on an instance | `chat.send@session://oncall` |
+| **Capability (cap)** | A signed grant letting an Entity invoke `kind.behavior` on an instance | `chat.send@session://oncall` |
 | **RoutingRegistry** | Global table of rules: matcher → receivers | — |
-| **Template Class** | A spawnable Kind blueprint registered by a plugin (e.g. `cc.pty`) | — |
+| **Template Class** | A spawnable Kind blueprint registered by a plugin (e.g. `cc.agent`) | — |
 
 ### Agent flavors today
 
-The operator should be able to recognise these at a glance — give each a distinct icon/colour:
+Every Entity should be recognisable at a glance — give each Kind / agent type a distinct icon/colour:
 
-| Kind | Behaviour | Notes for the designer |
+| Template Class | Behaviour | Notes for the designer |
 |---|---|---|
-| `cc.pty` | Spawns a real **Claude Code TUI** inside a PTY on the server | This is the **only Kind with an xterm.js view** — operators love seeing the TUI |
-| `curl.agent` | Posts messages to a remote HTTP completion API (DeepSeek, OpenAI, etc.) | Needs an API key from the user's KeyVault |
-| `cc.channel_instance` | Token-mints a bridge for an external Claude Code process to join via `/cc_socket` | Operator rarely sees this directly; surface it as a child of cc.pty rows |
+| `cc.agent` (`mode: local-pty`) | Spawns a real **Claude Code TUI** inside a PTY on the server | The local-pty mode is the **only one with an xterm.js view** — Entities of any sub-type love seeing the TUI |
+| `cc.agent` (`mode: remote-channel`) | Token-mints a bridge for an external Claude Code process to join via `/cc_socket` | Replaces the old `cc.channel_instance` split; surface it as another mode of the same `cc.agent` Template (PR-D2, 2026-05-19). Rarely the focal row; usually surfaced as a child of a local-pty row when both exist for one agent |
+| `curl.agent` | Posts messages to a remote HTTP completion API (DeepSeek, OpenAI, etc.) | Needs an API key from the caller Entity's KeyVault. URI shape: `agent://curl/<name>` |
 | `feishu.chat_binding` | Binds a Feishu (Lark) group/DM to a local Session | Bidirectional bridge; both sides see all messages |
-| `echo` | Test fixture that echoes back | Use to teach the operator the system without spending tokens |
+| `echo` | Test fixture that echoes back | Use to teach a new Entity the system without spending tokens |
 
 ### Two modes the main interaction window must support
 
 This is the key visual differentiator from a generic Slack-clone:
 
 - **Chat mode** — the Slack/Discord/Lark experience: scrolling message stream, compose box, member roster on the right. Works for every agent flavour.
-- **PTY mode** — when the agent is a `cc.pty`, the operator can drop directly into an **xterm.js view of the live Claude Code TUI**. They see the same TUI the CC process draws to its terminal — full colours, cursor blinking, scroll back. Keystrokes flow back to the PTY.
+- **PTY mode** — when the agent is a `cc.agent` in `local-pty` mode, the viewer can drop directly into an **xterm.js view of the live Claude Code TUI**. They see the same TUI the CC process draws to its terminal — full colours, cursor blinking, scroll back. Keystrokes flow back to the PTY.
 
-The design must let the operator **toggle** between Chat and PTY for the same agent, or place them **side-by-side**. A tab strip inside the main pane, a split-pane toggle in the header, or a slide-over drawer are all fine — pick what reads cleanly. The split-pane option is particularly nice because the operator can drive the TUI directly with the keyboard while watching the room-facing chat conversation simultaneously.
+The design must let any viewer **toggle** between Chat and PTY for the same agent, or place them **side-by-side**. A tab strip inside the main pane, a split-pane toggle in the header, or a slide-over drawer are all fine — pick what reads cleanly. The split-pane option is particularly nice because a human can drive the TUI directly with the keyboard while watching the room-facing chat conversation simultaneously.
 
-### How an operator actually uses it (a day in the life)
+### How a session actually unfolds (a day in the life)
 
-1. Lands on `/login`, signs in as `user://allen`.
-2. Arrives at `/admin`. Left sidebar shows their Sessions (rooms they're members of) and a few "Floating agents" (agents spun up but not yet assigned to any room).
-3. Picks `session://review-room`. Main pane shows the chat stream; right pane shows members (a few humans + a few agents).
-4. Types `@agent://cc-architect please look at PR #42`. Send. The mention routes to that agent via the RoutingRegistry, the cc.pty agent reads the message, posts a reply back into the Session.
-5. Operator notices the reply is sluggish, opens the agent's DM directly, toggles to PTY mode, sees the live TUI mid-reply. Watches it work, sends a clarifying keystroke directly into the TUI.
+The viewer below is `user://allen`, but the flow is identical when the actor is an agent driving the same surfaces via agent-browser plus the `/api/v1` endpoint.
+
+1. Lands on `/login`, signs in as `user://allen` (or, for an agent: POSTs `/login` with `agent://curl/myself` + secret).
+2. Arrives at `/admin`. Left sidebar shows the Entity's Sessions (rooms it is a member of) and a few "Floating agents" (agents spun up but not yet assigned to any room).
+3. Picks `session://review-room`. Main pane shows the chat stream; right pane shows members (any mix of humans and agents — they live in the same `members` map).
+4. Types `@agent://cc/cc-architect please look at PR #42`. Send. The mention routes to that agent via the RoutingRegistry, the `cc.agent` reads the message, posts a reply back into the Session. The exact same path fires when an agent in the room `@mentions` another agent — Routing has no human/agent special case.
+5. Allen notices the reply is sluggish, opens the agent's DM directly, toggles to PTY mode, sees the live TUI mid-reply. Watches it work, sends a clarifying keystroke directly into the TUI.
 6. Goes to `/admin/workspaces/research`, adds a new `curl.agent` Template using the auto-derived form, then bounces back to chat where the new agent has joined.
-7. Drops by `/admin/routing` to add a `from` rule that copies everything `user://billing` says into `session://oncall`.
+7. Drops by `/admin/routing` to add a `from` rule that copies everything `user://billing` says into `session://oncall`. The same rule could equally read `agent://feishu/customer-bot` as its `from` argument — Routing matchers compare URI to URI without caring which scheme is on which side.
 
-The prototype should make every step of that flow feel inevitable.
+The prototype should make every step of that flow feel inevitable for both human and agent actors.
 
 ---
 
@@ -105,7 +109,7 @@ The Phoenix router lives at `apps/ezagent_web/lib/ezagent_web/router.ex`. Here i
 | `/_health` | JSON liveness probe |
 | `/api/cc-events` | POST endpoint for CC hook error reports |
 | `/api/feishu/webhook` | Feishu webhook receiver |
-| `/api/v1`, `/api/v1/:kind/:action` | Auto-derived REST API |
+| `/api/v1`, `/api/v1/:kind/:action` | Auto-derived REST API — the entity-agnostic dispatch surface; any caller (LV-driven human, agent-browser-driven agent, CLI) can invoke any `kind.behavior.action` with a bearer token |
 | `/dev/dashboard` | LiveDashboard (dev only) |
 
 You do not need to design the API or dev routes. The prototype only needs HTML for the rows in the **Auth** and **Admin core** tables.
@@ -123,7 +127,7 @@ You do not need to design the API or dev routes. The prototype only needs HTML f
 The current LV ships a thin top-nav of 5 horizontal anchor links above the AdminLive layout. That worked for v1 but does not scale. Please design a proper **left sidebar shell**:
 
 - **Logo + product wordmark** at the top.
-- **Logged-in user pill** (avatar, `user://allen`, sign-out) at the top right or bottom-of-sidebar.
+- **Logged-in Entity pill** (avatar, current URI — `user://allen` or `agent://curl/myself`, sign-out) at the top right or bottom-of-sidebar. The pill must accept either Entity sub-type — agents that drive the admin via agent-browser see the same affordance.
 - **Primary nav sections** (collapsible groups):
   - **Chat** — list of the user's Sessions + DMs (this is the "live" working surface).
   - **Workspaces** — link to list, expand to show recent workspaces.
@@ -199,9 +203,9 @@ These are the heart of the design system; please make them feel polished and con
 | `<SessionList>` | App shell left sidebar | Group by section: "Direct messages" (DMs) and "Channels" (multi-party Sessions). DMs render as `<Avatar> @other-party`; Channels render as `# session-short-name`. Selected item is highlighted. Inline "+ New" affordance at section bottom. |
 | `<FloatingAgentList>` | App shell left sidebar (bottom) | Shows agents that exist in the registry but are not members of any Session yet. Click a row to add the agent to a Session via a small dropdown. |
 | `<ChatStream>` | ChatHubPage main pane | Reverse-chronological message bubbles, with sender badge, timestamp, "Load older" button at top. Auto-scroll on new messages. Distinguish bubble background by sender Kind (user vs agent vs system). |
-| `<MessageComposer>` | Below `<ChatStream>` | Mention dropdown (`@agent_uri`), text input, send button. Disable + show hint when no agents are mentionable in the current Session. |
-| `<MemberRoster>` | ChatHubPage right pane | Table of members with `<StatusDot>`, URI, last-seen. Distinguish humans from agents visually. |
-| `<TemplateClassPicker>` | WorkspaceDetailPage | Horizontal button row of registered Template Classes (`cc.pty`, `curl.agent`, `feishu.chat_binding`, `echo`, …) plus a "JSON (custom)" escape hatch. Click a class → the form below adapts. |
+| `<MessageComposer>` | Below `<ChatStream>` | Mention dropdown — should list **every member URI of the current Session**, regardless of Entity sub-type (`user://`, `agent://`). The current LV restricts the dropdown to `agent://` URIs only; the prototype should treat that as a v1 bug and design the dropdown to also let an Entity `@mention` a human. Text input, send button. Disable + show hint when the current Session has no other members to mention. |
+| `<MemberRoster>` | ChatHubPage right pane | Table of members with `<StatusDot>`, URI, last-seen. Visually distinguish Entity sub-types (human / agent / system) via avatar/icon, but the row treatment, sort order, and actions are uniform — the roster does not care about sub-type. |
+| `<TemplateClassPicker>` | WorkspaceDetailPage | Horizontal button row of registered Template Classes (`cc.agent`, `curl.agent`, `feishu.chat_binding`, `echo`, …) plus a "JSON (custom)" escape hatch. Click a class → the form below adapts. For `cc.agent`, the form includes a `mode` field (`local-pty` vs `remote-channel`) — PR-D2 collapsed the previous `cc.pty` / `cc.channel_instance` split into one Template with a mode toggle. |
 | `<AutoForm>` | WorkspaceDetailPage, UserCapsPage, etc. | Renders a form from a schema descriptor — field types: `text`, `path`, `uri`, `select`. This is critical: see §3a below for the JSON shape it consumes. |
 | `<RuleTable>` | RoutingPage | Rows: ID + Source badge + Matcher (monospace) + Receivers (monospace, joined) + Delete/Disable/Enable button. Greyed-out row for disabled rules. |
 | `<RuleEditor>` | RoutingPage | Form-mode (matcher_type dropdown + arg input + receivers field) vs JSON-mode (full matcher JSON textarea + receivers). Tab toggle between modes. Also design a **wizard mode** (see UX polish §below) that walks the operator through {matcher} → {receivers} → {preview}. |
@@ -440,21 +444,21 @@ Allen has explicitly called out the following:
 
 The current `/login` form asks for a full `user://username` URI. **Fix it**:
 
-- Accept a plain username (`allen`) — the server builds `user://allen`.
-- A toggle / advanced section that exposes the full-URI field for non-default URI schemes (rare).
+- Accept a plain identifier (`allen`) — the server builds `user://allen` by default. The full-URI field is the advanced fallback for other Entity sub-types (e.g. `agent://curl/myself` when an automated agent signs itself in via the same endpoint).
+- A toggle / advanced section that exposes the full-URI field for non-default URI schemes.
 - Consider a "Continue as guest" or one-click **dev-mode admin sign-in** button — gated by a banner that says "Dev mode only; disable in production".
-- After successful login, redirect to `/admin` and open the user's most-recent Session (or a friendly empty state if none).
+- After successful login, redirect to `/admin` and open the Entity's most-recent Session (or a friendly empty state if none).
 
 ### Main chat — chat vs PTY toggle
 
-When the operator opens an agent's DM (`session://allen-cc-architect-dm`), the main pane should let them choose:
+When any Entity (human or agent — both reach this view via the same `/admin` LV) opens an agent's DM (`session://allen-cc-architect-dm`), the main pane should let them choose:
 
 - **Chat with this agent** — the implicit Session chat stream (default).
-- **Open the PTY TUI directly** — full xterm view of the underlying `cc.pty` agent.
+- **Open the PTY TUI directly** — full xterm view of the underlying `cc.agent` running in `local-pty` mode.
 
 A **tab strip at the top of the main pane** ("Chat" / "Terminal") is the simplest design. A **split-pane toggle** ("Show side-by-side") is more powerful — chat on the left half, terminal on the right. Designer picks; either is acceptable.
 
-Make this **only show up when the agent in the DM is a `cc.pty`** — for `curl.agent` or `echo` agents, hide the terminal option.
+Make this **only show up when the agent in the DM is a `cc.agent` whose `mode` is `local-pty`** — for `cc.agent[remote-channel]`, `curl.agent`, or `echo` agents, hide the terminal option.
 
 ### Sessions vs DMs visual distinction
 
@@ -467,11 +471,11 @@ The current LV shows the full session URI in monospace; replace that with friend
 
 ### Routing rule wizard
 
-The current `/admin/routing` is a flat table + a one-shot add-rule form. Operators get confused. Design a **rule wizard** in addition to the current form:
+The current `/admin/routing` is a flat table + a one-shot add-rule form. New Entities get confused. Design a **rule wizard** in addition to the current form:
 
-1. **Step 1 — When?** Pick a matcher: `mention` (an agent is @-mentioned), `from` (a specific sender), `text_contains`, `text_matches`, `always`. Show a short explanation per option.
+1. **Step 1 — When?** Pick a matcher: `mention` (any Entity URI is @-mentioned — works for both `user://` and `agent://` targets), `from` (a specific sender, again any Entity URI), `text_contains`, `text_matches`, `always`. Show a short explanation per option.
 2. **Step 2 — What's it about?** Fill in the matcher's argument (the URI for `mention` / `from`, the substring for `text_contains`, the regex for `text_matches`). Inline preview of which sessions/messages would match.
-3. **Step 3 — Who receives it?** Multi-select of URIs from the registry, plus the magic token `$session_members` (rendered as "(dynamic) all members of the current session" in the UI).
+3. **Step 3 — Who receives it?** Multi-select of URIs from the registry (mixing user/agent URIs freely), plus the magic token `$session_members` (rendered as "(dynamic) all members of the current session" in the UI).
 4. **Step 4 — Preview & save.** Show the rule in its final form (JSON below for power users), button to save.
 
 Keep the existing flat-form mode as a "quick add" toggle for power users.
@@ -490,8 +494,8 @@ Every list has an empty state; please design them:
 
 - No Sessions → "Create your first Session" CTA opens the new-session inline form.
 - No Workspaces → "Create a Workspace" → workspaces page.
-- No Agents → explain that agents appear when a `cc.pty` Template is added to a Workspace; link to Workspaces.
-- No CC Bridges → explain bridges connect when a `cc.pty` agent's Python sidecar joins `/cc_socket`.
+- No Agents → explain that agents appear when a `cc.agent` Template (or any other agent Template Class) is added to a Workspace; link to Workspaces.
+- No CC Bridges → explain bridges connect when a `cc.agent` running in `remote-channel` mode (or the Python sidecar of a `local-pty` agent) joins `/cc_socket`.
 
 ### Toasts / flash messages
 
