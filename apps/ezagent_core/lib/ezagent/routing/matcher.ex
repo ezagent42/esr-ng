@@ -26,8 +26,8 @@ defmodule Ezagent.Routing.Matcher do
   ## Shape
 
   Matchers are plain Elixir tuples (Decision #42 JSON-serializable):
-  - `{:mention, "user://admin"}` (URI as string for JSON round-trip)
-  - `{:from, "agent://cc-builder"}`
+  - `{:mention, "entity://user/admin"}` (URI as string for JSON round-trip)
+  - `{:from, "entity://agent/cc_builder"}`
   - `{:text_contains, "urgent"}`
   - `{:text_matches, "^/help"}`
   - `{:always}`

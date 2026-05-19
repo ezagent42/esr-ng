@@ -179,9 +179,9 @@ defmodule Ezagent.Kind.Runtime do
   # Phase 7 PR 43 — derive session URI from target URI for ctx enrichment.
   #
   # Sources covered:
-  # - `session://main/behavior/chat/send` → `session://main`
+  # - `session://main/behavior/chat/send` → `session://main` (legacy 1-seg)
   # - `session://main` → `session://main` (already session)
-  # - `agent://cc/cc-demo/behavior/chat/receive` → nil (not session-targeted)
+  # - `entity://agent/cc_demo/behavior/chat/receive` → nil (not session-targeted)
   # - any non-session URI → nil
   #
   # Pure URI manipulation; no registry / dispatch / GenServer involvement.
@@ -190,9 +190,11 @@ defmodule Ezagent.Kind.Runtime do
   # isn't even session-scoped, and `Capability.instance_match?/2` is
   # designed to handle nil session_uri (returns false for the tuple
   # case, preserving deny-as-default).
-  defp derive_session_uri(%URI{scheme: "session", host: host} = target)
-       when is_binary(host) do
-    %URI{scheme: "session", host: host, authority: host}
+  defp derive_session_uri(%URI{scheme: "session"} = target) do
+    # PR #141 SPEC v2: session URIs are `session://<type>/<name>`
+    # (uniform 2-segment). Use Ezagent.URI.instance/1 to strip any
+    # sub-resource so the result is the canonical instance form.
+    Ezagent.URI.instance(target)
   end
 
   defp derive_session_uri(_other), do: nil

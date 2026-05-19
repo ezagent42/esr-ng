@@ -68,10 +68,10 @@ defmodule Ezagent.Entity.Workspace do
 
   Per Phase 4 D4 — Workspaces are first-class URIs that participate
   in cap checks and KindRegistry lookups, identical pattern to
-  `session://<name>` and `agent://<name>`.
+  `session://<type>/<name>` and `entity://agent/<flavor>_<name>`.
 
       iex> Ezagent.Entity.Workspace.uri_for("default") |> URI.to_string()
-      "workspace://default"
+      "workspace://default/main"
   """
   @spec uri_for(String.t()) :: URI.t()
   def uri_for(name) when is_binary(name) and name != "" do

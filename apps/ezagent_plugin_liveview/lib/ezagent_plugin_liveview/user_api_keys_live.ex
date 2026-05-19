@@ -236,7 +236,7 @@ defmodule EzagentPluginLiveview.UserApiKeysLive do
             style="padding: 8px 16px; background: #0969da; color: white; border: none; border-radius: 4px; cursor: pointer;"
           >Save</button>
           <p :if={not (@is_admin? or @self?)} style="font-size: 12px; color: #b91c1c;">
-            You can only edit your own keys. Admin (<code>user://admin</code>) can edit any.
+            You can only edit your own keys. Admin (<code>entity://user/admin</code>) can edit any.
           </p>
         </.form>
       </section>

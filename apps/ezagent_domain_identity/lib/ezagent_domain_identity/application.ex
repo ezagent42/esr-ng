@@ -35,14 +35,39 @@ defmodule EzagentDomainIdentity.Application do
       })
     ]
 
+    # PR #141 (SPEC v2): identity domain owns the User Kind, so it
+    # registers an initial `entity://` spawn fn that handles `host =
+    # "user"`. The chat plugin (which boots later — chat depends on
+    # identity) OVERWRITES this registration with a combined fn that
+    # additionally handles `host = "agent"` via `AgentTypeRegistry`.
+    # This layering keeps identity self-sufficient for stacks that
+    # don't load chat (e.g. CLI-only test contexts).
     case Supervisor.start_link(children, strategy: :one_for_one, name: __MODULE__) do
       {:ok, sup_pid} ->
-        :ok = register_user_spawn_fn()
+        :ok = register_user_only_entity_spawn_fn()
         {:ok, sup_pid}
 
       other ->
         other
     end
+  end
+
+  defp register_user_only_entity_spawn_fn do
+    :ok =
+      SpawnRegistry.register("entity", fn uri ->
+        case uri.host do
+          "user" ->
+            DynamicSupervisor.start_child(
+              __MODULE__.UserSupervisor,
+              {Ezagent.Kind.Server, {User, %{uri: uri, initial_caps: MapSet.new()}}}
+            )
+
+          other ->
+            {:error, {:no_entity_host_handler, other}}
+        end
+      end)
+
+    :ok
   end
 
   defp register_identity_behaviors do
@@ -62,18 +87,6 @@ defmodule EzagentDomainIdentity.Application do
     for action <- ApiKeys.actions() do
       :ok = BehaviorRegistry.register(User, action, ApiKeys)
     end
-
-    :ok
-  end
-
-  defp register_user_spawn_fn do
-    :ok =
-      SpawnRegistry.register("user", fn uri ->
-        DynamicSupervisor.start_child(
-          __MODULE__.UserSupervisor,
-          {Ezagent.Kind.Server, {User, %{uri: uri, initial_caps: MapSet.new()}}}
-        )
-      end)
 
     :ok
   end

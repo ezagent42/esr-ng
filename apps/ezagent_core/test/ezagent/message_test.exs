@@ -2,7 +2,7 @@ defmodule Ezagent.MessageTest do
   use ExUnit.Case, async: true
   alias Ezagent.Message
 
-  @sender URI.parse("user://admin")
+  @sender URI.parse("entity://user/admin")
   @body %{text: "hello", attachments: []}
 
   describe "new/3" do
@@ -28,7 +28,7 @@ defmodule Ezagent.MessageTest do
     end
 
     test ":mentions opt fills mentions field" do
-      mentions = [URI.parse("agent://cc-builder")]
+      mentions = [URI.parse("entity://agent/test_cc-builder")]
       msg = Message.new(@sender, @body, mentions: mentions)
       assert msg.mentions == mentions
     end
@@ -65,25 +65,25 @@ defmodule Ezagent.MessageTest do
 
   describe "Jason.Encoder for %URI{}" do
     test "URI struct serializes to its string form" do
-      uri = URI.parse("agent://cc-builder")
-      assert Jason.encode!(uri) == ~s("agent://cc-builder")
+      uri = URI.parse("entity://agent/test_cc-builder")
+      assert Jason.encode!(uri) == ~s("entity://agent/test_cc-builder")
     end
 
     test "URI inside a list (mentions field) serializes as JSON array of strings" do
-      uris = [URI.parse("agent://cc"), URI.parse("user://admin")]
-      assert Jason.encode!(uris) == ~s(["agent://cc","user://admin"])
+      uris = [URI.parse("entity://agent/test_cc"), URI.parse("entity://user/admin")]
+      assert Jason.encode!(uris) == ~s(["entity://agent/test_cc","entity://user/admin"])
     end
   end
 
   describe "Jason.Encoder for %Ezagent.Message{}" do
     test "round-trip — encode + decode keeps logical fields" do
-      msg = Message.new(@sender, @body, mentions: [URI.parse("agent://cc")])
+      msg = Message.new(@sender, @body, mentions: [URI.parse("entity://agent/test_cc")])
       encoded = Jason.encode!(msg)
       assert is_binary(encoded)
       decoded = Jason.decode!(encoded)
 
-      assert decoded["sender"] == "user://admin"
-      assert decoded["mentions"] == ["agent://cc"]
+      assert decoded["sender"] == "entity://user/admin"
+      assert decoded["mentions"] == ["entity://agent/test_cc"]
       assert decoded["body"]["text"] == "hello"
       assert decoded["body"]["attachments"] == []
       assert is_binary(decoded["inserted_at"])

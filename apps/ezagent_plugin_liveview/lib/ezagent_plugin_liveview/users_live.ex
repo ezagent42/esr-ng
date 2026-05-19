@@ -21,7 +21,7 @@ defmodule EzagentPluginLiveview.UsersLive do
   end
 
   defp create_form_defaults do
-    %{"uri" => "user://", "password" => "", "caps" => ""}
+    %{"uri" => "entity://user/", "password" => "", "caps" => ""}
   end
 
   defp list_users do
@@ -41,8 +41,8 @@ defmodule EzagentPluginLiveview.UsersLive do
     caps_str = Map.get(params, "caps", "")
 
     cond do
-      uri == "" or uri == "user://" ->
-        {:noreply, assign(socket, :flash_error, "User URI required (e.g. user://allen)")}
+      uri == "" or uri == "entity://user/" ->
+        {:noreply, assign(socket, :flash_error, "User URI required (e.g. entity://user/allen)")}
 
       String.contains?(caps_str, "*") ->
         {:noreply,
@@ -170,7 +170,7 @@ defmodule EzagentPluginLiveview.UsersLive do
             <input
               type="text"
               name="user[uri]"
-              placeholder="user://allen"
+              placeholder="entity://user/allen"
               value={@create_form.params["uri"]}
               style="padding: 6px 10px; border: 1px solid #d1d5da; border-radius: 4px; font-family: monospace; font-size: 12px;"
             />
@@ -192,7 +192,7 @@ defmodule EzagentPluginLiveview.UsersLive do
             >Create</button>
           </div>
           <p style="font-size: 11px; color: #57606a; margin-top: 6px;">
-            URI scheme: <code>user://</code>. Caps grammar:
+            URI scheme: <code>entity://user/</code>. Caps grammar:
             <code>kind.behavior</code> or <code>kind.behavior@instance_uri</code>;
             comma-separated. Asterisk (<code>*</code>) requires the
             <code>--allow-allcaps</code> mix CLI flag.

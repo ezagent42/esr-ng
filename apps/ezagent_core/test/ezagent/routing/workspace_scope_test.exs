@@ -8,8 +8,8 @@ defmodule Ezagent.Routing.WorkspaceScopeTest do
   alias Ezagent.Routing.{Matcher, Resolver, RuleStore}
 
   @session_uri URI.new!("session://test")
-  @user_a URI.new!("user://alice")
-  @recv URI.new!("user://recv")
+  @user_a URI.new!("entity://user/alice")
+  @recv URI.new!("entity://user/recv")
   @ws_alpha URI.new!("workspace://alpha")
   @ws_beta URI.new!("workspace://beta")
 
@@ -58,13 +58,13 @@ defmodule Ezagent.Routing.WorkspaceScopeTest do
   test "mix: global + scoped rules combine sensibly", %{table: table} do
     # Global rule routing to recv_global
     {:ok, _} =
-      RuleStore.add(table, Matcher.always(), [URI.new!("user://recv-global")], @user_a,
+      RuleStore.add(table, Matcher.always(), [URI.new!("entity://user/recv-global")], @user_a,
         workspace_uri: nil
       )
 
     # alpha-scoped rule routing to recv_alpha
     {:ok, _} =
-      RuleStore.add(table, Matcher.always(), [URI.new!("user://recv-alpha")], @user_a,
+      RuleStore.add(table, Matcher.always(), [URI.new!("entity://user/recv-alpha")], @user_a,
         workspace_uri: @ws_alpha
       )
 
@@ -75,13 +75,13 @@ defmodule Ezagent.Routing.WorkspaceScopeTest do
     in_alpha = Resolver.resolve(msg, @session_uri, [], workspace_uri: @ws_alpha)
     in_alpha_strs = Enum.map(in_alpha, &URI.to_string/1)
 
-    assert "user://recv-global" in in_alpha_strs
-    assert "user://recv-alpha" in in_alpha_strs
+    assert "entity://user/recv-global" in in_alpha_strs
+    assert "entity://user/recv-alpha" in in_alpha_strs
 
     in_no_ws = Resolver.resolve(msg, @session_uri, [], [])
     in_no_ws_strs = Enum.map(in_no_ws, &URI.to_string/1)
 
-    assert "user://recv-global" in in_no_ws_strs
-    refute "user://recv-alpha" in in_no_ws_strs
+    assert "entity://user/recv-global" in in_no_ws_strs
+    refute "entity://user/recv-alpha" in in_no_ws_strs
   end
 end

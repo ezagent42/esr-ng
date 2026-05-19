@@ -19,7 +19,7 @@ defmodule EzagentPluginLiveview.PtyTerminalLive do
 
   ## URL
 
-  `/admin/agents/:uri/terminal` — `:uri` is URI-encoded `agent://...`
+  `/admin/agents/:uri/terminal` — `:uri` is URI-encoded `entity://agent/...`
   """
 
   use Phoenix.LiveView

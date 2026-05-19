@@ -3,7 +3,7 @@ defmodule Ezagent.Routing.MatcherCombinatorsTest do
 
   alias Ezagent.Routing.Matcher
 
-  defp msg(text \\ "hello", mentions \\ [], sender \\ "user://admin") do
+  defp msg(text \\ "hello", mentions \\ [], sender \\ "entity://user/admin") do
     %Ezagent.Message{
       uri: "message://test",
       sender: URI.parse(sender),
@@ -16,13 +16,13 @@ defmodule Ezagent.Routing.MatcherCombinatorsTest do
 
   describe "all_of/1 + match?/2" do
     test "true when every leaf matches" do
-      m = Matcher.all_of([Matcher.mention("agent://x"), Matcher.text_contains("hi")])
-      assert Matcher.match?(m, msg("hi all", ["agent://x"]))
+      m = Matcher.all_of([Matcher.mention("entity://agent/test_x"), Matcher.text_contains("hi")])
+      assert Matcher.match?(m, msg("hi all", ["entity://agent/test_x"]))
     end
 
     test "false when any leaf fails" do
-      m = Matcher.all_of([Matcher.mention("agent://x"), Matcher.text_contains("never")])
-      refute Matcher.match?(m, msg("hi", ["agent://x"]))
+      m = Matcher.all_of([Matcher.mention("entity://agent/test_x"), Matcher.text_contains("never")])
+      refute Matcher.match?(m, msg("hi", ["entity://agent/test_x"]))
     end
 
     test "empty list is vacuously true" do
@@ -32,13 +32,13 @@ defmodule Ezagent.Routing.MatcherCombinatorsTest do
 
   describe "any_of/1 + match?/2" do
     test "true when at least one leaf matches" do
-      m = Matcher.any_of([Matcher.from("user://admin"), Matcher.text_contains("never")])
-      assert Matcher.match?(m, msg("hi", [], "user://admin"))
+      m = Matcher.any_of([Matcher.from("entity://user/admin"), Matcher.text_contains("never")])
+      assert Matcher.match?(m, msg("hi", [], "entity://user/admin"))
     end
 
     test "false when no leaf matches" do
-      m = Matcher.any_of([Matcher.text_contains("never"), Matcher.from("user://other")])
-      refute Matcher.match?(m, msg("hi", [], "user://admin"))
+      m = Matcher.any_of([Matcher.text_contains("never"), Matcher.from("entity://user/other")])
+      refute Matcher.match?(m, msg("hi", [], "entity://user/admin"))
     end
 
     test "empty list is vacuously false" do
@@ -64,19 +64,19 @@ defmodule Ezagent.Routing.MatcherCombinatorsTest do
     test "and(or(mention X, mention Y), not from Z)" do
       m =
         Matcher.all_of([
-          Matcher.any_of([Matcher.mention("agent://x"), Matcher.mention("agent://y")]),
-          Matcher.negate(Matcher.from("user://blocked"))
+          Matcher.any_of([Matcher.mention("entity://agent/test_x"), Matcher.mention("entity://agent/test_y")]),
+          Matcher.negate(Matcher.from("entity://user/blocked"))
         ])
 
-      assert Matcher.match?(m, msg("hi", ["agent://y"], "user://admin"))
-      refute Matcher.match?(m, msg("hi", ["agent://y"], "user://blocked"))
-      refute Matcher.match?(m, msg("hi", ["agent://z"], "user://admin"))
+      assert Matcher.match?(m, msg("hi", ["entity://agent/test_y"], "entity://user/admin"))
+      refute Matcher.match?(m, msg("hi", ["entity://agent/test_y"], "entity://user/blocked"))
+      refute Matcher.match?(m, msg("hi", ["entity://agent/test_z"], "entity://user/admin"))
     end
   end
 
   describe "JSON serde for combinators" do
     test "and round-trip" do
-      m = Matcher.all_of([Matcher.mention("agent://x"), Matcher.from("user://admin")])
+      m = Matcher.all_of([Matcher.mention("entity://agent/test_x"), Matcher.from("entity://user/admin")])
       assert {:ok, ^m} = m |> Matcher.to_json() |> Matcher.from_json()
     end
 
@@ -86,15 +86,15 @@ defmodule Ezagent.Routing.MatcherCombinatorsTest do
     end
 
     test "not round-trip" do
-      m = Matcher.negate(Matcher.from("user://blocked"))
+      m = Matcher.negate(Matcher.from("entity://user/blocked"))
       assert {:ok, ^m} = m |> Matcher.to_json() |> Matcher.from_json()
     end
 
     test "deeply nested round-trip" do
       m =
         Matcher.all_of([
-          Matcher.any_of([Matcher.mention("agent://x"), Matcher.mention("agent://y")]),
-          Matcher.negate(Matcher.from("user://blocked")),
+          Matcher.any_of([Matcher.mention("entity://agent/test_x"), Matcher.mention("entity://agent/test_y")]),
+          Matcher.negate(Matcher.from("entity://user/blocked")),
           Matcher.text_matches("^/help")
         ])
 
@@ -104,8 +104,8 @@ defmodule Ezagent.Routing.MatcherCombinatorsTest do
 
   describe "backward compat" do
     test "existing leaf-only JSON still decodes" do
-      assert {:ok, {:mention, "user://admin"}} =
-               Matcher.from_json(%{"type" => "mention", "arg" => "user://admin"})
+      assert {:ok, {:mention, "entity://user/admin"}} =
+               Matcher.from_json(%{"type" => "mention", "arg" => "entity://user/admin"})
     end
   end
 end

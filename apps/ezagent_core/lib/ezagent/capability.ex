@@ -5,11 +5,12 @@ defmodule Ezagent.Capability do
   A capability matches an `Ezagent.Invocation` when all four fields match
   (with `:any` acting as wildcard for `kind` / `behavior` / `instance`).
 
-  `revoke/2` is admin-protected per Decision #81: `user://admin`'s
+  `revoke/2` is admin-protected per Decision #81: `entity://user/admin`'s
   all-caps capability (`%Ezagent.Capability{kind: :any, behavior: :any,
-  instance: :any, ...}` granted_by `system://bootstrap`) is a structural
-  invariant and cannot be removed. The check lives here at the data-layer
-  boundary so any caller path is forced through one chokepoint.
+  instance: :any, ...}` granted_by `system://bootstrap/default`) is a
+  structural invariant and cannot be removed. The check lives here at
+  the data-layer boundary so any caller path is forced through one
+  chokepoint.
   """
 
   @enforce_keys [:kind, :behavior, :instance, :granted_by, :granted_at]
@@ -114,9 +115,9 @@ defmodule Ezagent.Capability do
   @doc """
   Remove a capability from a MapSet of caps.
 
-  Refuses to remove the admin all-caps invariant — `user://admin`'s
-  triple-`:any` capability granted_by `system://bootstrap` is structural
-  per Decision #81 and would break the bootstrap principal.
+  Refuses to remove the admin all-caps invariant — `entity://user/admin`'s
+  triple-`:any` capability granted_by `system://bootstrap/default` is
+  structural per Decision #81 and would break the bootstrap principal.
 
   Returns `{:ok, new_caps}` on success, `{:error, :cannot_revoke_admin}`
   if the input cap is the admin all-caps invariant.

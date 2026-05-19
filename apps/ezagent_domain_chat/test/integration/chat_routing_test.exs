@@ -74,7 +74,7 @@ defmodule EzagentDomainChat.Integration.ChatRoutingTest do
     session_uri = Session.default_uri()
     {:ok, session_pid} = KindRegistry.lookup(session_uri)
 
-    transient_uri = URI.new!("user://transient-down-#{System.unique_integer([:positive])}")
+    transient_uri = URI.new!("entity://user/transient-down-#{System.unique_integer([:positive])}")
     {:ok, transient_pid} = GenServer.start(__MODULE__.NoopServer, transient_uri)
 
     # Join transient member to session

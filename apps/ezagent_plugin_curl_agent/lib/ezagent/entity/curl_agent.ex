@@ -3,12 +3,11 @@ defmodule Ezagent.Entity.CurlAgent do
   CurlAgent Kind — an agent that proxies chat messages to a remote
   LLM completion API via HTTP.
 
-  ## URI scheme
+  ## URI scheme (PR #141 SPEC v2)
 
-  `curl-agent://<instance_name>` — a fresh scheme distinct from
-  `agent://` (which is used by claude/PTY agents and the v2 CC
-  bridge BridgeRegistry). The separation keeps the routing
-  conditional-free: when the chat router dispatches
+  `entity://agent/curl_<instance_name>` — flavor `curl` prefix on
+  the name segment distinguishes from `cc_*` (PTY-based Claude Code
+  agents). When the chat router dispatches
   `<receiver>/behavior/chat/receive`, the BehaviorRegistry maps
   `(CurlAgent, :receive)` straight to `Ezagent.Behavior.CurlAgent`
   without overloading the Agent Kind's receive handler.

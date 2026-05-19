@@ -22,7 +22,7 @@ defmodule Ezagent.PluginCc.PtyInputDispatchTest do
   alias Ezagent.Invocation
 
   setup do
-    agent_uri = URI.parse("agent://pty-input-test-#{System.unique_integer([:positive])}")
+    agent_uri = URI.parse("entity://agent/test_pty-input-test-#{System.unique_integer([:positive])}")
 
     {:ok, pid} =
       DynamicSupervisor.start_child(
@@ -82,7 +82,7 @@ defmodule Ezagent.PluginCc.PtyInputDispatchTest do
 
   test "non-admin without pty_input cap → :unauthorized", %{agent_uri: agent_uri} do
     non_admin_ctx = %{
-      caller: URI.parse("user://non-admin-pty-test"),
+      caller: URI.parse("entity://user/non-admin-pty-test"),
       caps: MapSet.new(),
       reply: {:caller_inbox, self()}
     }
@@ -105,7 +105,7 @@ defmodule Ezagent.PluginCc.PtyInputDispatchTest do
              Invocation.dispatch(%Invocation{
                target: dispatch_target(),
                mode: :call,
-               args: %{agent_uri: "agent://nonexistent", bytes: "x"},
+               args: %{agent_uri: "entity://agent/test_nonexistent", bytes: "x"},
                ctx: admin_ctx()
              })
   end

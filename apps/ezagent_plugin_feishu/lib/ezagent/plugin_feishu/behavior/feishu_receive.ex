@@ -12,7 +12,7 @@ defmodule EzagentPluginFeishu.Behavior.FeishuReceive do
 
   Translates the inbound `%Ezagent.Message{}` into a formatted text and
   calls `EzagentPluginFeishu.Client.send_text(chat_id, text)`. Self-echo
-  prevention: if `msg.sender` is a `user://feishu/*` URI, skip — that
+  prevention: if `msg.sender` is a `entity://user/feishu/*` URI, skip — that
   message originated from Feishu and was inbound via WebhookPlug,
   forwarding it back would loop.
 

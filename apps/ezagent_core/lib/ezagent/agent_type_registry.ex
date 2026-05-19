@@ -1,20 +1,20 @@
 defmodule Ezagent.AgentTypeRegistry do
   @moduledoc """
-  PR #131 — registry for `agent://<type>/<name>` URI dispatch.
+  Registry for agent flavor → spawn fn dispatch.
 
-  ## Why
+  ## SPEC v2 (PR #141 onwards)
 
-  Before this PR, every `agent://X` URI was a freeform name; nothing
-  in the URI told you whether the agent was a Claude Code TUI, a
-  curl-driven HTTP-completion proxy, an echo fixture, or something
-  else. Allen 2026-05-19 03:21 directive: encode the agent type
-  in the URI host segment so a glance at `agent://curl/my-deepseek`
-  tells you what kind of agent you're talking to.
+  Agent URIs are now `entity://agent/<flavor>_<name>` (SPEC §5.14).
+  The flavor (cc / curl / echo / ...) is a free-form prefix on the
+  name segment, separated from the rest of the name by an underscore.
 
-  ## How
+      entity://agent/cc_demo-builder     # flavor=cc, name=demo-builder
+      entity://agent/curl_my-deepseek    # flavor=curl, name=my-deepseek
+      entity://agent/echo_default        # flavor=echo, name=default
+      entity://agent/test_X              # flavor=test (test fixtures)
 
-  Each plugin that provides an agent flavour registers a type name
-  + spawn function at boot:
+  Each plugin that provides an agent flavor registers a flavor name +
+  spawn function at boot:
 
       Ezagent.AgentTypeRegistry.register("curl", fn uri, name ->
         DynamicSupervisor.start_child(
@@ -23,18 +23,27 @@ defmodule Ezagent.AgentTypeRegistry do
         )
       end)
 
-  The chat plugin's `agent://` `Ezagent.SpawnRegistry` fn delegates
-  here, parsing `<type>/<name>` from the URI and looking up the
-  registered fn.
+  The chat plugin's `entity://` `Ezagent.SpawnRegistry` fn dispatches
+  on `uri.host`: for `host = "agent"`, it delegates to
+  `AgentTypeRegistry.spawn/1` which extracts the flavor and looks
+  up the registered fn.
 
-  ## URI shape (strict, per Allen 2026-05-19 03:46 #3 + #4)
+  ## Why this still exists
 
-  - `agent://<type>/<name>` only. `<type>` must be one of the
-    registered types; `<name>` is plugin-defined (typically a stable
-    identifier).
-  - Old `agent://<name>` (no type segment) URIs error at validate
-    time — operators must rebuild with the new shape. DB migration
-    rewrites the existing demo data.
+  SPEC §5.14 says "the AgentTemplate that instantiated the agent" is
+  the authoritative source for "which Behavior runs this agent". PR
+  #147 will retire this registry in favor of Template-owned kind_module
+  wiring. PR #141 keeps it for the mechanical scheme migration; the
+  spawn semantics (one fn per flavor) are unchanged.
+
+  ## Naming convention
+
+  `register/2` takes a flavor string (`"cc"`, `"curl"`, `"echo"`,
+  `"test"`). The flavor MUST match the name-prefix the operator uses
+  when constructing URIs. The spawn fn receives the full URI and the
+  full name string (e.g. `"cc_demo-builder"`) — NOT the
+  flavor-stripped tail. This keeps the spawn fn URI-faithful;
+  callers that want the stripped tail can split themselves.
   """
 
   @table :ezagent_agent_type_registry
@@ -54,50 +63,74 @@ defmodule Ezagent.AgentTypeRegistry do
     :ok
   end
 
-  @type type_name :: String.t()
+  @type flavor_name :: String.t()
   @type spawn_fn :: (URI.t(), String.t() -> {:ok, pid()} | {:error, term()})
 
   @doc """
-  Register `type` → `spawn_fn`. Plugins call this in their
+  Register `flavor` → `spawn_fn`. Plugins call this in their
   `Application.start/2`. Re-registration overwrites silently
   (matches `SpawnRegistry.register/2` semantics — late-binding
   plugins win).
   """
-  @spec register(type_name(), spawn_fn()) :: :ok
-  def register(type, fun) when is_binary(type) and is_function(fun, 2) do
-    :ets.insert(@table, {type, fun})
+  @spec register(flavor_name(), spawn_fn()) :: :ok
+  def register(flavor, fun) when is_binary(flavor) and is_function(fun, 2) do
+    :ets.insert(@table, {flavor, fun})
     :ok
   end
 
   @doc """
-  List currently registered type names (for debugging + the LV's
+  List currently registered flavor names (for debugging + the LV's
   template Class picker which can render them as a dropdown).
   """
-  @spec registered_types() :: [type_name()]
-  def registered_types do
+  @spec registered_flavors() :: [flavor_name()]
+  def registered_flavors do
     @table
     |> :ets.tab2list()
-    |> Enum.map(fn {type, _} -> type end)
+    |> Enum.map(fn {flavor, _} -> flavor end)
     |> Enum.sort()
   end
+
+  # Kept as an alias for migration ergonomics — `registered_types/0`
+  # was the pre-PR-141 name. New code should prefer `registered_flavors/0`.
+  @doc false
+  def registered_types, do: registered_flavors()
 
   @doc """
   Spawn (or look up an existing) Kind at the given URI.
 
-  - `agent://<type>/<name>` → dispatch by `type` to the registered
-    spawn fn
-  - `agent://<name>` (no path) → `{:error, :missing_type_segment}`
-  - Other schemes → `{:error, :not_agent_scheme}`
+  - `entity://agent/<flavor>_<name>` → split on first `_`, dispatch
+    by `flavor` to the registered spawn fn (full name passed through)
+  - `entity://agent/<name-without-underscore>` →
+    `{:error, :missing_flavor_prefix}`
+  - Other URIs → `{:error, :not_agent_entity_uri}`
 
-  Returns `{:ok, pid}` either way for valid known types; concrete
+  Returns `{:ok, pid}` either way for valid known flavors; concrete
   error for invalid shapes.
   """
   @spec spawn(URI.t()) :: {:ok, pid()} | {:error, term()}
-  def spawn(%URI{scheme: "agent", host: type, path: "/" <> name})
-      when is_binary(type) and type != "" and name != "" do
-    case :ets.lookup(@table, type) do
-      [{^type, fun}] ->
-        full_uri = URI.new!("agent://#{type}/#{name}")
+  def spawn(%URI{scheme: "entity", host: "agent", path: "/" <> name})
+      when is_binary(name) and name != "" do
+    case String.split(name, "_", parts: 2) do
+      [flavor, _rest] when flavor != "" ->
+        dispatch_flavor(flavor, name)
+
+      _ ->
+        {:error, {:missing_flavor_prefix, name}}
+    end
+  end
+
+  def spawn(%URI{scheme: "entity", host: "agent", path: nil}) do
+    {:error, {:missing_name, "entity://agent/"}}
+  end
+
+  def spawn(%URI{} = uri) do
+    {:error, {:not_agent_entity_uri, URI.to_string(uri)}}
+  end
+
+  defp dispatch_flavor(flavor, name) do
+    case :ets.lookup(@table, flavor) do
+      [{^flavor, fun}] ->
+        full_uri = URI.new!("entity://agent/#{name}")
 
         case fun.(full_uri, name) do
           {:ok, _pid} = ok -> ok
@@ -106,26 +139,14 @@ defmodule Ezagent.AgentTypeRegistry do
         end
 
       [] ->
-        {:error, {:unknown_agent_type, type}}
+        {:error, {:unknown_agent_flavor, flavor}}
     end
   end
 
-  def spawn(%URI{scheme: "agent", host: host, path: nil}) when is_binary(host) do
-    {:error, {:missing_type_segment, host}}
-  end
-
-  def spawn(%URI{scheme: "agent"} = uri) do
-    {:error, {:invalid_agent_uri_shape, URI.to_string(uri)}}
-  end
-
-  def spawn(%URI{scheme: other}) do
-    {:error, {:not_agent_scheme, other}}
-  end
-
   @doc """
-  Strict validator for the `agent://<type>/<name>` shape. Returns
-  `:ok` or `{:error, reason}`. Used by Template Class validators
-  to reject legacy URIs at template-add time.
+  Strict validator for the `entity://agent/<flavor>_<name>` shape.
+  Returns `:ok` or `{:error, reason}`. Used by Template Class
+  validators to reject legacy URIs at template-add time.
   """
   @spec validate_uri(String.t() | URI.t()) :: :ok | {:error, term()}
   def validate_uri(%URI{} = uri), do: do_validate(uri)
@@ -137,31 +158,34 @@ defmodule Ezagent.AgentTypeRegistry do
     end
   end
 
-  defp do_validate(%URI{scheme: "agent", host: type, path: "/" <> name})
-       when is_binary(type) and type != "" and name != "" do
-    if known_type?(type) do
-      :ok
-    else
-      {:error, {:unknown_agent_type, type, registered_types()}}
+  defp do_validate(%URI{scheme: "entity", host: "agent", path: "/" <> name})
+       when is_binary(name) and name != "" do
+    case String.split(name, "_", parts: 2) do
+      [flavor, rest] when flavor != "" and rest != "" ->
+        if known_flavor?(flavor) do
+          :ok
+        else
+          {:error, {:unknown_agent_flavor, flavor, registered_flavors()}}
+        end
+
+      _ ->
+        {:error,
+         {:missing_flavor_prefix, name,
+          "agent URIs must be `entity://agent/<flavor>_<name>` " <>
+            "(SPEC v2 §5.14 / PR #141)"}}
     end
   end
 
-  defp do_validate(%URI{scheme: "agent", host: host, path: nil}) when is_binary(host) do
-    {:error,
-     {:missing_type_segment, host,
-      "agent URIs must be `agent://<type>/<name>` (PR #131 / Allen 2026-05-19 #4)"}}
-  end
-
-  defp do_validate(%URI{scheme: "agent"} = uri) do
+  defp do_validate(%URI{scheme: "entity", host: "agent"} = uri) do
     {:error, {:invalid_agent_uri_shape, URI.to_string(uri)}}
   end
 
-  defp do_validate(%URI{scheme: other}) do
-    {:error, {:not_agent_scheme, other}}
+  defp do_validate(%URI{} = uri) do
+    {:error, {:not_agent_entity_uri, URI.to_string(uri)}}
   end
 
-  defp known_type?(type) when is_binary(type) do
-    case :ets.lookup(@table, type) do
+  defp known_flavor?(flavor) when is_binary(flavor) do
+    case :ets.lookup(@table, flavor) do
       [_] -> true
       [] -> false
     end

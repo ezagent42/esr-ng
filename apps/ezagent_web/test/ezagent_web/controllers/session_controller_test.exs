@@ -14,7 +14,7 @@ defmodule EzagentWeb.SessionControllerTest do
 
   describe "POST /login" do
     test "happy path: valid creds → session set + redirect to /admin" do
-      uri = "user://login-happy-#{System.unique_integer([:positive])}"
+      uri = "entity://user/login-happy-#{System.unique_integer([:positive])}"
       {:ok, _} = Ezagent.Users.create(uri, "right-pw", [])
 
       conn =
@@ -27,7 +27,7 @@ defmodule EzagentWeb.SessionControllerTest do
     end
 
     test "bad password: redirect to /login with flash error" do
-      uri = "user://login-bad-#{System.unique_integer([:positive])}"
+      uri = "entity://user/login-bad-#{System.unique_integer([:positive])}"
       {:ok, _} = Ezagent.Users.create(uri, "right-pw", [])
 
       conn =
@@ -43,7 +43,7 @@ defmodule EzagentWeb.SessionControllerTest do
       conn =
         build_conn()
         |> Plug.Test.init_test_session(%{})
-        |> post("/login", %{"user_uri" => "user://never-existed", "password" => "x"})
+        |> post("/login", %{"user_uri" => "entity://user/never-existed", "password" => "x"})
 
       assert redirected_to(conn) == "/login"
     end
@@ -53,7 +53,7 @@ defmodule EzagentWeb.SessionControllerTest do
     test "DELETE /logout clears session and redirects" do
       conn =
         build_conn()
-        |> Plug.Test.init_test_session(%{"current_user_uri" => "user://allen"})
+        |> Plug.Test.init_test_session(%{"current_user_uri" => "entity://user/allen"})
         |> delete("/logout")
 
       assert redirected_to(conn) == "/login"

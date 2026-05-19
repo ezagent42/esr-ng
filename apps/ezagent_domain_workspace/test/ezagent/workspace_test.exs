@@ -31,7 +31,7 @@ defmodule Ezagent.WorkspaceTest do
     test "members in initial args are reachable via :list_members dispatch" do
       name = "members-test-#{System.unique_integer([:positive])}"
       uri = WK.uri_for(name)
-      members = [URI.parse("user://admin"), URI.parse("agent://x")]
+      members = [URI.parse("entity://user/admin"), URI.parse("entity://agent/test_x")]
 
       {:ok, _pid} = Ezagent.Workspace.spawn_workspace(name, %{members: members})
 
@@ -57,7 +57,7 @@ defmodule Ezagent.WorkspaceTest do
     test ":instantiate returns one child per member" do
       name = "inst-test-#{System.unique_integer([:positive])}"
       uri = WK.uri_for(name)
-      members = [URI.parse("user://admin"), URI.parse("agent://cc-builder")]
+      members = [URI.parse("entity://user/admin"), URI.parse("entity://agent/test_cc-builder")]
 
       {:ok, _pid} = Ezagent.Workspace.spawn_workspace(name, %{members: members})
 

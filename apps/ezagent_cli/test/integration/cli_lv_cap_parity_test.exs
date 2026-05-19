@@ -54,7 +54,7 @@ defmodule EzagentCli.Integration.CliLvCapParityTest do
 
   setup do
     suffix = "parity-#{System.unique_integer([:positive])}"
-    user_uri = URI.new!("user://#{suffix}")
+    user_uri = URI.new!("entity://user/#{suffix}")
     {:ok, %{uri: user_uri, suffix: suffix}}
   end
 
@@ -80,7 +80,7 @@ defmodule EzagentCli.Integration.CliLvCapParityTest do
       kind: :workspace,
       behavior: :any,
       instance: :any,
-      granted_by: URI.parse("user://admin"),
+      granted_by: URI.parse("entity://user/admin"),
       granted_at: ~U[2026-05-18 00:00:00Z]
     }
 
@@ -121,6 +121,6 @@ defmodule EzagentCli.Integration.CliLvCapParityTest do
              c.kind == :any and c.behavior == :any and c.instance == :any
            end),
            "non-admin user resolved to admin wildcard cap via CLI token — " <>
-             "auth elevation bug; only user://admin should hold this cap"
+             "auth elevation bug; only entity://user/admin should hold this cap"
   end
 end

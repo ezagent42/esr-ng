@@ -4,7 +4,7 @@ defmodule Ezagent.Ecto.URI do
 
   In-memory representation: `%URI{}` struct (per ARCHITECTURE §3.5 — Message
   identity fields are URI structs, type-rich). Storage: TEXT column (the
-  `URI.to_string/1` form, e.g. `"agent://cc-builder"`).
+  `URI.to_string/1` form, e.g. `"entity://agent/cc_builder"`).
 
   ## Phase 2 v1_prototype usage
 

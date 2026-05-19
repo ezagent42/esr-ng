@@ -36,12 +36,14 @@ defmodule Ezagent.Entity.Agent do
   Ezagent.Kind.Server are the only contact points, and they're both
   `ezagent_core` machinery.
 
-  ## URI shape
+  ## URI shape (PR #141 SPEC v2)
 
   Bridges supply `agent_uri` either via the mcp.json `env` field
   (preferred — PtyServer writes it deterministically) or via
-  `EZAGENT_AGENT_URI` operator-shell env (legacy fallback). Anything
-  matching `agent://*` works at the routing layer.
+  `EZAGENT_AGENT_URI` operator-shell env (legacy fallback). The
+  canonical shape is `entity://agent/<flavor>_<name>` per SPEC §5.14
+  (flavor in name prefix); anything matching `entity://agent/*` works
+  at the routing layer.
   """
 
   @behaviour Ezagent.Kind
@@ -78,8 +80,9 @@ defmodule Ezagent.Entity.Agent do
   - `template_uri` — `template://agent/<template_name>` (must
     be an already-registered AgentTemplate Kind)
   - `instance_name` — string, becomes the instance Agent URI's
-    host segment (`agent://<instance_name>`). Caller's job to
-    ensure uniqueness; collisions return
+    name segment (`entity://agent/<instance_name>` — PR #141 SPEC v2;
+    caller supplies the full flavor-prefixed name like `cc_<id>`).
+    Caller's job to ensure uniqueness; collisions return
     `{:error, {:already_started, _}}` per SpawnRegistry semantics.
   - `workspace_uri` — `%URI{}` scope this Agent belongs to;
     bound via `Ezagent.WorkspaceRegistry.bind/2` so workspace-scoped
@@ -118,7 +121,7 @@ defmodule Ezagent.Entity.Agent do
         ) :: {:ok, URI.t()} | {:error, term()}
   def spawn(%URI{} = _template_uri, instance_name, %URI{} = workspace_uri, %URI{} = granted_by)
       when is_binary(instance_name) do
-    agent_uri = URI.new!("agent://#{instance_name}")
+    agent_uri = URI.new!("entity://agent/#{instance_name}")
 
     with {:ok, _pid} <- spawn_or_resume(agent_uri),
          :ok <- Ezagent.WorkspaceRegistry.bind(agent_uri, workspace_uri),

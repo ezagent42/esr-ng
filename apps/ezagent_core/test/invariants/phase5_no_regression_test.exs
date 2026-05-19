@@ -22,7 +22,7 @@ defmodule EzagentCore.Invariants.Phase5NoRegressionTest do
       assert Process.alive?(pid)
     end
 
-    test "user://admin is registered + has admin caps" do
+    test "entity://user/admin is registered + has admin caps" do
       uri = Ezagent.Entity.User.admin_uri()
       assert {:ok, pid} = KindRegistry.lookup(uri)
       assert Process.alive?(pid)

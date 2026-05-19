@@ -50,7 +50,7 @@ defmodule Ezagent.Orchestrator.Tools do
   runtime** instead:
 
   - `agent_slots` — live `Ezagent.WorkspaceRegistry` membership for
-    the session's workspace, filtered to `agent://*` URIs
+    the session's workspace, filtered to `entity://agent/*` URIs
   - `routing_rules` — `Ezagent.Routing.RuleStore.list(MentionRouting)`
     filtered to rules tagged with this session's workspace
 
@@ -87,7 +87,7 @@ defmodule Ezagent.Orchestrator.Tools do
   # --- tools (PR 46-impl bodies) -----------------------------------------
 
   @doc """
-  Spawn a worker agent at `agent://<slot_name>` from `agent_template_uri`.
+  Spawn a worker agent at `entity://agent/<slot_name>` from `agent_template_uri`.
 
   Required `opts`:
   - `:workspace_uri` — `%URI{}` workspace the agent joins
@@ -115,13 +115,13 @@ defmodule Ezagent.Orchestrator.Tools do
   end
 
   @doc """
-  Despawn the worker at `agent://<slot_name>` if alive.
+  Despawn the worker at `entity://agent/<slot_name>` if alive.
 
   Returns `{:ok, :removed}` whether the slot was alive or not (idempotent).
   """
   @spec remove_agent_slot(String.t(), keyword()) :: {:ok, :removed}
   def remove_agent_slot(slot_name, _opts \\ []) when is_binary(slot_name) do
-    agent_uri = URI.new!("agent://#{slot_name}")
+    agent_uri = URI.new!("entity://agent/#{slot_name}")
 
     case Ezagent.KindRegistry.lookup(agent_uri) do
       {:ok, pid} ->
@@ -137,7 +137,7 @@ defmodule Ezagent.Orchestrator.Tools do
 
   @doc """
   Replace an agent slot's template: despawn the live agent at
-  `agent://<slot_name>`, then respawn from `new_agent_template_uri`.
+  `entity://agent/<slot_name>`, then respawn from `new_agent_template_uri`.
 
   Required `opts`: same as `add_agent_slot/4` (`:workspace_uri`,
   `:owner`).
@@ -153,7 +153,7 @@ defmodule Ezagent.Orchestrator.Tools do
   @doc """
   Insert a routing rule that fires `matcher_ast` against incoming
   messages and delivers to the agents named by `receiver_slot_names`
-  (each becomes `agent://<slot_name>`).
+  (each becomes `entity://agent/<slot_name>`).
 
   Required `opts`:
   - `:workspace_uri` — scopes the rule (Phase 7 PR 31 workspace
@@ -172,7 +172,7 @@ defmodule Ezagent.Orchestrator.Tools do
          {:ok, caller_uri} <- require_opt(opts, :caller) do
       receivers =
         Enum.map(receiver_slot_names, fn slot ->
-          URI.new!("agent://#{slot}")
+          URI.new!("entity://agent/#{slot}")
         end)
 
       RuleStore.add(
@@ -364,14 +364,16 @@ defmodule Ezagent.Orchestrator.Tools do
 
   defp build_working_copy(%URI{} = session_uri, %URI{} = workspace_uri, %URI{} = caller_uri, parent_uri) do
     # Derive agent_slots from live WorkspaceRegistry membership:
-    # every agent:// member in this workspace counts as a slot.
+    # every entity://agent/* member in this workspace counts as a slot.
+    # PR #141 SPEC v2: slot_name = the name segment (path) of the
+    # agent URI, e.g. `cc_architect` for `entity://agent/cc_architect`.
     agent_slots =
       workspace_uri
       |> live_agents_in_workspace()
       |> Enum.map(fn agent_uri ->
         slot_name =
-          case agent_uri.host do
-            h when is_binary(h) -> h
+          case agent_uri.path do
+            "/" <> name when name != "" -> name
             _ -> URI.to_string(agent_uri)
           end
 
@@ -416,9 +418,14 @@ defmodule Ezagent.Orchestrator.Tools do
   defp live_agents_in_workspace(%URI{} = workspace_uri) do
     target = URI.to_string(workspace_uri)
 
+    # PR #141 SPEC v2: agent URIs are `entity://agent/<flavor>_<name>`
+    # (scheme=entity, host=agent).
     Ezagent.WorkspaceRegistry.list_all()
     |> Enum.filter(fn {_session_or_agent, ws_str} -> ws_str == target end)
     |> Enum.map(fn {member_str, _ws} -> URI.parse(member_str) end)
-    |> Enum.filter(fn %URI{scheme: s} -> s == "agent" end)
+    |> Enum.filter(fn
+      %URI{scheme: "entity", host: "agent"} -> true
+      _ -> false
+    end)
   end
 end

@@ -4,8 +4,8 @@ defmodule Ezagent.Kind.ServerTest do
 
   setup do
     # Each test gets a unique URI so registry state doesn't leak.
-    # PR-A: agent URIs are typed (agent://<type>/<name>); use "test" type.
-    uri = URI.parse("agent://test/kind-server-#{System.unique_integer([:positive])}")
+    # PR #141: agent URIs are entity://agent/<flavor>_<name>; use "test" flavor.
+    uri = URI.parse("entity://agent/test_kind-server-#{System.unique_integer([:positive])}")
 
     # Wire TestKind/TestBehavior into the BehaviorRegistry for this test —
     # idempotent register so reruns are fine.
@@ -37,7 +37,7 @@ defmodule Ezagent.Kind.ServerTest do
       mode: :call,
       args: %{msg: "hello"},
       ctx: %{
-        caller: URI.parse("user://admin"),
+        caller: URI.parse("entity://user/admin"),
         caps: Ezagent.Entity.User.admin_caps(),
         reply: :ignore
       }
@@ -55,7 +55,7 @@ defmodule Ezagent.Kind.ServerTest do
       mode: :cast,
       args: %{msg: "via-cast"},
       ctx: %{
-        caller: URI.parse("user://admin"),
+        caller: URI.parse("entity://user/admin"),
         caps: Ezagent.Entity.User.admin_caps(),
         reply: {:caller_inbox, self()}
       }
@@ -74,7 +74,7 @@ defmodule Ezagent.Kind.ServerTest do
       mode: :cast,
       args: %{msg: "pre-ready"},
       ctx: %{
-        caller: URI.parse("user://admin"),
+        caller: URI.parse("entity://user/admin"),
         caps: Ezagent.Entity.User.admin_caps(),
         reply: {:caller_inbox, self()}
       }

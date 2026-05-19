@@ -12,7 +12,7 @@ defmodule EzagentCli.Integration.CLIDispatchTest do
   describe "Dispatch.run_action — end-to-end via auto-derive" do
     test "workspace list_members on an existing workspace returns the member list" do
       name = "cli-test-#{System.unique_integer([:positive])}"
-      members = [URI.parse("user://admin"), URI.parse("agent://test-cli")]
+      members = [URI.parse("entity://user/admin"), URI.parse("entity://agent/test_test-cli")]
       {:ok, _pid} = Ezagent.Workspace.create(name, %{members: members})
 
       parsed = %{
@@ -36,7 +36,7 @@ defmodule EzagentCli.Integration.CLIDispatchTest do
       {:ok, _pid} = Ezagent.Workspace.create(name)
 
       parsed = %{
-        options: %{workspace: name, member: URI.parse("agent://cli-new-member")},
+        options: %{workspace: name, member: URI.parse("entity://agent/test_cli-new-member")},
         flags: %{cast: true, json: false}
       }
 
@@ -67,7 +67,7 @@ defmodule EzagentCli.Integration.CLIDispatchTest do
                })
 
       assert Enum.any?(members, fn u ->
-               URI.to_string(u) == "agent://cli-new-member"
+               URI.to_string(u) == "entity://agent/test_cli-new-member"
              end)
     end
   end

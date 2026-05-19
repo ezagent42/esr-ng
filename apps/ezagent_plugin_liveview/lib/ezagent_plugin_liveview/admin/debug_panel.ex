@@ -98,7 +98,7 @@ defmodule EzagentPluginLiveview.Admin.DebugPanel do
                 type="text"
                 name="manual_dispatch[target]"
                 id="manual_dispatch_target"
-                placeholder="agent://echo/default/behavior/echo/say"
+                placeholder="entity://agent/echo_default/behavior/echo/say"
                 style="width: 100%; padding: 6px 10px; border: 1px solid #d1d5da; border-radius: 4px;"
               />
             </div>

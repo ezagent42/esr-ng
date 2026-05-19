@@ -2,7 +2,7 @@ defmodule Ezagent.CapabilityTest do
   use ExUnit.Case, async: true
   alias Ezagent.Capability
 
-  @user_uri URI.parse("user://alice")
+  @user_uri URI.parse("entity://user/alice")
   @system_uri URI.parse("system://bootstrap")
   @other_uri URI.parse("system://other")
   @now ~U[2026-05-15 00:00:00Z]
@@ -12,7 +12,7 @@ defmodule Ezagent.CapabilityTest do
       cap = %Capability{
         kind: :echo,
         behavior: Ezagent.Behavior.Echo,
-        instance: URI.parse("agent://echo"),
+        instance: URI.parse("entity://agent/test_echo"),
         granted_by: @user_uri,
         granted_at: @now
       }
@@ -20,7 +20,7 @@ defmodule Ezagent.CapabilityTest do
       assert Capability.matches?(cap, %{
                kind: :echo,
                behavior: Ezagent.Behavior.Echo,
-               instance: URI.parse("agent://echo")
+               instance: URI.parse("entity://agent/test_echo")
              })
     end
 
@@ -28,7 +28,7 @@ defmodule Ezagent.CapabilityTest do
       cap = %Capability{
         kind: :any,
         behavior: Ezagent.Behavior.Echo,
-        instance: URI.parse("agent://echo"),
+        instance: URI.parse("entity://agent/test_echo"),
         granted_by: @user_uri,
         granted_at: @now
       }
@@ -36,7 +36,7 @@ defmodule Ezagent.CapabilityTest do
       assert Capability.matches?(cap, %{
                kind: :anything,
                behavior: Ezagent.Behavior.Echo,
-               instance: URI.parse("agent://echo")
+               instance: URI.parse("entity://agent/test_echo")
              })
     end
 
@@ -52,7 +52,7 @@ defmodule Ezagent.CapabilityTest do
       assert Capability.matches?(cap, %{
                kind: :random_kind,
                behavior: SomeMod,
-               instance: URI.parse("agent://whatever")
+               instance: URI.parse("entity://agent/test_whatever")
              })
     end
 
@@ -68,7 +68,7 @@ defmodule Ezagent.CapabilityTest do
       refute Capability.matches?(cap, %{
                kind: :chat,
                behavior: Mod,
-               instance: URI.parse("agent://x")
+               instance: URI.parse("entity://agent/test_x")
              })
     end
   end
@@ -120,17 +120,17 @@ defmodule Ezagent.CapabilityTest do
   describe "cap_for_action/3 (Phase 3d)" do
     test "extracts kind type name + behavior from registry + instance from URI" do
       # Echo plugin pre-registers BehaviorRegistry at boot
-      target = URI.new!("agent://echo/default/behavior/echo/say")
+      target = URI.new!("entity://agent/echo_default/behavior/echo/say")
 
       needed = Capability.cap_for_action(Ezagent.Entity.Echo, :say, target)
 
       assert needed.kind == :echo
       assert needed.behavior == Ezagent.Behavior.Echo
-      assert needed.instance == URI.new!("agent://echo/default")
+      assert needed.instance == URI.new!("entity://agent/echo_default")
     end
 
     test "unknown action returns :unknown behavior" do
-      target = URI.new!("agent://echo/default/behavior/echo/say")
+      target = URI.new!("entity://agent/echo_default/behavior/echo/say")
       needed = Capability.cap_for_action(Ezagent.Entity.Echo, :nonexistent_action, target)
       assert needed.behavior == :unknown
     end
@@ -159,7 +159,7 @@ defmodule Ezagent.CapabilityTest do
         kind: :session,
         behavior: :any,
         instance: instance,
-        granted_by: URI.parse("user://admin"),
+        granted_by: URI.parse("entity://user/admin"),
         granted_at: ~U[2026-05-18 00:00:00Z]
       }
     end
@@ -210,12 +210,12 @@ defmodule Ezagent.CapabilityTest do
       # spawn relationship, the cap denies. This is the new
       # placeholder-equivalent (was hard-coded false in PR 42; now
       # ETS lookup that's empty).
-      cap = scoped_cap({:spawned_by, URI.new!("agent://orchestrator-unrecorded")})
+      cap = scoped_cap({:spawned_by, URI.new!("entity://agent/test_orchestrator-unrecorded")})
 
       needed_any_agent = %{
         kind: :agent,
         behavior: :any,
-        instance: URI.parse("agent://worker-no-lineage-#{System.unique_integer([:positive])}")
+        instance: URI.parse("entity://agent/test_worker-no-lineage-#{System.unique_integer([:positive])}")
       }
 
       refute Capability.matches?(cap, needed_any_agent),
@@ -224,8 +224,8 @@ defmodule Ezagent.CapabilityTest do
     end
 
     test "{:spawned_by, P} matches when lineage IS recorded (PR 40 real impl)" do
-      orchestrator = URI.new!("agent://orchestrator-#{System.unique_integer([:positive])}")
-      worker = URI.new!("agent://worker-#{System.unique_integer([:positive])}")
+      orchestrator = URI.new!("entity://agent/test_orchestrator-#{System.unique_integer([:positive])}")
+      worker = URI.new!("entity://agent/test_worker-#{System.unique_integer([:positive])}")
 
       :ok = Ezagent.AgentLineage.record(worker, orchestrator)
 
@@ -244,7 +244,7 @@ defmodule Ezagent.CapabilityTest do
         kind: :agent,
         behavior: :any,
         instance: {:spawned_by, orchestrator},
-        granted_by: URI.parse("user://admin"),
+        granted_by: URI.parse("entity://user/admin"),
         granted_at: ~U[2026-05-18 00:00:00Z]
       }
 
@@ -263,9 +263,9 @@ defmodule Ezagent.CapabilityTest do
     end
 
     test "{:spawned_by, P} does NOT match an unrelated agent (lineage isolation)" do
-      orchestrator_a = URI.new!("agent://orch-a-#{System.unique_integer([:positive])}")
-      orchestrator_b = URI.new!("agent://orch-b-#{System.unique_integer([:positive])}")
-      worker_of_a = URI.new!("agent://worker-of-a-#{System.unique_integer([:positive])}")
+      orchestrator_a = URI.new!("entity://agent/test_orch-a-#{System.unique_integer([:positive])}")
+      orchestrator_b = URI.new!("entity://agent/test_orch-b-#{System.unique_integer([:positive])}")
+      worker_of_a = URI.new!("entity://agent/test_worker-of-a-#{System.unique_integer([:positive])}")
 
       :ok = Ezagent.AgentLineage.record(worker_of_a, orchestrator_a)
 
@@ -273,7 +273,7 @@ defmodule Ezagent.CapabilityTest do
         kind: :agent,
         behavior: :any,
         instance: {:spawned_by, orchestrator_b},
-        granted_by: URI.parse("user://admin"),
+        granted_by: URI.parse("entity://user/admin"),
         granted_at: ~U[2026-05-18 00:00:00Z]
       }
 
@@ -295,7 +295,7 @@ defmodule Ezagent.CapabilityTest do
         kind: :workspace,
         behavior: :any,
         instance: {:within_session, URI.new!("session://main")},
-        granted_by: URI.parse("user://admin"),
+        granted_by: URI.parse("entity://user/admin"),
         granted_at: ~U[2026-05-18 00:00:00Z]
       }
 

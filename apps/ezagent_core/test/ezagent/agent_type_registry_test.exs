@@ -7,93 +7,100 @@ defmodule Ezagent.AgentTypeRegistryTest do
     AgentTypeRegistry.init()
 
     # Clean slate for each test — wipe any registrations our test made
-    # (other plugins' real registrations stay; tests use unique type names).
+    # (other plugins' real registrations stay; tests use unique flavor names).
     :ok
   end
 
-  describe "register/2 + registered_types/0" do
-    test "registers a type and exposes it via registered_types" do
-      type = "test-type-#{System.unique_integer([:positive])}"
+  describe "register/2 + registered_flavors/0" do
+    test "registers a flavor and exposes it via registered_flavors" do
+      flavor = "test-flavor-#{System.unique_integer([:positive])}"
 
       :ok =
-        AgentTypeRegistry.register(type, fn _uri, name ->
+        AgentTypeRegistry.register(flavor, fn _uri, name ->
           send(self(), {:spawned, name})
           {:ok, self()}
         end)
 
-      assert type in AgentTypeRegistry.registered_types()
+      assert flavor in AgentTypeRegistry.registered_flavors()
     end
   end
 
-  describe "spawn/1 — dispatch by URI type segment" do
-    test "calls the registered fn with the URI + name" do
-      type = "deldist-#{System.unique_integer([:positive])}"
+  describe "spawn/1 — dispatch by entity://agent/<flavor>_<name> prefix" do
+    test "calls the registered fn with the URI + full name" do
+      flavor = "deldist#{System.unique_integer([:positive])}"
       this = self()
 
       :ok =
-        AgentTypeRegistry.register(type, fn uri, name ->
+        AgentTypeRegistry.register(flavor, fn uri, name ->
           send(this, {:dispatched, uri, name})
           {:ok, this}
         end)
 
-      uri = URI.new!("agent://#{type}/the-name")
+      uri = URI.new!("entity://agent/#{flavor}_the-name")
       assert {:ok, ^this} = AgentTypeRegistry.spawn(uri)
-      assert_receive {:dispatched, ^uri, "the-name"}, 200
+      assert_receive {:dispatched, ^uri, name}, 200
+      # Per task spec: full name string (flavor prefix + tail) passes through
+      assert name == "#{flavor}_the-name"
     end
 
-    test "rejects URI without type segment" do
-      assert {:error, {:missing_type_segment, "no-type"}} =
-               AgentTypeRegistry.spawn(URI.new!("agent://no-type"))
+    test "rejects URI without flavor prefix" do
+      assert {:error, {:missing_flavor_prefix, "no-underscore"}} =
+               AgentTypeRegistry.spawn(URI.new!("entity://agent/no-underscore"))
     end
 
-    test "rejects unknown type" do
-      assert {:error, {:unknown_agent_type, "made-up-type-xyz"}} =
-               AgentTypeRegistry.spawn(URI.new!("agent://made-up-type-xyz/x"))
+    test "rejects unknown flavor" do
+      assert {:error, {:unknown_agent_flavor, "made-up-flavor-xyz"}} =
+               AgentTypeRegistry.spawn(URI.new!("entity://agent/made-up-flavor-xyz_x"))
     end
 
-    test "rejects non-agent scheme" do
-      assert {:error, {:not_agent_scheme, "session"}} =
+    test "rejects non-entity scheme" do
+      assert {:error, {:not_agent_entity_uri, "session://main"}} =
                AgentTypeRegistry.spawn(URI.new!("session://main"))
     end
 
+    test "rejects entity://user/X (wrong host)" do
+      assert {:error, {:not_agent_entity_uri, "entity://user/admin"}} =
+               AgentTypeRegistry.spawn(URI.new!("entity://user/admin"))
+    end
+
     test "passes through {:already_started, pid} as success" do
-      type = "alread-#{System.unique_integer([:positive])}"
+      flavor = "alread#{System.unique_integer([:positive])}"
       target_pid = spawn(fn -> Process.sleep(:infinity) end)
 
       :ok =
-        AgentTypeRegistry.register(type, fn _uri, _name ->
+        AgentTypeRegistry.register(flavor, fn _uri, _name ->
           {:error, {:already_started, target_pid}}
         end)
 
       assert {:ok, ^target_pid} =
-               AgentTypeRegistry.spawn(URI.new!("agent://#{type}/x"))
+               AgentTypeRegistry.spawn(URI.new!("entity://agent/#{flavor}_x"))
     end
   end
 
   describe "validate_uri/1 — strict shape check" do
     setup do
-      type = "validatest-#{System.unique_integer([:positive])}"
-      :ok = AgentTypeRegistry.register(type, fn _uri, _name -> {:ok, self()} end)
-      {:ok, type: type}
+      flavor = "validatest#{System.unique_integer([:positive])}"
+      :ok = AgentTypeRegistry.register(flavor, fn _uri, _name -> {:ok, self()} end)
+      {:ok, flavor: flavor}
     end
 
-    test "accepts agent://<type>/<name> for a registered type", %{type: type} do
-      assert :ok = AgentTypeRegistry.validate_uri("agent://#{type}/instance-name")
+    test "accepts entity://agent/<flavor>_<name> for a registered flavor", %{flavor: flavor} do
+      assert :ok = AgentTypeRegistry.validate_uri("entity://agent/#{flavor}_instance-name")
     end
 
-    test "rejects agent://<name> (no type segment)" do
-      assert {:error, {:missing_type_segment, _, _}} =
-               AgentTypeRegistry.validate_uri("agent://just-a-name")
+    test "rejects entity://agent/<name> (no flavor prefix)" do
+      assert {:error, {:missing_flavor_prefix, _, _}} =
+               AgentTypeRegistry.validate_uri("entity://agent/just-a-name")
     end
 
-    test "rejects agent://unknown-type/x" do
-      assert {:error, {:unknown_agent_type, "unknown-type-zzzzz", _}} =
-               AgentTypeRegistry.validate_uri("agent://unknown-type-zzzzz/x")
+    test "rejects entity://agent/unknown-flavor_x" do
+      assert {:error, {:unknown_agent_flavor, "unknown-flavor-zzzzz", _}} =
+               AgentTypeRegistry.validate_uri("entity://agent/unknown-flavor-zzzzz_x")
     end
 
-    test "rejects non-agent scheme" do
-      assert {:error, {:not_agent_scheme, "user"}} =
-               AgentTypeRegistry.validate_uri("user://admin")
+    test "rejects non-entity scheme" do
+      assert {:error, {:not_agent_entity_uri, _}} =
+               AgentTypeRegistry.validate_uri("entity://user/admin")
     end
 
     test "rejects malformed URIs" do

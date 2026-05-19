@@ -42,11 +42,11 @@ defmodule EzagentPluginLiveview.AgentsLiveTest do
   end
 
   test "find_by_agent_uri returns :error for unknown URI", %{conn: _conn} do
-    assert :error = Ezagent.PluginCc.PtyServer.find_by_agent_uri(URI.parse("agent://nonexistent"))
+    assert :error = Ezagent.PluginCc.PtyServer.find_by_agent_uri(URI.parse("entity://agent/test_nonexistent"))
   end
 
   test "find_by_agent_uri + status work for a spawned PtyServer (test_mode)", %{conn: conn} do
-    agent_uri = URI.parse("agent://pty-status-test-#{System.unique_integer([:positive])}")
+    agent_uri = URI.parse("entity://agent/test_pty-status-test-#{System.unique_integer([:positive])}")
 
     {:ok, _pid} =
       DynamicSupervisor.start_child(

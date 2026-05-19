@@ -20,11 +20,11 @@ defmodule EzagentWeb.Plugs.RequireUserTest do
     test "passes through and assigns :current_user_uri when session present" do
       conn =
         conn(:get, "/admin")
-        |> init_test_session(%{"current_user_uri" => "user://allen"})
+        |> init_test_session(%{"current_user_uri" => "entity://user/allen"})
         |> RequireUser.call([])
 
       refute conn.halted
-      assert %URI{scheme: "user", host: "allen"} = conn.assigns.current_user_uri
+      assert %URI{scheme: "entity", host: "user", path: "/allen"} = conn.assigns.current_user_uri
     end
   end
 end

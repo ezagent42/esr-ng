@@ -11,7 +11,7 @@ defmodule EzagentCore.Repo.Migrations.Pr131AgentUriTypeSegment do
     - `class: "cc.pty"` → rewrite `agent_uri` to `agent://cc/<name>`
     - `class: "cc.channel_instance"` → same (cc type)
     - `class: "curl.agent"` → `agent://curl/<name>` (also handles
-      legacy `curl-agent://X` scheme)
+      legacy `curl-entity://agent/test_X` scheme)
   - `routing_rules.receivers` (JSON array of strings) — rewrite
     every URI based on the registered agent_uri ↔ class mapping
     derived from workspaces above
@@ -88,7 +88,7 @@ defmodule EzagentCore.Repo.Migrations.Pr131AgentUriTypeSegment do
   defp normalize_agent_uri("agent://" <> rest, type) do
     case URI.new("agent://" <> rest) do
       {:ok, %URI{host: host, path: nil}} ->
-        # `agent://just-a-name` → `agent://<type>/just-a-name`
+        # `entity://agent/test_just-a-name` → `agent://<type>/just-a-name`
         "agent://#{type}/#{host}"
 
       {:ok, %URI{host: existing_type, path: "/" <> _name}} ->
@@ -102,7 +102,7 @@ defmodule EzagentCore.Repo.Migrations.Pr131AgentUriTypeSegment do
     end
   end
 
-  # `curl-agent://X` legacy scheme → `agent://curl/X`
+  # `curl-entity://agent/test_X` legacy scheme → `entity://agent/curl_X`
   defp normalize_agent_uri("curl-agent://" <> name, "curl"), do: "agent://curl/#{name}"
 
   defp normalize_agent_uri(other, _type), do: other

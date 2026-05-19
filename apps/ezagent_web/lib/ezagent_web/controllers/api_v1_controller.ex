@@ -24,7 +24,7 @@ defmodule EzagentWeb.ApiV1Controller do
       Authorization: Bearer esr_pat_xxx
       Content-Type: application/json
 
-      {"target": "agent://echo", "args": {"message": "hi"}}
+      {"target": "entity://agent/echo_default", "args": {"message": "hi"}}
 
   Response:
 

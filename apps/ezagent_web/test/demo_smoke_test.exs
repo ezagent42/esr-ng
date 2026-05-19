@@ -35,7 +35,7 @@ defmodule EzagentCore.Invariants.DemoSmokeTest do
   `:slices` vs actual `:state`) and didn't parse the string URI
   stored in KindRegistry. Result: empty list for every known Kind.
 
-  Test: AutoDerive.list_instances(:user) must contain user://admin.
+  Test: AutoDerive.list_instances(:user) must contain entity://user/admin.
   """
   use ExUnit.Case, async: false
 
@@ -103,13 +103,13 @@ defmodule EzagentCore.Invariants.DemoSmokeTest do
       assert length(instances) > 0,
              """
              EzagentDomainUi.AutoDerive.list_instances(:user) returned []
-             but user://admin should be live in the registry. Check
+             but entity://user/admin should be live in the registry. Check
              the state-field accessors (:kind vs :kind_module,
              :state vs :slices) in apps/ezagent_domain_ui/lib/.../auto_derive.ex.
              """
 
       uris = Enum.map(instances, &URI.to_string(&1.uri))
-      assert "user://admin" in uris
+      assert "entity://user/admin" in uris
     end
 
     test "list_instances(:session) finds session://main" do
@@ -118,9 +118,9 @@ defmodule EzagentCore.Invariants.DemoSmokeTest do
       assert "session://main" in uris
     end
 
-    test "instance_detail/1 returns a populated map for user://admin" do
+    test "instance_detail/1 returns a populated map for entity://user/admin" do
       {:ok, detail} =
-        EzagentDomainUi.AutoDerive.instance_detail(URI.parse("user://admin"))
+        EzagentDomainUi.AutoDerive.instance_detail(URI.parse("entity://user/admin"))
 
       assert detail.kind_module == "Ezagent.Entity.User"
       assert is_map(detail.slices)

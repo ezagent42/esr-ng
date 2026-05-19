@@ -10,8 +10,8 @@ defmodule Mix.Tasks.Ezagent.User.Token do
 
   ## Examples
 
-      mix ezagent.user.token user://admin --rotate
-      mix ezagent.user.token user://alice --revoke
+      mix ezagent.user.token entity://user/admin --rotate
+      mix ezagent.user.token entity://user/alice --revoke
 
   ## After rotating
 

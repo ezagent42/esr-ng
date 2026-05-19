@@ -11,7 +11,7 @@ defmodule EzagentPluginLiveview.UserCapsLive do
   ## Feishu user note
 
   Feishu webhook → ESR maps the inbound Feishu user_id to a User Kind
-  URI (e.g. `user://feishu:ou_xxx`). Once that User exists in the
+  URI (e.g. `entity://user/feishu:ou_xxx`). Once that User exists in the
   KindRegistry, this LV grants caps to it the same way as any local
   user — the "Feishu cap-grant UI" the SPEC calls out is exactly this
   page, with the URI shaped accordingly.

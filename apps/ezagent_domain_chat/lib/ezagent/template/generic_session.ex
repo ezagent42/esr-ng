@@ -8,7 +8,7 @@ defmodule Ezagent.Template.GenericSession do
       %{
         "class" => "session.generic",            # required, picked up by Workspace.add_template/3
         "session_name" => "architect-review",    # required — becomes session://<name>
-        "members" => ["user://admin", "agent://cc-architect"],  # URI strings
+        "members" => ["entity://user/admin", "entity://agent/cc_architect"],  # URI strings
         "routing_rules" => [...]                 # optional; v1 ignored with warning if present
       }
 
@@ -176,7 +176,7 @@ defmodule Ezagent.Template.GenericSession do
         type: :text,
         label: "Members (comma-separated URIs)",
         required: false,
-        placeholder: "user://admin,agent://cc-architect"
+        placeholder: "entity://user/admin,entity://agent/cc_architect"
       }
     ]
   end

@@ -19,7 +19,7 @@ defmodule Ezagent.PluginCc.Template.CcAgent do
 
       %{
         "class" => "cc.agent",
-        "agent_uri" => "agent://cc/<name>",  # PR #131 typed shape
+        "agent_uri" => "entity://agent/cc_<name>",  # PR #141 SPEC v2
         "mode" => "local-pty" | "remote-channel",
         "cwd" => "/path"                     # required for local-pty
       }
@@ -66,16 +66,20 @@ defmodule Ezagent.PluginCc.Template.CcAgent do
 
   defp check_agent_uri(%{"agent_uri" => uri_str}) when is_binary(uri_str) and uri_str != "" do
     case URI.new(uri_str) do
-      {:ok, %URI{scheme: "agent", host: "cc", path: "/" <> name}} when name != "" ->
-        :ok
+      {:ok, %URI{scheme: "entity", host: "agent", path: "/" <> name}} when name != "" ->
+        # PR #141 SPEC v2 §5.14: agent flavor lives in the name prefix
+        # as `<flavor>_<rest>`. cc.agent template requires flavor=cc.
+        case String.split(name, "_", parts: 2) do
+          ["cc", rest] when rest != "" -> :ok
+          [flavor, _] -> {:error, {:wrong_agent_flavor, flavor, expected: "cc"}}
+          _ -> {:error, {:missing_flavor_prefix, uri_str,
+                         "agent URIs must be `entity://agent/cc_<name>` (PR #141)"}}
+        end
 
-      {:ok, %URI{scheme: "agent", host: other, path: "/" <> _}} ->
-        {:error, {:wrong_agent_type, other, expected: "cc"}}
-
-      {:ok, %URI{scheme: "agent"}} ->
+      {:ok, %URI{scheme: "entity"}} ->
         {:error,
-         {:missing_type_segment, uri_str,
-          "agent URIs must be `agent://cc/<name>` (PR #131)"}}
+         {:invalid_agent_uri, uri_str,
+          "agent URIs must be `entity://agent/cc_<name>` (PR #141)"}}
 
       _ ->
         {:error, {:bad_agent_uri, uri_str}}
@@ -169,9 +173,9 @@ defmodule Ezagent.PluginCc.Template.CcAgent do
       %{
         name: "agent_uri",
         type: :uri,
-        label: "Agent URI (agent://cc/<name>)",
+        label: "Agent URI (entity://agent/cc_<name>)",
         required: true,
-        placeholder: "agent://cc/cc-architect"
+        placeholder: "entity://agent/cc_architect"
       },
       %{
         name: "mode",

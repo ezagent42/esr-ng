@@ -25,8 +25,9 @@ defmodule Ezagent.Capability.Parser do
   @doc """
   Parse a caps string into a list of Capability structs.
 
-  `granter` is the URI of who is granting (e.g. `user://admin` when
-  admin runs `mix ezagent.user.create`). `now` defaults to current UTC.
+  `granter` is the URI of who is granting (e.g. `entity://user/admin`
+  when admin runs `mix ezagent.user.create`). `now` defaults to
+  current UTC.
   """
   @spec parse(String.t(), URI.t(), DateTime.t()) ::
           {:ok, [Ezagent.Capability.t()]} | {:error, term()}

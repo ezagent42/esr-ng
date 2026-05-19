@@ -2,48 +2,66 @@ defmodule Ezagent.URI do
   @moduledoc """
   URI helpers — thin convenience over stdlib `URI`.
 
-  ## Shape
+  ## Shape (SPEC v2 — PR #141 onwards)
 
-  Every Ezagent URI has two parts:
+  SPEC v2 §5.1 defines the **target** uniform 2-segment authority
+  for every Ezagent URI:
 
-      <instance>[ /<sub-resource> ]
+      <scheme>://<type>/<name>[/<sub-resource>...]
 
-  The instance identifies a Kind in `KindRegistry`. The sub-resource
-  (optional) addresses something about that instance — currently only
-  `/behavior/<kind>/<action>` is defined, but the parser is open to
-  future sub-resource types (`/auth/...`, `/snapshot/...`, etc.)
-  without modification.
+  - `<scheme>` is one of the registered schemes (see `@known_schemes`).
+  - `<type>` is the value on the scheme's type axis (e.g. `user` /
+    `agent` for `entity://`, free-form tenant name for `workspace://`).
+  - `<name>` is the instance identity within `<scheme>/<type>`.
+  - Anything after `/<name>` is sub-resource (currently only
+    `/behavior/<kind>/<action>` is defined; the parser is open).
 
-  ### Instance shape per scheme
+  PR #141 implements the migration for the `entity://` scheme (user
+  + agent merged). The other 2-seg-target schemes (`workspace://`,
+  `session://`, `template://`, `resource://`, `system://`) migrate
+  in later PRs (#143/#144/#146) — until then their existing 1-seg
+  shape is preserved by `instance/1` (legacy clause).
 
-      agent://<type>/<name>      # PR #131: type segment required
-      session://<name>
-      user://<name>
-      resource://<name>
-      system://<name>
+  ### Examples
 
-  ### Sub-resource examples
+      entity://user/admin
+      entity://agent/cc_demo-builder
+      session://main             # legacy 1-seg, migrating in #146
+      workspace://default        # legacy 1-seg, migrating in #144
+      template://agent/cc-orchestrator
+      system://routing/default
 
-      agent://cc/demo-builder/behavior/chat/receive
-      session://main/behavior/chat/send
-      user://admin/behavior/identity/check
+  ## SPEC v2 deltas (PR #141)
 
-  ## Parser layering (PR-A)
+  - `user://` + `agent://` schemes deleted — merged into `entity://`.
+  - `instance/1` is now **uniform across all schemes**: it splits
+    on `host + /<first-path-segment>`, treating every URI the same.
+    The pre-PR-141 agent-specific clause is gone.
+  - Agent flavor (cc / curl / echo) moves OUT of the URI type segment
+    INTO the name segment as a free-form prefix:
+    `entity://agent/cc_demo-builder`, `entity://agent/curl_my-deepseek`
+    (SPEC §5.14).
+
+  ## Parser layering
 
   - `instance/1` is **positional**: it knows where the instance ends
-    based on scheme structure alone, NOT by searching for a keyword
-    like "behavior". For `agent://`, that's `host + 1st path segment`;
-    for all other schemes, it's `host` only.
+    based on uniform structure (always `host + /first-path-segment`),
+    NOT by searching for a keyword like "behavior".
   - `behavior_action/1` is **named**: it looks for the `behavior/`
     keyword in the sub-resource portion. A future `auth_action/1`
     would do the same for `auth/`. Each named parser returns `:error`
     for sub-resources it doesn't recognize.
 
-  This split means adding a new sub-resource type (e.g. `auth/login`)
-  only requires writing a new parser; `instance/1` doesn't change.
+  ## Deferred-deletion schemes
+
+  `feishu`, `message`, `routing-admin`, `pty-input` remain in
+  `@known_schemes` for now — later PRs trim them:
+  - PR #143 deletes `feishu`
+  - PR #144 deletes `routing-admin` + `pty-input`
+  - PR #147 deletes `message`
   """
 
-  @known_schemes ~w(agent session user resource system)
+  @known_schemes ~w(entity workspace session template resource system feishu message routing-admin pty-input)
 
   @doc """
   Parse a binary URI into a stdlib `%URI{}`. Raises on malformed input
@@ -71,35 +89,38 @@ defmodule Ezagent.URI do
   Return the instance form of a URI — strip the sub-resource portion
   (and any query/fragment).
 
-  **Positional split, scheme-aware** — does NOT search for keywords
-  like `behavior`. The split point depends only on scheme structure:
+  **PR #141 SPEC v2 transitional rule**: 2-segment-authority schemes
+  (`entity://` today; `workspace://` + `session://` + `template://`
+  + `resource://` + `system://` migrating in later PRs) use the
+  uniform split `host + /<first-path-segment>`. The pre-PR-131
+  agent-specific clause is generalized to `entity://`.
 
-  - `agent://` (PR #131): instance = `agent://<type>/<name>`,
-    so the first path segment is part of the instance; segments
-    2+ are the sub-resource.
-  - All other schemes: instance = `<scheme>://<host>`, so the
-    entire path is the sub-resource.
+  1-segment-authority schemes (legacy `session://<name>`,
+  `workspace://<name>`, etc., still in use until PRs #143/#144/#146
+  migrate them) keep the prior "strip entire path" behavior so
+  `session://main/behavior/chat/send` continues to resolve to
+  `session://main` until the query-string action syntax lands
+  (PR #146).
 
   Examples:
-  - `agent://echo/default` → unchanged (no sub-resource)
-  - `agent://cc/demo-builder/behavior/chat/receive`
-    → `%URI{scheme: "agent", host: "cc", path: "/demo-builder"}`
-  - `agent://cc/demo-builder/auth/whatever` (hypothetical)
-    → `%URI{scheme: "agent", host: "cc", path: "/demo-builder"}`
+  - `entity://user/admin` → unchanged (no sub-resource)
+  - `entity://agent/cc_demo-builder/behavior/chat/receive`
+    → `%URI{scheme: "entity", host: "agent", path: "/cc_demo-builder"}`
   - `session://main/behavior/chat/send`
-    → `%URI{scheme: "session", host: "main", path: nil}`
+    → `%URI{scheme: "session", host: "main", path: nil}` (legacy
+       1-seg session URI; path stripped entirely)
+  - `workspace://default/main` → unchanged
 
   Used by dispatch to find the instance pid in KindRegistry.
   """
   @spec instance(URI.t()) :: URI.t()
   def instance(%URI{path: nil} = uri), do: %URI{uri | query: nil, fragment: nil}
 
-  def instance(%URI{scheme: "agent", path: "/" <> rest} = uri) do
-    # agent://<type>/<name>[/<sub-resource...>]
-    # The instance ends after the first path segment (the name).
+  def instance(%URI{scheme: "entity", path: "/" <> rest} = uri) do
+    # PR #141 SPEC v2 §5.1 — uniform 2-segment authority for entity:
+    # entity://<type>/<name>[/<sub-resource>...]
     case String.split(rest, "/", parts: 2) do
       [_name_only] ->
-        # path = "/<name>" — already pure instance
         %URI{uri | query: nil, fragment: nil}
 
       [name, _subresource] ->
@@ -108,7 +129,10 @@ defmodule Ezagent.URI do
   end
 
   def instance(%URI{path: _path} = uri) do
-    # Non-agent schemes: instance = <scheme>://<host>; path is sub-resource.
+    # Legacy 1-segment-authority schemes (session/workspace/template/
+    # resource/system/routing-admin/pty-input/feishu/message) —
+    # entire path is sub-resource. Migrated to uniform split in
+    # later PRs (#143/#144/#146).
     %URI{uri | path: nil, query: nil, fragment: nil}
   end
 
@@ -119,16 +143,15 @@ defmodule Ezagent.URI do
   sub-resource isn't a behavior call — e.g. it's `/auth/...`").
 
   **Named parser** — sibling to a hypothetical `auth_action/1`. The
-  parser is scheme-aware in the same way `instance/1` is: it knows
-  where the sub-resource starts (positional) and then looks for the
-  `behavior/` prefix within that sub-resource.
+  parser uses `subresource/1` to locate the sub-resource portion
+  (positional) and then looks for the `behavior/` prefix within it.
 
   Examples:
-  - `agent://echo/default/behavior/echo/say` → `{:ok, {:echo, :say}}`
-  - `agent://cc/demo-builder/behavior/chat/receive` → `{:ok, {:chat, :receive}}`
-  - `session://main/behavior/chat/send` → `{:ok, {:chat, :send}}`
-  - `agent://cc/demo-builder/auth/login` → `{:error, :malformed_path}`
-  - `agent://cc/demo-builder` → `{:error, :malformed_path}`
+  - `entity://agent/echo_default/behavior/echo/say` → `{:ok, {:echo, :say}}`
+  - `entity://agent/cc_demo-builder/behavior/chat/receive` → `{:ok, {:chat, :receive}}`
+  - `session://default/main/behavior/chat/send` → `{:ok, {:chat, :send}}`
+  - `entity://agent/cc_demo-builder/auth/login` → `{:error, :malformed_path}`
+  - `entity://agent/cc_demo-builder` → `{:error, :malformed_path}`
   """
   @spec behavior_action(URI.t()) ::
           {:ok, {atom(), atom()}} | {:error, :malformed_path}
@@ -152,21 +175,21 @@ defmodule Ezagent.URI do
   Return the sub-resource portion of a URI as a string (no leading
   slash), or `""` if there is none.
 
-  **Positional, scheme-aware** — the mirror image of `instance/1`.
-  Made public so future named parsers (e.g. `auth_action/1`) can
-  reuse the same split rule without re-deriving it.
+  **Positional, uniform** — the mirror image of `instance/1`. Made
+  public so future named parsers (e.g. `auth_action/1`) can reuse the
+  same split rule without re-deriving it.
 
   Examples:
-  - `agent://echo/default` → `""`
-  - `agent://cc/demo-builder/behavior/chat/receive` → `"behavior/chat/receive"`
-  - `agent://cc/demo-builder/auth/login` → `"auth/login"`
-  - `session://main/behavior/chat/send` → `"behavior/chat/send"`
-  - `user://admin` → `""`
+  - `entity://user/admin` → `""`
+  - `entity://agent/cc_demo-builder/behavior/chat/receive` → `"behavior/chat/receive"`
+  - `entity://agent/cc_demo-builder/auth/login` → `"auth/login"`
+  - `session://default/main/behavior/chat/send` → `"behavior/chat/send"`
   """
   @spec subresource(URI.t()) :: String.t()
   def subresource(%URI{path: nil}), do: ""
 
-  def subresource(%URI{scheme: "agent", path: "/" <> rest}) do
+  def subresource(%URI{scheme: "entity", path: "/" <> rest}) do
+    # 2-segment authority: name is first segment; remainder is sub.
     case String.split(rest, "/", parts: 2) do
       [_name_only] -> ""
       [_name, sub] -> sub

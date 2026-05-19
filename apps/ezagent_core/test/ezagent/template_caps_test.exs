@@ -35,7 +35,7 @@ defmodule Ezagent.TemplateCapsTest do
       kind: :template,
       behavior: behavior_atom,
       instance: instance,
-      granted_by: URI.parse("user://admin"),
+      granted_by: URI.parse("entity://user/admin"),
       granted_at: ~U[2026-05-18 00:00:00Z]
     }
   end

@@ -19,7 +19,7 @@ defmodule Ezagent.PluginCc.SnapshotBufferTest do
     # Tests run under Mix.env() == :test, so PtyServer's test_mode
     # short-circuits the real :exec spawn. We can still get_state on
     # the GenServer to verify the snapshot path.
-    agent_uri = URI.new!("agent://snapshot-test-#{System.unique_integer([:positive])}")
+    agent_uri = URI.new!("entity://agent/test_snapshot-test-#{System.unique_integer([:positive])}")
 
     {:ok, pid} =
       DynamicSupervisor.start_child(
@@ -55,7 +55,7 @@ defmodule Ezagent.PluginCc.SnapshotBufferTest do
     end
 
     test "returns :error for unknown agent_uri" do
-      ghost = URI.new!("agent://does-not-exist-#{System.unique_integer([:positive])}")
+      ghost = URI.new!("entity://agent/test_does-not-exist-#{System.unique_integer([:positive])}")
       assert :error = PtyServer.snapshot_buffer(ghost)
     end
   end
@@ -66,7 +66,7 @@ defmodule Ezagent.PluginCc.SnapshotBufferTest do
     end
 
     test "returns :error for unknown agent_uri" do
-      ghost = URI.new!("agent://does-not-exist-#{System.unique_integer([:positive])}")
+      ghost = URI.new!("entity://agent/test_does-not-exist-#{System.unique_integer([:positive])}")
       assert :error = PtyServer.trigger_redraw(ghost)
     end
   end

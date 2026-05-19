@@ -10,25 +10,26 @@ defmodule EzagentPluginFeishu.MentionParser do
   need to exist in the chat). To target an ESR agent (which has no
   Feishu identity), we use the simpler convention:
 
-      @<agent-name>  →  agent://<agent-name>
+      @<agent-name>  →  entity://agent/<flavor>_<agent-name>
 
   ESR is the source of truth for agent URIs, and the chat is just a
-  human-readable surface. If you have an `agent://cc-architect` live
-  and someone types `@cc-architect 看看`, the message routes only
+  human-readable surface. If you have an `entity://agent/cc_architect`
+  live and someone types `@architect 看看`, the message routes only
   to that agent via MentionRouting (the existing matcher).
 
-  ## Resolution
+  ## Resolution (PR #141 SPEC v2)
 
   Each `@<name>` token expands to one candidate per registered agent
-  type (`agent://<type>/<name>`); live agents in `Ezagent.KindRegistry`
-  pass through. Unknown names are ignored (no Message mention added —
-  admin sees the message in /admin but no agent gets singled out).
+  flavor (`entity://agent/<flavor>_<name>`); live agents in
+  `Ezagent.KindRegistry` pass through. Unknown names are ignored
+  (no Message mention added — admin sees the message in /admin but
+  no agent gets singled out).
 
-  ## UX: name-only mention with type auto-discovery (PR-A)
+  ## UX: name-only mention with flavor auto-discovery
 
-  Users type `@<name>`, not `@<type>/<name>` — the parser asks
-  `AgentTypeRegistry.registered_types/0` for every type and tries
-  each one. If the same name happens to exist under multiple types
+  Users type `@<name>`, not `@<flavor>_<name>` — the parser asks
+  `AgentTypeRegistry.registered_flavors/0` for every flavor and tries
+  each one. If the same name happens to exist under multiple flavors
   (rare), both URIs are returned (both mentioned).
 
   Allen 2026-05-17: "B2 路线可以，暂时只考虑文字" — text only,
@@ -42,8 +43,8 @@ defmodule EzagentPluginFeishu.MentionParser do
   @doc """
   Extract live agent URIs from free text. Returns `[URI.t()]`.
 
-      iex> EzagentPluginFeishu.MentionParser.extract_agent_mentions("@cc-architect look")
-      [%URI{scheme: "agent", host: "cc", path: "/cc-architect", ...}]  # if live
+      iex> EzagentPluginFeishu.MentionParser.extract_agent_mentions("@architect look")
+      [%URI{scheme: "entity", host: "agent", path: "/cc_architect", ...}]  # if live
 
   Returns `[]` if no `@name` tokens or none of them resolve.
   """
@@ -61,10 +62,12 @@ defmodule EzagentPluginFeishu.MentionParser do
   def extract_agent_mentions(_), do: []
 
   # Each `@name` token expands to one candidate per registered agent
-  # type. live? filters down to whichever URIs are actually alive.
+  # flavor. live? filters down to whichever URIs are actually alive.
+  # PR #141 SPEC v2: agent URIs are `entity://agent/<flavor>_<name>`
+  # (flavor as free-form name prefix).
   defp candidate_uris(name) do
-    for type <- AgentTypeRegistry.registered_types() do
-      URI.parse("agent://#{type}/#{name}")
+    for flavor <- AgentTypeRegistry.registered_flavors() do
+      URI.parse("entity://agent/#{flavor}_#{name}")
     end
   end
 
