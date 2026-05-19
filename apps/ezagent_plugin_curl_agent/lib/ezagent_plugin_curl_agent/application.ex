@@ -8,12 +8,20 @@ defmodule EzagentPluginCurlAgent.Application do
      Kind.Server children spawned by the Template Class)
   2. Register `(Entity.CurlAgent, :receive)`, `(Entity.CurlAgent, :reset_conversation)`,
      `(Entity.CurlAgent, :configure)` → `Behavior.CurlAgent` in BehaviorRegistry
-  3. Register "curl" flavor in `Ezagent.AgentTypeRegistry`. PR #141
-     SPEC v2 §5.14: agent URIs are `entity://agent/<flavor>_<name>`;
-     chat plugin's `entity://` spawn fn delegates to AgentTypeRegistry
-     for `host = "agent"`, which dispatches by flavor to this fn.
-  4. Register `curl.agent` Template Class so workspaces can declare
+  3. Register `curl.agent` Template Class so workspaces can declare
      instances via the standard add-template UI
+
+  ## PR #149 (SPEC v2 §5.14)
+
+  `Ezagent.AgentTypeRegistry` was deleted. This plugin no longer
+  registers a `"curl"` flavor → spawn fn pair. Curl agents materialize
+  via either:
+  - `Ezagent.PluginCurlAgent.Template.instantiate/3` (workspace path,
+    spawns under the plugin's own `InstanceSupervisor`); or
+  - the chat plugin's `entity://` SpawnRegistry fn, which resolves
+    `entity://agent/curl_<name>` to `Ezagent.Entity.CurlAgent` via
+    snapshot / template / flavor-prefix lookup and spawns under
+    `EzagentDomainChat.AgentSupervisor`.
   """
 
   use Application
@@ -32,7 +40,6 @@ defmodule EzagentPluginCurlAgent.Application do
     case Supervisor.start_link(children, strategy: :one_for_one, name: __MODULE__) do
       {:ok, sup_pid} ->
         :ok = register_behaviors()
-        :ok = register_spawn_fn()
         :ok = register_template_class()
         # Decision #112 boot-ordering: when chat plugin ran
         # Workspace.Loader.load_all/0 before this plugin registered
@@ -50,22 +57,6 @@ defmodule EzagentPluginCurlAgent.Application do
     for action <- CurlAgentBehavior.actions() do
       :ok = BehaviorRegistry.register(CurlAgentKind, action, CurlAgentBehavior)
     end
-
-    :ok
-  end
-
-  defp register_spawn_fn do
-    # PR #141 (SPEC v2): agent URIs are `entity://agent/<flavor>_<name>`
-    # — flavor moves to the name prefix (§5.14). Register "curl" flavor
-    # → Entity.CurlAgent in the AgentTypeRegistry; chat plugin's
-    # `entity://` SpawnRegistry fn delegates here for `host = "agent"`.
-    :ok =
-      Ezagent.AgentTypeRegistry.register("curl", fn uri, _name ->
-        DynamicSupervisor.start_child(
-          EzagentPluginCurlAgent.InstanceSupervisor,
-          {Ezagent.Kind.Server, {CurlAgentKind, %{uri: uri}}}
-        )
-      end)
 
     :ok
   end

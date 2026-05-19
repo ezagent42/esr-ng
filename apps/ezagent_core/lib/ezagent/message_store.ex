@@ -11,14 +11,14 @@ defmodule Ezagent.MessageStore do
   ## Phase 3 multi-session persist (#P1-4 fix)
 
   Phase 2 wrote `messages` table with `session_uri` column directly.
-  Phase 3 D8 (reply to multiple sessions) needs same `message_uri` to
-  appear in multiple sessions, but `messages.uri` is PK (Decision #40
+  Phase 3 D8 (reply to multiple sessions) needs same `message_id` to
+  appear in multiple sessions, but `messages.id` is PK (Decision #40
   identity invariant). Resolution:
 
-  - `messages` table: still 1 row per `message_uri`. `session_uri`
+  - `messages` table: still 1 row per `message_id`. `session_uri`
     column kept (set on first write only) for Phase 2 backward compat;
     queries in Phase 3 use the join table instead.
-  - `message_routings` table (new): one row per `(message_uri, session_uri)`
+  - `message_routings` table (new): one row per `(message_id, session_uri)`
     — the canonical per-session presence record.
   - `write/2` upserts messages (on_conflict: :nothing) + always inserts
     a fresh message_routings row.
@@ -29,7 +29,7 @@ defmodule Ezagent.MessageStore do
   - `write/2(message, session_uri)` — persist Message in a session
     context. Synchronous (Phase 2 messages are first-class; write
     failure means caller's send fails, no silent degrade per
-    DECISIONS impl-time §write-failure). Idempotent on (message_uri,
+    DECISIONS impl-time §write-failure). Idempotent on (message_id,
     session_uri) pair via upsert + unique index.
   - `in_session_since/2(session_uri, since)` — messages in this
     session strictly after `since`. Ascending order. Used by
@@ -37,8 +37,8 @@ defmodule Ezagent.MessageStore do
     via SQL `LIMIT 1000` per DECISIONS P2-D3 failure mode (4)
   - `recent_in_session/2(session_uri, limit)` — N most recent
     messages, descending. LV /admin mount uses this to render history
-  - `by_uri/1(message_uri)` — single Message lookup for `ref` chain
-    following / debugging
+  - `by_id/1(message_id)` — single Message lookup for `ref_id` chain
+    following / debugging (renamed from `by_uri/1` in PR #149)
 
   All functions wrap `EzagentCore.Repo` calls. Custom Ecto.URI type
   handles URI struct ↔ string at column boundary.
@@ -56,7 +56,7 @@ defmodule Ezagent.MessageStore do
   Phase 3:
   - First-time write: insert `messages` row (with messages.session_uri
     set to this session) + insert `message_routings` row
-  - Subsequent writes of same `message_uri` to a different session:
+  - Subsequent writes of same `message_id` to a different session:
     upsert messages = noop (PK conflict on `:nothing`) + add
     `message_routings` row (different session_uri makes composite PK
     unique)
@@ -72,17 +72,17 @@ defmodule Ezagent.MessageStore do
     # Wrapped in a transaction so we don't end up with messages row
     # but missing routing, or vice versa.
     Repo.transaction(fn ->
-      case Repo.insert(msg_with_session, on_conflict: :nothing, conflict_target: :uri) do
+      case Repo.insert(msg_with_session, on_conflict: :nothing, conflict_target: :id) do
         {:ok, _} ->
           routing = %MessageRouting{
-            message_uri: msg.uri,
+            message_id: msg.id,
             session_uri: URI.to_string(session_uri),
             inserted_at: now
           }
 
           case Repo.insert(routing,
                  on_conflict: :nothing,
-                 conflict_target: [:message_uri, :session_uri]
+                 conflict_target: [:message_id, :session_uri]
                ) do
             {:ok, _} -> msg_with_session
             {:error, reason} -> Repo.rollback(reason)
@@ -106,7 +106,7 @@ defmodule Ezagent.MessageStore do
 
     from(m in Message,
       join: r in MessageRouting,
-      on: r.message_uri == m.uri,
+      on: r.message_id == m.id,
       where: r.session_uri == ^session_str and r.inserted_at > ^since,
       order_by: [asc: r.inserted_at],
       limit: @replay_cap
@@ -125,7 +125,7 @@ defmodule Ezagent.MessageStore do
 
     from(m in Message,
       join: r in MessageRouting,
-      on: r.message_uri == m.uri,
+      on: r.message_id == m.id,
       where: r.session_uri == ^session_str,
       order_by: [desc: r.inserted_at],
       limit: ^limit
@@ -151,7 +151,7 @@ defmodule Ezagent.MessageStore do
 
     from(m in Message,
       join: r in MessageRouting,
-      on: r.message_uri == m.uri,
+      on: r.message_id == m.id,
       where: r.session_uri == ^session_str and r.inserted_at < ^cursor,
       order_by: [desc: r.inserted_at],
       limit: ^limit
@@ -160,17 +160,20 @@ defmodule Ezagent.MessageStore do
   end
 
   @doc """
-  Single Message lookup by URI. Returns `{:ok, message}` or `:error`.
+  Single Message lookup by id. Returns `{:ok, message}` or `:error`.
 
-  Used for `ref` chain following — if `msg.ref == "message://X"` and
+  Used for `ref_id` chain following — if `msg.ref_id == "<id>"` and
   a consumer wants the original referenced message, this is the lookup.
   Returns the message with its **first-written** session_uri (Phase 2
   semantics) — for Phase 3 multi-session presence, query
   `message_routings` directly.
+
+  PR #149 (SPEC v2 §5.13): renamed from `by_uri/1`. Message ids are
+  plain UUID strings, not URIs.
   """
-  @spec by_uri(String.t()) :: {:ok, Message.t()} | :error
-  def by_uri(message_uri) when is_binary(message_uri) do
-    case Repo.get(Message, message_uri) do
+  @spec by_id(String.t()) :: {:ok, Message.t()} | :error
+  def by_id(message_id) when is_binary(message_id) do
+    case Repo.get(Message, message_id) do
       nil -> :error
       %Message{} = m -> {:ok, m}
     end
@@ -183,9 +186,9 @@ defmodule Ezagent.MessageStore do
   check in `Ezagent.Behavior.Chat.handle_kind_message/3`.
   """
   @spec sessions_for_message(String.t()) :: [String.t()]
-  def sessions_for_message(message_uri) when is_binary(message_uri) do
+  def sessions_for_message(message_id) when is_binary(message_id) do
     from(r in MessageRouting,
-      where: r.message_uri == ^message_uri,
+      where: r.message_id == ^message_id,
       select: r.session_uri
     )
     |> Repo.all()

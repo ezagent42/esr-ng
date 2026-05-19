@@ -91,7 +91,7 @@ defmodule EzagentPluginLiveview.AdminLive do
       |> assign(:current_session_uri, current_session_uri)
       |> assign(:sessions, EzagentDomainChat.list_sessions())
       |> assign(:session_members, read_session_members(current_session_uri))
-      |> assign(:agent_options, list_session_agent_uris(current_session_uri))
+      |> assign(:member_options, list_session_member_uris(current_session_uri))
       |> assign(:floating_agents, list_floating_agents())
       |> assign(:form,
         to_form(%{"target" => "", "args" => "", "mode" => "call"}, as: "manual_dispatch")
@@ -129,7 +129,7 @@ defmodule EzagentPluginLiveview.AdminLive do
     {:noreply,
      socket
      |> assign(:connected_bridges, list_bridges_safely())
-     |> assign(:agent_options, list_session_agent_uris(socket.assigns.current_session_uri))
+     |> assign(:member_options, list_session_member_uris(socket.assigns.current_session_uri))
      |> assign(:floating_agents, list_floating_agents())}
   end
 
@@ -137,7 +137,7 @@ defmodule EzagentPluginLiveview.AdminLive do
     {:noreply,
      socket
      |> assign(:connected_bridges, list_bridges_safely())
-     |> assign(:agent_options, list_session_agent_uris(socket.assigns.current_session_uri))
+     |> assign(:member_options, list_session_member_uris(socket.assigns.current_session_uri))
      |> assign(:floating_agents, list_floating_agents())}
   end
 
@@ -146,7 +146,7 @@ defmodule EzagentPluginLiveview.AdminLive do
       {:noreply,
        socket
        |> assign(:session_members, read_session_members(socket.assigns.current_session_uri))
-       |> assign(:agent_options, list_session_agent_uris(socket.assigns.current_session_uri))
+       |> assign(:member_options, list_session_member_uris(socket.assigns.current_session_uri))
        |> assign(:floating_agents, list_floating_agents())}
 
   def handle_info({:member_left, _uri}, socket),
@@ -154,7 +154,7 @@ defmodule EzagentPluginLiveview.AdminLive do
       {:noreply,
        socket
        |> assign(:session_members, read_session_members(socket.assigns.current_session_uri))
-       |> assign(:agent_options, list_session_agent_uris(socket.assigns.current_session_uri))
+       |> assign(:member_options, list_session_member_uris(socket.assigns.current_session_uri))
        |> assign(:floating_agents, list_floating_agents())}
 
   def handle_info({:member_offline, _uri, _at}, socket),
@@ -292,7 +292,7 @@ defmodule EzagentPluginLiveview.AdminLive do
          socket
          |> assign(:current_session_uri, new_uri)
          |> assign(:session_members, read_session_members(new_uri))
-         |> assign(:agent_options, list_session_agent_uris(new_uri))
+         |> assign(:member_options, list_session_member_uris(new_uri))
          |> assign(:oldest_cursor, oldest_cursor(new_messages))
          |> stream(:messages, new_messages, reset: true)}
 
@@ -418,7 +418,7 @@ defmodule EzagentPluginLiveview.AdminLive do
           <a href="/admin/routing" style="margin-left: 16px; color: #0969da;">Routing →</a>
           <a href="/admin/users" style="margin-left: 16px; color: #0969da;">Users →</a>
           <a href="/admin/snapshots" style="margin-left: 16px; color: #0969da;">Snapshots →</a>
-          <a href="/admin/agents" style="margin-left: 16px; color: #0969da;">Agents →</a>
+          <a href="/admin/entities" style="margin-left: 16px; color: #0969da;">Entities →</a>
         </p>
       </header>
 
@@ -433,7 +433,7 @@ defmodule EzagentPluginLiveview.AdminLive do
         <.chat_window
           current_session_uri={@current_session_uri}
           messages_stream={@streams.messages}
-          agent_options={@agent_options}
+          member_options={@member_options}
           compose_form={@compose_form}
           flash_error={@flash_error}
           oldest_cursor={@oldest_cursor}
@@ -505,14 +505,20 @@ defmodule EzagentPluginLiveview.AdminLive do
     |> Enum.sort()
   end
 
-  # @ agent dropdown should only offer agents that can actually receive
-  # in the current session — i.e. members of @current_session_uri.
+  # @-mention dropdown lists every member of the current session that
+  # could receive a routed message — users + agents both.
+  #
   # Showing all KindRegistry agents (including floating) confused operators
   # because @-mentioning a floating agent silently drops (Phase 3 P3-D9).
-  defp list_session_agent_uris(%URI{} = session_uri) do
+  #
+  # PR #149 (S-4, entity-agnostic reflection §4): previously this fn
+  # filtered to `agent://`-prefixed URIs only, leaving humans-mentioning-
+  # other-humans unreachable via the UI even though the routing layer
+  # supported it. Now any session member (entity://user/* or
+  # entity://agent/*) is offered.
+  defp list_session_member_uris(%URI{} = session_uri) do
     read_session_members(session_uri)
     |> Enum.map(& &1.uri)
-    |> Enum.filter(&String.starts_with?(&1, "agent://"))
     |> Enum.sort()
   end
 
@@ -574,8 +580,7 @@ defmodule EzagentPluginLiveview.AdminLive do
     sender_str = URI.to_string(msg.sender)
 
     %{
-      id: msg.uri,
-      uri: msg.uri,
+      id: msg.id,
       sender: sender_str,
       sender_kind: sender_kind(sender_str),
       text: body_text(msg.body),

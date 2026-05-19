@@ -166,9 +166,16 @@ defmodule EzagentDomainChat.Application do
     #   `EzagentDomainIdentity.Application.UserSupervisor` (identity
     #   domain owns User Kind; chat references its supervisor by
     #   module name per task spec).
-    # - `entity://agent/<flavor>_<name>` → delegate to
-    #   `Ezagent.AgentTypeRegistry.spawn/1` which extracts the flavor
-    #   from the name prefix and dispatches to the registered fn.
+    # - `entity://agent/<flavor>_<name>` → resolve the backing
+    #   `kind_module` via `lookup_kind_module_for_agent/1` (snapshot →
+    #   workspace-template → flavor-prefix fallback) and spawn under
+    #   `EzagentDomainChat.AgentSupervisor`.
+    #
+    # PR #149 (SPEC v2 §5.14): `Ezagent.AgentTypeRegistry` deleted.
+    # Per-flavor lookup table replaced by snapshot-first /
+    # template-second / prefix-fallback resolution. Plugins no longer
+    # register flavor → spawn fn pairs; Template Class registration is
+    # the declarative channel for new agent flavors.
     :ok =
       Ezagent.SpawnRegistry.register("entity", fn uri ->
         case uri.host do
@@ -179,23 +186,11 @@ defmodule EzagentDomainChat.Application do
             )
 
           "agent" ->
-            Ezagent.AgentTypeRegistry.spawn(uri)
+            spawn_agent(uri)
 
           other ->
             {:error, {:unknown_entity_host, other}}
         end
-      end)
-
-    # Register flavor "cc" — the chat domain's Entity.Agent Kind backs
-    # all bridge-driven Claude Code agents (cc.agent template both
-    # produces `entity://agent/cc_<name>` URIs). Chat owns this
-    # registration because chat owns Entity.Agent the Kind module.
-    :ok =
-      Ezagent.AgentTypeRegistry.register("cc", fn uri, _name ->
-        DynamicSupervisor.start_child(
-          EzagentDomainChat.AgentSupervisor,
-          {Ezagent.Kind.Server, {Agent, %{uri: uri, initial_caps: MapSet.new()}}}
-        )
       end)
 
     :ok =
@@ -299,4 +294,133 @@ defmodule EzagentDomainChat.Application do
 
     :ok
   end
+
+  # PR #149 (SPEC v2 §5.14) — agent flavor resolution without
+  # `Ezagent.AgentTypeRegistry`. Three-step lookup:
+  #
+  # 1. Snapshot — restart case. KindSnapshot stores `kind_type` for
+  #    every persisted Kind; the chat plugin maps it back to the Kind
+  #    module. Fast, single DB row by URI.
+  # 2. Workspace template — first-spawn-after-template-creation case.
+  #    Walks `Ezagent.Workspace.Store.list_all/0` looking for a
+  #    session_template whose `agent_uri` matches; the template's
+  #    `class` string ("cc.agent" / "curl.agent" / ...) maps to a Kind
+  #    module.
+  # 3. Flavor prefix — boot-time auto-spawn / CLI-driven spawn case.
+  #    The URI's name segment is `<flavor>_<name>`; the chat plugin
+  #    knows the three built-in flavors (cc/curl/echo). Future agent
+  #    flavors register their Template Class in step 2; the prefix
+  #    fallback handles legacy / direct-spawn paths.
+  defp spawn_agent(%URI{} = uri) do
+    case lookup_kind_module_for_agent(uri) do
+      {:ok, kind_module} ->
+        DynamicSupervisor.start_child(
+          EzagentDomainChat.AgentSupervisor,
+          {Ezagent.Kind.Server, {kind_module, %{uri: uri}}}
+        )
+
+      :error ->
+        {:error, {:no_kind_module_for_agent, URI.to_string(uri)}}
+    end
+  end
+
+  defp lookup_kind_module_for_agent(%URI{} = uri) do
+    uri_str = URI.to_string(uri)
+
+    with :error <- lookup_via_snapshot(uri_str),
+         :error <- lookup_via_workspace_template(uri_str),
+         :error <- lookup_via_flavor_prefix(uri) do
+      :error
+    else
+      {:ok, _mod} = ok -> ok
+    end
+  end
+
+  defp lookup_via_snapshot(uri_str) do
+    case Ezagent.Ecto.KindSnapshot.get(uri_str) do
+      %Ezagent.Ecto.KindSnapshot{kind_type: kt} when is_binary(kt) and kt != "" ->
+        case kind_module_from_kind_type(kt) do
+          nil -> :error
+          mod -> {:ok, mod}
+        end
+
+      _ ->
+        :error
+    end
+  rescue
+    # DB unavailable at boot — fall through to next resolver step. The
+    # snapshot is an optimization; missing it just means we hit step 2/3.
+    _ -> :error
+  end
+
+  defp lookup_via_workspace_template(uri_str) do
+    if Code.ensure_loaded?(Ezagent.Workspace.Store) do
+      Ezagent.Workspace.Store.list_all()
+      |> Enum.find_value(fn ws ->
+        ws.session_templates
+        |> Map.values()
+        |> Enum.find_value(fn tmpl ->
+          case tmpl do
+            %{"agent_uri" => ^uri_str, "class" => class} when is_binary(class) ->
+              kind_module_from_class(class)
+
+            %{"agent_uri" => ^uri_str, class: class} when is_binary(class) ->
+              kind_module_from_class(class)
+
+            _ ->
+              nil
+          end
+        end)
+      end)
+      |> case do
+        nil -> :error
+        mod -> {:ok, mod}
+      end
+    else
+      :error
+    end
+  rescue
+    # Same boot-time DB unavailability tolerance as step 1.
+    _ -> :error
+  end
+
+  defp lookup_via_flavor_prefix(%URI{host: "agent", path: "/" <> name}) when name != "" do
+    case String.split(name, "_", parts: 2) do
+      [flavor, rest] when flavor != "" and rest != "" ->
+        case kind_module_from_flavor(flavor) do
+          nil -> :error
+          mod -> {:ok, mod}
+        end
+
+      _ ->
+        :error
+    end
+  end
+
+  defp lookup_via_flavor_prefix(_), do: :error
+
+  # KindSnapshot.kind_type is `to_string(kind_module.type_name())` per
+  # the Snapshot writer (kind/snapshot.ex). Map back to the Kind module.
+  defp kind_module_from_kind_type("agent"), do: Ezagent.Entity.Agent
+  defp kind_module_from_kind_type("curl_agent"), do: Ezagent.Entity.CurlAgent
+  defp kind_module_from_kind_type("echo"), do: Ezagent.Entity.Echo
+  defp kind_module_from_kind_type(_), do: nil
+
+  # Template Class names (e.g. "cc.agent" registered by ezagent_plugin_cc;
+  # "curl.agent" registered by ezagent_plugin_curl_agent) map to Kind
+  # modules. Echo has no Template Class — Echo agents live via boot-time
+  # auto-spawn + snapshot.
+  defp kind_module_from_class("cc.agent"), do: Ezagent.Entity.Agent
+  defp kind_module_from_class("curl.agent"), do: Ezagent.Entity.CurlAgent
+  defp kind_module_from_class("echo.agent"), do: Ezagent.Entity.Echo
+  defp kind_module_from_class(_), do: nil
+
+  # Flavor prefix (`cc_` / `curl_` / `echo_` / `test_`) → Kind module.
+  # `test` agents (used as mention/routing fixtures) map to Entity.Agent
+  # so the SpawnRegistry round-trip works in tests.
+  defp kind_module_from_flavor("cc"), do: Ezagent.Entity.Agent
+  defp kind_module_from_flavor("curl"), do: Ezagent.Entity.CurlAgent
+  defp kind_module_from_flavor("echo"), do: Ezagent.Entity.Echo
+  defp kind_module_from_flavor("test"), do: Ezagent.Entity.Agent
+  defp kind_module_from_flavor(_), do: nil
 end

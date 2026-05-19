@@ -96,11 +96,11 @@ defmodule EzagentPluginFeishu.Behavior.FeishuOutboundTest do
     # string keys, so the in-flight message may carry either shape).
     # Construct the struct directly to mirror the post-reload shape.
     msg = %Message{
-      uri: "message://" <> Ecto.UUID.generate(),
+      id: Ecto.UUID.generate(),
       sender: sender,
       body: %{"text" => "loop?", "_feishu_origin" => true},
       mentions: [],
-      ref: nil,
+      ref_id: nil,
       inserted_at: DateTime.utc_now()
     }
 

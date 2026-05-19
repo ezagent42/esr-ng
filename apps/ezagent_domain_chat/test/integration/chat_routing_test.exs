@@ -62,11 +62,11 @@ defmodule EzagentDomainChat.Integration.ChatRoutingTest do
       })
 
     # Session-level broadcast (for LV chat stream)
-    assert_receive {:chat_message, _session_uri, %Message{uri: received_uri}}, 500
-    assert received_uri == msg.uri
+    assert_receive {:chat_message, _session_uri, %Message{id: received_id}}, 500
+    assert received_id == msg.id
 
     # Message landed in MessageStore
-    assert {:ok, loaded} = MessageStore.by_uri(msg.uri)
+    assert {:ok, loaded} = MessageStore.by_id(msg.id)
     assert loaded.session_uri == session_uri
   end
 

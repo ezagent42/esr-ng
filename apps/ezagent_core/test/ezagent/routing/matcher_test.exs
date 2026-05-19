@@ -54,7 +54,7 @@ defmodule Ezagent.Routing.MatcherTest do
         body: %{"text" => "abc"},
         mentions: [],
         inserted_at: DateTime.utc_now(),
-        uri: "message://x"
+        id: "x"
       }
 
       assert Matcher.match?(Matcher.text_contains("abc"), m)

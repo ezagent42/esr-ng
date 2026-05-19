@@ -1,7 +1,9 @@
 defmodule Ezagent.MessageStoreMultiSessionTest do
   @moduledoc """
-  Phase 3a-step 3: validate Phase 3 fix for #P1-4 — same Message URI
+  Phase 3a-step 3: validate Phase 3 fix for #P1-4 — same Message id
   can land in multiple Session contexts without PK collision.
+
+  PR #149 (SPEC v2 §5.13): by_uri renamed to by_id; URIs no longer used for messages.
   """
 
   use ExUnit.Case
@@ -14,7 +16,7 @@ defmodule Ezagent.MessageStoreMultiSessionTest do
     :ok
   end
 
-  test "same message URI written to 2 sessions → messages 1 row + routings 2 rows" do
+  test "same message id written to 2 sessions → messages 1 row + routings 2 rows" do
     sender = URI.new!("entity://agent/test_cc-builder")
     msg = Message.new(sender, %{text: "reply to both", attachments: []})
 
@@ -24,12 +26,12 @@ defmodule Ezagent.MessageStoreMultiSessionTest do
     assert {:ok, _} = MessageStore.write(msg, session_a)
     assert {:ok, _} = MessageStore.write(msg, session_b)
 
-    # by_uri returns ONE row (Phase 2 identity invariant unchanged)
-    assert {:ok, loaded} = MessageStore.by_uri(msg.uri)
-    assert loaded.uri == msg.uri
+    # by_id returns ONE row (Phase 2 identity invariant unchanged)
+    assert {:ok, loaded} = MessageStore.by_id(msg.id)
+    assert loaded.id == msg.id
 
     # but sessions_for_message returns both
-    sessions = MessageStore.sessions_for_message(msg.uri)
+    sessions = MessageStore.sessions_for_message(msg.id)
     assert MapSet.new(sessions) == MapSet.new(["session://main", "session://oncall"])
   end
 
@@ -63,7 +65,7 @@ defmodule Ezagent.MessageStoreMultiSessionTest do
     assert "msg-shared" in b_texts
   end
 
-  test "write is idempotent on (message_uri, session_uri) — duplicate write doesn't fail or double-insert routing" do
+  test "write is idempotent on (message_id, session_uri) — duplicate write doesn't fail or double-insert routing" do
     sender = URI.new!("entity://user/admin")
     msg = Message.new(sender, %{text: "once", attachments: []})
     session = URI.new!("session://main")
@@ -71,6 +73,6 @@ defmodule Ezagent.MessageStoreMultiSessionTest do
     {:ok, _} = MessageStore.write(msg, session)
     {:ok, _} = MessageStore.write(msg, session)
 
-    assert MessageStore.sessions_for_message(msg.uri) == ["session://main"]
+    assert MessageStore.sessions_for_message(msg.id) == ["session://main"]
   end
 end

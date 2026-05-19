@@ -70,7 +70,8 @@ defmodule Ezagent.URI do
   - `feishu` (PR #143 — plugin re-shaped, SPEC §5.8)
   - `routing-admin`, `pty-input` (PR #144 — synthetic singletons
     dissolved per SPEC §5.7)
-  - `message` (PR #145 — `Ezagent.Message.uri` renamed `id`, SPEC §5.13)
+  - `message` (PR #149 — `Ezagent.Message.uri` renamed `id`, SPEC §5.13;
+    message identifiers are plain UUID strings, not URIs)
   """
 
   @doc """

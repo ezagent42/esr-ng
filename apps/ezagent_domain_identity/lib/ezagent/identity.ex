@@ -3,7 +3,8 @@ defmodule Ezagent.Identity do
   Facade for reading Identity slice (caps) per principal URI.
 
   Phase 4-completion Spec 05 §A.2.3: LV mounts call `list_caps_for/1`
-  to derive `ctx.caps` from the session cookie's `current_user_uri`.
+  to derive `ctx.caps` from the session cookie's `current_entity_uri`
+  (renamed from `current_user_uri` in PR #142 — works for any Entity).
 
   Uses the dispatch path so cap checks fire naturally (and audit rows
   appear for non-admin reads). Per Q-MU-5 default: every spawned User

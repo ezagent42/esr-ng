@@ -39,9 +39,10 @@ defmodule EzagentDomainIdentity.Application do
     # registers an initial `entity://` spawn fn that handles `host =
     # "user"`. The chat plugin (which boots later — chat depends on
     # identity) OVERWRITES this registration with a combined fn that
-    # additionally handles `host = "agent"` via `AgentTypeRegistry`.
-    # This layering keeps identity self-sufficient for stacks that
-    # don't load chat (e.g. CLI-only test contexts).
+    # additionally handles `host = "agent"` (PR #149 — snapshot /
+    # template / flavor-prefix resolver; `Ezagent.AgentTypeRegistry`
+    # was deleted). This layering keeps identity self-sufficient for
+    # stacks that don't load chat (e.g. CLI-only test contexts).
     case Supervisor.start_link(children, strategy: :one_for_one, name: __MODULE__) do
       {:ok, sup_pid} ->
         :ok = register_user_only_entity_spawn_fn()

@@ -10,7 +10,7 @@ defmodule EzagentPluginLiveview.Admin.ChatWindow do
 
   attr :current_session_uri, URI, required: true
   attr :messages_stream, :any, required: true
-  attr :agent_options, :list, required: true
+  attr :member_options, :list, required: true
   attr :compose_form, :map, required: true
   attr :flash_error, :string, default: nil
   attr :oldest_cursor, :any, default: nil
@@ -65,17 +65,17 @@ defmodule EzagentPluginLiveview.Admin.ChatWindow do
         style="display: flex; gap: 8px; align-items: end; margin-top: 12px; flex-wrap: wrap;"
       >
         <div style="flex: 0 0 240px;">
-          <label style="display: block; font-size: 13px; font-weight: 500;" for="chat_agent_uri">@ agent</label>
+          <label style="display: block; font-size: 13px; font-weight: 500;" for="chat_agent_uri">@ member</label>
           <select
             name="chat[agent_uri]"
             id="chat_agent_uri"
             style="width: 100%; padding: 6px 10px; border: 1px solid #d1d5da; border-radius: 4px;"
           >
             <option value="">— room (no mention) —</option>
-            <option :for={uri <- @agent_options} value={uri}>{uri}</option>
+            <option :for={uri <- @member_options} value={uri}>{uri}</option>
           </select>
-          <p :if={@agent_options == []} style="font-size: 11px; color: #999; margin: 4px 0 0;">
-            (no agents in this session — add one via Floating list)
+          <p :if={@member_options == []} style="font-size: 11px; color: #999; margin: 4px 0 0;">
+            (no members in this session — add an agent via Floating list, or join more users)
           </p>
         </div>
         <div style="flex: 1 1 auto;">

@@ -37,11 +37,11 @@ defmodule EzagentDomainChat.Integration.RoutingConsolidationInvariantTest do
 
   defp build_msg(text \\ "hi", mentions \\ [], sender \\ "entity://user/admin") do
     %Ezagent.Message{
-      uri: "message://test-#{System.unique_integer([:positive])}",
+      id: "test-#{System.unique_integer([:positive])}",
       sender: URI.parse(sender),
       body: %{text: text, attachments: []},
       mentions: Enum.map(mentions, &URI.parse/1),
-      ref: nil,
+      ref_id: nil,
       inserted_at: ~U[2026-05-16 00:00:00.000000Z]
     }
   end

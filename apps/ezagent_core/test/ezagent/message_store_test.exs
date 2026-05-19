@@ -4,8 +4,10 @@ defmodule Ezagent.MessageStoreTest do
 
   Sandbox-mode integration against the SQLite Repo. Validates the 4
   public functions (write/2, in_session_since/2, recent_in_session/2,
-  by_uri/1) including rejoin-replay edge cases (strict-after timestamp
+  by_id/1) including rejoin-replay edge cases (strict-after timestamp
   semantics) and the @replay_cap bound.
+
+  PR #149 (SPEC v2 §5.13): by_uri renamed to by_id; ref opt renamed to ref_id.
   """
 
   use ExUnit.Case
@@ -38,43 +40,43 @@ defmodule Ezagent.MessageStoreTest do
       assert written.sender == @admin
 
       # Round-trip load to confirm SQLite saw it (not just changeset roundtrip).
-      assert {:ok, loaded} = MessageStore.by_uri(msg.uri)
+      assert {:ok, loaded} = MessageStore.by_id(msg.id)
       assert loaded.session_uri == @session_a
     end
 
     test "preserves the Message envelope unchanged (identity invariant)" do
       mention = URI.new!("entity://agent/test_cc-builder")
-      ref = URI.new!("message://aabbccdd00000000")
+      ref_id = "aabbccdd00000000"
 
       msg =
         Message.new(@admin, %{text: "carry-through", attachments: []},
           mentions: [mention],
-          ref: ref
+          ref_id: ref_id
         )
 
       {:ok, written} = MessageStore.write(msg, @session_a)
 
       # `session_uri` is metadata stamped at write boundary; sender / body /
-      # mentions / ref / uri / inserted_at all unchanged (Decision #40 —
+      # mentions / ref_id / id / inserted_at all unchanged (Decision #40 —
       # Message identity invariant).
-      assert written.uri == msg.uri
+      assert written.id == msg.id
       assert written.sender == msg.sender
       assert written.mentions == [mention]
       assert written.body == msg.body
-      assert written.ref == ref
+      assert written.ref_id == ref_id
       assert written.inserted_at == msg.inserted_at
     end
   end
 
-  describe "by_uri/1" do
-    test "returns {:ok, message} for stored uri" do
+  describe "by_id/1" do
+    test "returns {:ok, message} for stored id" do
       msg = insert_msg(@admin, @session_a, "lookup-me")
-      assert {:ok, loaded} = MessageStore.by_uri(msg.uri)
-      assert loaded.uri == msg.uri
+      assert {:ok, loaded} = MessageStore.by_id(msg.id)
+      assert loaded.id == msg.id
     end
 
-    test "returns :error for missing uri" do
-      assert :error = MessageStore.by_uri("message://0000000000000000")
+    test "returns :error for missing id" do
+      assert :error = MessageStore.by_id("0000000000000000")
     end
   end
 
@@ -96,9 +98,9 @@ defmodule Ezagent.MessageStoreTest do
       _other = insert_msg(@admin, @session_b, "other-session")
 
       result = MessageStore.recent_in_session(@session_a, 10)
-      uris = Enum.map(result, & &1.uri)
+      ids = Enum.map(result, & &1.id)
 
-      assert uris == [m3.uri, m2.uri, m1.uri]
+      assert ids == [m3.id, m2.id, m1.id]
     end
 
     test "respects limit" do
@@ -130,9 +132,9 @@ defmodule Ezagent.MessageStoreTest do
       first_page = MessageStore.recent_in_session(@session_a, 50)
       assert length(first_page) == 50
 
-      first_uris = Enum.map(first_page, & &1.uri)
-      expected_first = written |> Enum.slice(50, 50) |> Enum.reverse() |> Enum.map(& &1.uri)
-      assert first_uris == expected_first
+      first_ids = Enum.map(first_page, & &1.id)
+      expected_first = written |> Enum.slice(50, 50) |> Enum.reverse() |> Enum.map(& &1.id)
+      assert first_ids == expected_first
 
       # Step 2 — cursor is the oldest visible (msg-51's inserted_at).
       oldest_visible = List.last(first_page)
@@ -142,12 +144,12 @@ defmodule Ezagent.MessageStoreTest do
       second_page = MessageStore.older_than(@session_a, oldest_visible.inserted_at, 50)
       assert length(second_page) == 50
 
-      second_uris = Enum.map(second_page, & &1.uri)
-      expected_second = written |> Enum.take(50) |> Enum.reverse() |> Enum.map(& &1.uri)
-      assert second_uris == expected_second
+      second_ids = Enum.map(second_page, & &1.id)
+      expected_second = written |> Enum.take(50) |> Enum.reverse() |> Enum.map(& &1.id)
+      assert second_ids == expected_second
 
       # Step 4 — no overlap between pages (invariant: each message appears once).
-      assert MapSet.disjoint?(MapSet.new(first_uris), MapSet.new(second_uris))
+      assert MapSet.disjoint?(MapSet.new(first_ids), MapSet.new(second_ids))
 
       # Step 5 — paging past the start returns []; cursor stays harmless.
       oldest_of_all = List.last(second_page)
@@ -189,12 +191,12 @@ defmodule Ezagent.MessageStoreTest do
 
       # since = t1 → must EXCLUDE at_t1 (strict-after), include t2, t3.
       result = MessageStore.in_session_since(@session_a, t1)
-      uris = Enum.map(result, & &1.uri)
-      assert uris == [at_t2.uri, at_t3.uri]
+      ids = Enum.map(result, & &1.id)
+      assert ids == [at_t2.id, at_t3.id]
 
       # since = t0 → includes everything after t0 (t1/t2/t3) in session_a.
       result_t0 = MessageStore.in_session_since(@session_a, t0)
-      assert Enum.map(result_t0, & &1.uri) == [at_t1.uri, at_t2.uri, at_t3.uri]
+      assert Enum.map(result_t0, & &1.id) == [at_t1.id, at_t2.id, at_t3.id]
     end
 
     test "empty result when nothing newer than since" do
