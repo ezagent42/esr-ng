@@ -10,9 +10,12 @@ defmodule EzagentPluginLiveview.PtyTerminalLive do
     raw bytes to xterm via `push_event(socket, "pty_chunk", %{bytes})`
   - Input: xterm hook `onData` fires `pushEvent("pty_input", {bytes})`
     → this LV's `handle_event("pty_input", ...)` → `Ezagent.Invocation.dispatch`
-    to `pty-input://default/behavior/pty/write` (CapBAC + audit fire)
-    → `Ezagent.Behavior.Pty.invoke(:write, ...)` looks up PtyServer and
-    writes the bytes
+    to `entity://agent/<flavor>_<name>/behavior/pty/write` (CapBAC +
+    audit fire) → `Ezagent.Behavior.Pty.invoke(:write, ...)` looks up
+    PtyServer for `ctx.self_uri` (the agent URI) and writes the bytes.
+
+    PR #146 (SPEC v2 §5.7) dissolves the `pty-input://default`
+    synthetic singleton — the dispatch target IS the agent now.
 
   **Never pushes input directly to PubSub.** The dispatch path is the
   enforced invariant (`agents_pty_input_dispatch_test.exs`).
@@ -52,7 +55,7 @@ defmodule EzagentPluginLiveview.PtyTerminalLive do
          |> assign(:not_found, false)
          |> assign(:agent_uri, agent_uri)
          |> assign(:flash_error, nil)
-         |> assign(:dispatch_target, dispatch_target_uri())
+         |> assign(:dispatch_target, dispatch_target_for(agent_uri))
          |> assign_caller(session)}
 
       _ ->
@@ -78,12 +81,10 @@ defmodule EzagentPluginLiveview.PtyTerminalLive do
     |> assign(:caller_caps, caller_caps)
   end
 
-  defp dispatch_target_uri,
-    do:
-      URI.parse(
-        URI.to_string(Ezagent.Entity.PtyInput.default_uri()) <>
-          "/behavior/pty/write"
-      )
+  # PR #146: dispatch directly to the agent URI (pty-input://default
+  # synthetic singleton dissolved per SPEC v2 §5.7).
+  defp dispatch_target_for(%URI{} = agent_uri),
+    do: URI.parse(URI.to_string(agent_uri) <> "/behavior/pty/write")
 
   # PR #141 + #145: entity:// scheme; agent URIs are entity://agent/<flavor>_<name>.
   defp parse_agent_uri(encoded) do
@@ -126,10 +127,12 @@ defmodule EzagentPluginLiveview.PtyTerminalLive do
 
   @impl true
   def handle_event("pty_input", %{"bytes" => bytes}, socket) when is_binary(bytes) do
+    # PR #146 — args no longer carry agent_uri; the dispatch target IS
+    # the agent URI, and `Behavior.Pty.invoke/4` reads `ctx.self_uri`.
     inv = %Ezagent.Invocation{
       target: socket.assigns.dispatch_target,
       mode: :cast,
-      args: %{agent_uri: URI.to_string(socket.assigns.agent_uri), bytes: bytes},
+      args: %{bytes: bytes},
       ctx: %{
         caller: socket.assigns.caller_uri,
         caps: socket.assigns.caller_caps,
@@ -147,7 +150,8 @@ defmodule EzagentPluginLiveview.PtyTerminalLive do
       {:error, :unauthorized} ->
         {:noreply,
          assign(socket, :flash_error,
-           "Unauthorized — need pty_input cap. Ask admin to grant it."
+           "Unauthorized — need agent.pty.write cap on this agent. " <>
+             "Ask admin to grant it."
          )}
 
       {:error, reason} ->

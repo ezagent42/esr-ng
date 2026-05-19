@@ -26,10 +26,10 @@ defmodule Ezagent.URI do
 
       entity://user/admin
       entity://agent/cc_demo-builder
-      session://main             # legacy 1-seg, migrating in #146
-      workspace://default        # legacy 1-seg, migrating in #144
+      session://main             # legacy 1-seg, migrating in #147
+      workspace://default        # legacy 1-seg, migrating in #147
       template://agent/cc-orchestrator
-      system://routing/default
+      system://routing/default   # 2-seg (PR #146)
 
   ## SPEC v2 deltas (PR #141)
 
@@ -54,14 +54,15 @@ defmodule Ezagent.URI do
 
   ## Deferred-deletion schemes
 
-  `message`, `routing-admin`, `pty-input` remain in
-  `@known_schemes` for now — later PRs trim them:
-  - PR #144 deleted `feishu` (DONE — Feishu plugin re-shaped per SPEC §5.8)
-  - PR #145 deletes `routing-admin` + `pty-input`
+  `message` remains in `@known_schemes` for now — PR #147 deletes it.
+
+  - PR #144 deleted `feishu` (Feishu plugin re-shaped per SPEC §5.8)
+  - PR #146 deleted `routing-admin` + `pty-input` (synthetic singletons
+    dissolved per SPEC §5.7 — Behaviors moved to scope-owning Kinds)
   - PR #147 deletes `message`
   """
 
-  @known_schemes ~w(entity workspace session template resource system message routing-admin pty-input)
+  @known_schemes ~w(entity workspace session template resource system message)
 
   @doc """
   Parse a binary URI into a stdlib `%URI{}`. Raises on malformed input
@@ -89,23 +90,23 @@ defmodule Ezagent.URI do
   Return the instance form of a URI — strip the sub-resource portion
   (and any query/fragment).
 
-  **PR #141 SPEC v2 transitional rule**: 2-segment-authority schemes
-  (`entity://` today; `workspace://` + `session://` + `template://`
-  + `resource://` + `system://` migrating in later PRs) use the
-  uniform split `host + /<first-path-segment>`. The pre-PR-131
-  agent-specific clause is generalized to `entity://`.
+  **PR #141 + #146 SPEC v2 transitional rule**: 2-segment-authority
+  schemes use the uniform split `host + /<first-path-segment>`:
+  - `entity://` (PR #141)
+  - `system://` (PR #146 — `system://routing/default`,
+    `system://bootstrap/default`)
 
-  1-segment-authority schemes (legacy `session://<name>`,
-  `workspace://<name>`, etc., still in use until PRs #143/#144/#146
-  migrate them) keep the prior "strip entire path" behavior so
-  `session://main/behavior/chat/send` continues to resolve to
-  `session://main` until the query-string action syntax lands
-  (PR #146).
+  Remaining schemes (`session://`, `workspace://`, `template://`,
+  `resource://`, `message://`) keep the legacy "strip entire path"
+  behavior until PR #147 migrates them along with the query-string
+  action syntax.
 
   Examples:
   - `entity://user/admin` → unchanged (no sub-resource)
   - `entity://agent/cc_demo-builder/behavior/chat/receive`
     → `%URI{scheme: "entity", host: "agent", path: "/cc_demo-builder"}`
+  - `system://routing/default/behavior/routing/add_rule`
+    → `%URI{scheme: "system", host: "routing", path: "/default"}`
   - `session://main/behavior/chat/send`
     → `%URI{scheme: "session", host: "main", path: nil}` (legacy
        1-seg session URI; path stripped entirely)
@@ -128,11 +129,24 @@ defmodule Ezagent.URI do
     end
   end
 
+  def instance(%URI{scheme: "system", path: "/" <> rest} = uri) do
+    # PR #146 SPEC v2 §5.1 + §5.10 — `system://<type>/<name>` is
+    # 2-segment-authority (e.g. `system://routing/default`,
+    # `system://bootstrap/default`). Same split as `entity://`.
+    case String.split(rest, "/", parts: 2) do
+      [_name_only] ->
+        %URI{uri | query: nil, fragment: nil}
+
+      [name, _subresource] ->
+        %URI{uri | path: "/" <> name, query: nil, fragment: nil}
+    end
+  end
+
   def instance(%URI{path: _path} = uri) do
     # Legacy 1-segment-authority schemes (session/workspace/template/
-    # resource/system/routing-admin/pty-input/message) —
-    # entire path is sub-resource. Migrated to uniform split in
-    # later PRs (#145/#146).
+    # resource/message) — entire path is sub-resource. Migrated to the
+    # uniform 2-seg target form in PR #147 (query-string action syntax)
+    # along with `message://` deletion.
     %URI{uri | path: nil, query: nil, fragment: nil}
   end
 
@@ -190,6 +204,14 @@ defmodule Ezagent.URI do
 
   def subresource(%URI{scheme: "entity", path: "/" <> rest}) do
     # 2-segment authority: name is first segment; remainder is sub.
+    case String.split(rest, "/", parts: 2) do
+      [_name_only] -> ""
+      [_name, sub] -> sub
+    end
+  end
+
+  def subresource(%URI{scheme: "system", path: "/" <> rest}) do
+    # PR #146 — `system://` is 2-segment-authority (same as `entity://`).
     case String.split(rest, "/", parts: 2) do
       [_name_only] -> ""
       [_name, sub] -> sub

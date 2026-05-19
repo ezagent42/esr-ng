@@ -32,8 +32,11 @@ defmodule EzagentCore.Invariants.Phase5NoRegressionTest do
       assert MapSet.size(caps) > 0
     end
 
-    test "routing-admin://default singleton is alive" do
-      uri = Ezagent.Entity.RoutingAdmin.default_uri()
+    # PR #146 (SPEC v2 §5.7) — `routing-admin://default` synthetic
+    # singleton dissolved. The functionally-equivalent invariant is the
+    # global System Kind sentinel for routing.
+    test "system://routing/default singleton is alive" do
+      uri = Ezagent.Entity.System.routing_default_uri()
       assert {:ok, pid} = KindRegistry.lookup(uri)
       assert Process.alive?(pid)
     end

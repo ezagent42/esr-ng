@@ -1,32 +1,32 @@
 defmodule Ezagent.Behavior.Pty do
   @moduledoc """
-  Phase 5 PR 4 — Behavior providing `:write` action for the synthetic
-  `pty-input://default` Kind.
+  Pty Behavior — `:write` action for an Agent Kind backed by a local
+  `Ezagent.PluginCc.PtyServer`.
 
-  ## Why synthetic singleton (like RoutingAdmin from Phase 4.5 PR 4)
+  ## PR #146 (SPEC v2 §5.7) — agent-direct dispatch
 
-  PtyServer GenServers aren't Kind Servers — they're just DynamicSupervisor
-  children. Making each PtyServer a Kind Server would be a much larger
-  change. Instead, mimic the RoutingAdmin pattern (Phase 4.5 PR 4
-  Decision #125): introduce `Ezagent.Entity.PtyInput` synthetic singleton at
-  `pty-input://default`; xterm.js LV hook calls
-  `Ezagent.Invocation.dispatch` targeting
-  `pty-input://default/behavior/pty/write` with `args: %{agent_uri, bytes}`.
+  The previous synthetic `pty-input://default` singleton is dissolved.
+  PTY input now dispatches to the target agent's own URI:
 
-  This satisfies the **critical invariant** (IMPLEMENTATION_ROADMAP §1.3 #1):
-  PTY input goes through `Ezagent.Invocation.dispatch` → CapBAC step 5.5 →
-  audit telemetry → PtyServer write. The xterm hook never touches the
-  PtyServer directly or pushes raw PubSub.
+      entity://agent/cc_<name>/behavior/pty/write   args: %{bytes: "..."}
 
-  `agents_pty_input_dispatch_test.exs` is the regression gate.
+  The Agent Kind hosts this Behavior; `ctx.self_uri` (injected by
+  `Ezagent.Kind.Runtime`) is the agent URI used to locate the
+  `PtyServer` via `EzagentPluginCc.PtyServerRegistry`.
+
+  ## Critical invariant (IMPLEMENTATION_ROADMAP §1.3 #1)
+
+  Every operator-typed byte goes through `Ezagent.Invocation.dispatch`
+  → CapBAC step 5.5 → audit telemetry → PtyServer write. The xterm.js
+  hook never touches the PtyServer directly or pushes raw PubSub.
 
   ## Cap shape
 
-  - `kind: :pty_input`
+  - `kind: :agent`
   - `behavior: Ezagent.Behavior.Pty`
-  - `instance: pty-input://default`
+  - `instance: entity://agent/<flavor>_<name>` (per-agent) or `:any`
 
-  Admin's triple-`:any` passes. Grant explicitly for non-admin users.
+  Admin's triple-`:any` passes. Grant per-agent for non-admin users.
   """
 
   @behaviour Ezagent.Behavior
@@ -35,57 +35,60 @@ defmodule Ezagent.Behavior.Pty do
   def actions, do: [:write]
 
   @impl Ezagent.Behavior
-  def state_slice, do: :pty_input
+  def state_slice, do: :pty
 
   @impl Ezagent.Behavior
   def init_slice(_args), do: %{write_calls: 0, total_bytes: 0}
 
   @impl Ezagent.Behavior
-  def invoke(:write, slice, %{agent_uri: agent_uri_str, bytes: bytes}, _ctx)
-      when is_binary(agent_uri_str) and is_binary(bytes) do
-    agent_uri = URI.parse(agent_uri_str)
+  def invoke(:write, slice, %{bytes: bytes}, ctx) when is_binary(bytes) do
+    case Map.get(ctx, :self_uri) do
+      %URI{} = agent_uri ->
+        case Ezagent.PluginCc.PtyServer.find_by_agent_uri(agent_uri) do
+          {:ok, pid} ->
+            case Ezagent.PluginCc.PtyServer.write_input(pid, bytes) do
+              :ok ->
+                # `slice` may be `%{}` on first write — the host Agent
+                # Kind doesn't list `Behavior.Pty` in `behaviors/0`
+                # (PR #146: cc plugin can't be a chat-domain dep, so the
+                # Behavior is added via BehaviorRegistry at boot, not
+                # statically declared). Initialize lazily from a base
+                # map so re-writes accumulate normally.
+                base = init_slice(%{})
 
-    case Ezagent.PluginCc.PtyServer.find_by_agent_uri(agent_uri) do
-      {:ok, pid} ->
-        case Ezagent.PluginCc.PtyServer.write_input(pid, bytes) do
-          :ok ->
-            new_slice = %{
-              slice
-              | write_calls: slice.write_calls + 1,
-                total_bytes: slice.total_bytes + byte_size(bytes)
-            }
+                new_slice = %{
+                  base
+                  | write_calls: Map.get(slice, :write_calls, base.write_calls) + 1,
+                    total_bytes:
+                      Map.get(slice, :total_bytes, base.total_bytes) + byte_size(bytes)
+                }
 
-            {:ok, new_slice, %{bytes_written: byte_size(bytes)}}
+                {:ok, new_slice, %{bytes_written: byte_size(bytes)}}
 
-          err ->
-            err
+              err ->
+                err
+            end
+
+          :error ->
+            {:error, :no_pty_server}
         end
 
-      :error ->
-        {:error, :no_pty_server}
+      _ ->
+        {:error, {:invalid_ctx, :self_uri_missing}}
     end
   end
 
   def invoke(:write, _slice, _args, _ctx),
-    do: {:error, {:invalid_args, :agent_uri_and_bytes_required}}
+    do: {:error, {:invalid_args, :bytes_required}}
 
   @impl Ezagent.Behavior
   def interface do
     %{
       write: %{
-        args: %{agent_uri: :string, bytes: :string},
+        args: %{bytes: :string},
         returns: %{bytes_written: :integer},
         modes: [:call, :cast]
       }
-    }
-  end
-
-  @doc "Cap-needed shape — used by Identity.grant operations."
-  def required_cap_shape do
-    %{
-      kind: :pty_input,
-      behavior: __MODULE__,
-      instance: Ezagent.Entity.PtyInput.default_uri()
     }
   end
 end

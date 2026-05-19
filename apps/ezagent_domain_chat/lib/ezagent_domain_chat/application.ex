@@ -244,6 +244,17 @@ defmodule EzagentDomainChat.Application do
     # Phase 6 PR 2: Identity behavior registration (list_caps / has_cap?)
     # moved to ezagent_domain_identity.Application — Identity is the identity
     # domain's concern, not chat's.
+
+    # PR #146 (SPEC v2 §5.7) — session-scoped routing rule mutations
+    # dispatch to `session://<name>/behavior/routing/<action>` against
+    # the Session Kind. The synthetic `routing-admin://default`
+    # singleton is dissolved; rules naturally cap-scope to their session.
+    alias Ezagent.Behavior.Routing, as: RB
+
+    Enum.each(RB.actions(), fn action ->
+      :ok = BehaviorRegistry.register(Session, action, RB)
+    end)
+
     :ok
   end
 

@@ -19,13 +19,19 @@ defmodule EzagentPluginLiveview.RoutingLive do
       and/or/not). Live-validated via `Matcher.from_json/1`
   - **Receivers** — comma-separated URI strings
 
-  ## Auth
+  ## Auth (PR #146 — SPEC v2 §5.7)
 
-  Phase 4 v1: admin-only by route gate (RequireUser already
-  authenticates; additional cap check on Workspace.routing_rules.modify
-  Behavior — but for global tables we just allow any logged-in user
-  per Phase 4 v1; tighten Phase 5 with synthetic RoutingAdmin Kind per
-  Spec Q-RT-3).
+  Routing mutations dispatch to the **scope-owning Kind** instead of
+  a synthetic `routing-admin://default` singleton:
+
+  - Global rules → `system://routing/default/behavior/routing/<action>`
+  - Workspace rules → `workspace://<name>/behavior/routing/<action>`
+  - Session rules → `session://<name>/behavior/routing/<action>`
+
+  Phase 4 v1 LV still defaults all rules to the global scope. The
+  scope picker is the contract surface for future "narrow this rule
+  to workspace X" / "narrow to session Y" — wired in this PR with
+  the global default; per-scope UI lands in a follow-up.
   """
 
   use Phoenix.LiveView
@@ -33,10 +39,9 @@ defmodule EzagentPluginLiveview.RoutingLive do
 
   alias Ezagent.Routing.{Matcher, RuleStore}
 
-  # Phase 5 PR 4: dispatch routing mutations through RoutingAdmin Kind
-  # so CapBAC check fires at dispatch step 5.5. Admin's all-cap passes;
-  # non-admin without explicit routing_admin cap gets :unauthorized.
-  @routing_admin_uri Ezagent.Entity.RoutingAdmin.default_uri()
+  # PR #146: default rule scope is **global** — dispatches to the
+  # System Kind sentinel for routing.
+  @global_routing_uri Ezagent.Entity.System.routing_default_uri()
 
   @tables [
     {"MentionRouting", EzagentDomainChat.Routing.MentionRouting},
@@ -164,7 +169,8 @@ defmodule EzagentPluginLiveview.RoutingLive do
       {:error, :unauthorized} ->
         {:noreply,
          assign(socket, :flash_error,
-           "You don't have routing_admin cap. Ask admin to grant via mix ezagent.user.create."
+           "You don't have routing cap on the global system://routing/default scope. " <>
+             "Ask admin to grant via mix ezagent.user.create."
          )}
 
       {:error, reason} ->
@@ -200,7 +206,8 @@ defmodule EzagentPluginLiveview.RoutingLive do
           {:error, :unauthorized} ->
             {:noreply,
              assign(socket, :flash_error,
-               "You don't have routing_admin cap to perform this action."
+               "You don't have routing cap on the global system://routing/default " <>
+                 "scope to perform this action."
              )}
 
           {:error, reason} ->
@@ -212,11 +219,16 @@ defmodule EzagentPluginLiveview.RoutingLive do
     end
   end
 
-  # Phase 5 PR 4: dispatch routing mutations via Invocation → CapBAC fires
+  # PR #146 (SPEC v2 §5.7) — dispatch routing mutations against the
+  # scope-owning Kind. Default scope is global (System Kind); per-rule
+  # scope narrowing lands in a follow-up PR with workspace/session
+  # picker fields.
   defp dispatch_routing_admin(socket, action, args) do
+    scope_uri = @global_routing_uri
+
     target =
       URI.parse(
-        "#{URI.to_string(@routing_admin_uri)}/behavior/routing_admin/#{Atom.to_string(action)}"
+        "#{URI.to_string(scope_uri)}/behavior/routing/#{Atom.to_string(action)}"
       )
 
     Ezagent.Invocation.dispatch(%Ezagent.Invocation{
