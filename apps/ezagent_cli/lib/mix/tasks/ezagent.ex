@@ -19,6 +19,9 @@ defmodule Mix.Tasks.Esr do
       EZAGENT_RUNTIME_NODE   Node name to reach (default ezagent_runtime@127.0.0.1)
       EZAGENT_HOME           Where the runtime cookie file lives
                          (default ~/.ezagent)
+      EZAGENT_USER_TOKEN     Bearer token (verified via `entity_tokens`)
+      EZAGENT_ENTITY_URI     Entity URI the token belongs to (e.g.
+                             `entity://user/admin` or `entity://agent/cc_demo`)
 
   ## Single-machine assumption
 
@@ -33,14 +36,22 @@ defmodule Mix.Tasks.Esr do
 
   @impl Mix.Task
   def run(argv) do
-    # Phase 6 PR 7: peel off CLI-level flags before passing argv to Exec.
-    # --token / EZAGENT_USER_TOKEN auth-tags the call so Exec resolves the
-    # token → user → caps. Token-less calls fall back to admin (BC).
+    # PR #142: bearer tokens are now entity-agnostic (entity_tokens
+    # table). The CLI presents BOTH the token and the entity URI it
+    # was minted for (verify is keyed by URI). Token-less calls fall
+    # back to admin caps (single-user BC).
     {token, argv} = extract_token(argv)
+    {entity_uri, argv} = extract_entity_uri(argv)
 
     case Ezagent.Runtime.connect_as_cli() do
       {:ok, runtime_node} ->
-        case :rpc.call(runtime_node, EzagentCli.Exec, :exec, [argv, [token: token]], 30_000) do
+        case :rpc.call(
+               runtime_node,
+               EzagentCli.Exec,
+               :exec,
+               [argv, [token: token, entity_uri: entity_uri]],
+               30_000
+             ) do
           %{output: output, exit_code: code} ->
             IO.write(output)
             exit_with(code)
@@ -51,7 +62,8 @@ defmodule Mix.Tasks.Esr do
         end
 
       {:error, :runtime_not_reachable} ->
-        IO.puts(:stderr,
+        IO.puts(
+          :stderr,
           "error: ESR runtime not reachable at #{Ezagent.Runtime.runtime_node()}\n" <>
             "       start it with `mix phx.server` (single-machine assumption)\n" <>
             "       or set EZAGENT_RUNTIME_NODE to point at a running instance"
@@ -67,17 +79,36 @@ defmodule Mix.Tasks.Esr do
 
   # Pluck --token=VAL or --token VAL out of argv; falls back to EZAGENT_USER_TOKEN.
   defp extract_token(argv) do
-    {tok, rest} = pluck_token(argv, [])
+    {tok, rest} = pluck_flag(argv, "--token", [])
     {tok || System.get_env("EZAGENT_USER_TOKEN"), rest}
   end
 
-  defp pluck_token([], acc), do: {nil, Enum.reverse(acc)}
+  # Pluck --uri=VAL / --uri VAL out of argv; falls back to EZAGENT_ENTITY_URI.
+  defp extract_entity_uri(argv) do
+    {uri, rest} = pluck_flag(argv, "--uri", [])
+    {uri || System.get_env("EZAGENT_ENTITY_URI"), rest}
+  end
 
-  defp pluck_token(["--token=" <> v | tail], acc), do: {v, Enum.reverse(acc) ++ tail}
+  defp pluck_flag([], _name, acc), do: {nil, Enum.reverse(acc)}
 
-  defp pluck_token(["--token", v | tail], acc), do: {v, Enum.reverse(acc) ++ tail}
+  defp pluck_flag([head | tail], name, acc) do
+    eq_form = name <> "="
 
-  defp pluck_token([h | t], acc), do: pluck_token(t, [h | acc])
+    cond do
+      String.starts_with?(head, eq_form) ->
+        v = String.replace_prefix(head, eq_form, "")
+        {v, Enum.reverse(acc) ++ tail}
+
+      head == name ->
+        case tail do
+          [v | rest] -> {v, Enum.reverse(acc) ++ rest}
+          [] -> {nil, Enum.reverse(acc)}
+        end
+
+      true ->
+        pluck_flag(tail, name, [head | acc])
+    end
+  end
 
   defp exit_with(code) when is_integer(code) do
     if Mix.env() == :test do

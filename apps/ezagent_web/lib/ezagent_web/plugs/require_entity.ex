@@ -1,0 +1,41 @@
+defmodule EzagentWeb.Plugs.RequireEntity do
+  @moduledoc """
+  Plug that bounces unauthenticated requests to `/login` (PR #142
+  rename of the prior `RequireUser` plug).
+
+  The session cookie now carries `current_entity_uri` — any
+  `entity://user/*` OR `entity://agent/*` URI is accepted, so a
+  future agent-driven `/admin` flow (an AI agent logged in with a
+  bearer token) lands in the same `assigns.current_entity_uri`
+  slot a human user uses.
+
+  Public scopes (e.g. `/`) skip this plug entirely.
+  """
+
+  import Plug.Conn
+  import Phoenix.Controller, only: [redirect: 2]
+
+  def init(opts), do: opts
+
+  def call(conn, _opts) do
+    case get_session(conn, :current_entity_uri) do
+      nil ->
+        bounce(conn)
+
+      uri_str when is_binary(uri_str) ->
+        case URI.parse(uri_str) do
+          %URI{scheme: "entity", host: host} = uri when host in ["user", "agent"] ->
+            assign(conn, :current_entity_uri, uri)
+
+          _ ->
+            bounce(conn)
+        end
+    end
+  end
+
+  defp bounce(conn) do
+    conn
+    |> redirect(to: "/login")
+    |> halt()
+  end
+end

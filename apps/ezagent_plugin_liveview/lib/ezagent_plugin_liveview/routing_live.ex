@@ -56,8 +56,8 @@ defmodule EzagentPluginLiveview.RoutingLive do
     [{_, first_table} | _] = @tables
 
     # PR #123 hardening: live_session :require_user on_mount sets
-    # current_user_uri before mount/3 runs; admin fallback deleted.
-    caller_uri = socket.assigns.current_user_uri
+    # current_entity_uri before mount/3 runs; admin fallback deleted.
+    caller_uri = socket.assigns.current_entity_uri
 
     caller_caps =
       if URI.to_string(caller_uri) == URI.to_string(Ezagent.Entity.User.admin_uri()) do

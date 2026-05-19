@@ -31,17 +31,17 @@ defmodule EzagentWeb.Router do
   # path that bypasses the HTTP Plug pipeline).
   # PR-B: file download route for chat compose uploads. Mounted in the
   # EzagentWeb scope (so the controller resolves correctly), under the
-  # same RequireUser plug as /admin/*.
+  # same RequireEntity plug as /admin/*.
   scope "/", EzagentWeb do
-    pipe_through [:browser, EzagentWeb.Plugs.RequireUser]
+    pipe_through [:browser, EzagentWeb.Plugs.RequireEntity]
 
     get "/admin/uploads/:filename", UploadsController, :show
   end
 
   scope "/", EzagentPluginLiveview do
-    pipe_through [:browser, EzagentWeb.Plugs.RequireUser]
+    pipe_through [:browser, EzagentWeb.Plugs.RequireEntity]
 
-    live_session :require_user, on_mount: {EzagentWeb.LiveAuth, :require_user} do
+    live_session :require_entity, on_mount: {EzagentWeb.LiveAuth, :require_entity} do
       live "/admin", AdminLive
 
       # Phase 4d: Workspace management surfaces. Separate LV (not a tab

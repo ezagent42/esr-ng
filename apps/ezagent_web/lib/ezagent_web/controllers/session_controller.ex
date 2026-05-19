@@ -10,7 +10,7 @@ defmodule EzagentWeb.SessionController do
 
   import Plug.Conn
 
-  alias Ezagent.Users
+  alias Ezagent.Entity
 
   @login_html """
   <!DOCTYPE html>
@@ -34,15 +34,17 @@ defmodule EzagentWeb.SessionController do
     {{ERROR}}
     <form method="post" action="/login">
       <input type="hidden" name="_csrf_token" value="{{CSRF}}">
-      <label for="user_uri">User URI</label>
-      <input type="text" id="user_uri" name="user_uri" placeholder="entity://user/allen" required autofocus>
-      <label for="password">Password</label>
-      <input type="password" id="password" name="password" required>
+      <label for="entity_uri">Entity URI</label>
+      <input type="text" id="entity_uri" name="entity_uri" placeholder="entity://user/allen" required autofocus>
+      <label for="secret">Password / Token</label>
+      <input type="password" id="secret" name="secret" required>
       <button type="submit">Sign in</button>
     </form>
     <p class="hint">
       First time? Admin runs <code>mix ezagent.user.set_password entity://user/admin --password X</code>,
-      then sign in as <code>entity://user/admin</code>.
+      then sign in as <code>entity://user/admin</code>. Agent URIs
+      (<code>entity://agent/&lt;flavor&gt;_&lt;name&gt;</code>) sign in with a bearer token
+      minted via the entity_tokens admin.
     </p>
   </body>
   </html>
@@ -62,24 +64,24 @@ defmodule EzagentWeb.SessionController do
     |> send_resp(200, html)
   end
 
-  def create(conn, %{"user_uri" => uri_str, "password" => password}) do
-    case authenticate(uri_str, password) do
+  def create(conn, %{"entity_uri" => uri_str, "secret" => secret}) do
+    case authenticate(uri_str, secret) do
       :ok ->
         conn
         |> configure_session(renew: true)
-        |> put_session(:current_user_uri, uri_str)
+        |> put_session(:current_entity_uri, uri_str)
         |> redirect(to: "/admin")
 
       :error ->
         conn
-        |> put_flash(:error, "Invalid URI or password.")
+        |> put_flash(:error, "Invalid URI or credentials.")
         |> redirect(to: "/login")
     end
   end
 
   def create(conn, _params) do
     conn
-    |> put_flash(:error, "URI and password are required.")
+    |> put_flash(:error, "Entity URI and credentials are required.")
     |> redirect(to: "/login")
   end
 
@@ -89,11 +91,16 @@ defmodule EzagentWeb.SessionController do
     |> redirect(to: "/login")
   end
 
-  defp authenticate(uri_str, password) when is_binary(uri_str) and is_binary(password) do
-    if Users.verify_password(uri_str, password) do
-      :ok
-    else
-      :error
+  defp authenticate(uri_str, secret) when is_binary(uri_str) and is_binary(secret) do
+    case URI.parse(uri_str) do
+      %URI{scheme: "entity"} = uri ->
+        case Entity.authenticate(uri, secret) do
+          {:ok, _} -> :ok
+          {:error, _} -> :error
+        end
+
+      _ ->
+        :error
     end
   end
 

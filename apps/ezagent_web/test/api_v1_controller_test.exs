@@ -58,10 +58,23 @@ defmodule EzagentWeb.ApiV1ControllerTest do
     conn =
       conn
       |> put_req_header("authorization", "Bearer esr_pat_garbage_token_value")
+      |> put_req_header("x-ezagent-entity-uri", "entity://user/admin")
       |> post("/api/v1/user/list_caps", %{"target" => "entity://user/admin"})
 
     assert conn.status == 401
     body = Jason.decode!(conn.resp_body)
     assert body["error"]["code"] == "invalid_token"
+  end
+
+  test "POST with bearer token but no entity URI header returns 401 missing_entity_uri",
+       %{conn: conn} do
+    conn =
+      conn
+      |> put_req_header("authorization", "Bearer esr_pat_garbage_token_value")
+      |> post("/api/v1/user/list_caps", %{"target" => "entity://user/admin"})
+
+    assert conn.status == 401
+    body = Jason.decode!(conn.resp_body)
+    assert body["error"]["code"] == "missing_entity_uri"
   end
 end

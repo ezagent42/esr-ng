@@ -11,51 +11,46 @@ defmodule EzagentCli.Integration.CliLvCapParityTest do
   resolution, an action a user can do via LV becomes impossible via
   CLI (or vice versa) — breaking the "CLI ↔ LV same-server invariant"
   (Decision #130). The structural reason this works today is that
-  BOTH paths derive caps from `Ezagent.Identity.list_caps_for/1`. This
-  test pins that contract.
+  BOTH paths derive caps from `Ezagent.Identity.list_caps_for/1` (LV
+  reads it on mount; CLI reads it via `Ezagent.Entity.authenticate/2`
+  on the bearer-token verify path).
+
+  ## PR #142 update
+
+  CLI token storage moved from `users.cli_token` (per-user-only field)
+  to `entity_tokens` (entity-agnostic table). Verify is via
+  `Ezagent.Entity.Token.verify/2` rather than `Users.lookup_by_cli_token/1`.
+
+  `Entity.authenticate/2` dispatches by URI host — `user` → password
+  (bcrypt against `users.password_hash`), `agent` → token (against
+  `entity_tokens`). The parity invariant we're guarding is unchanged:
+  whichever path lands a user/agent in the running runtime, caps come
+  from `Ezagent.Identity.list_caps_for/1` so the same principal sees
+  the same cap set across CLI + LV.
 
   ## What the test asserts
 
-  1. Token → user URI lookup is bijective: rotating a token for a
-     user creates a binding such that `lookup_by_cli_token(token)`
-     returns the same user URI.
-  2. CLI's resolve_caller (private, but exercised via the public
-     Identity.list_caps_for path) and LV's mount-time cap derivation
-     converge on the SAME `Ezagent.Identity.list_caps_for/1` result for
-     the same user.
-  3. Invalid tokens cleanly return `:error` (the path CLI Exec
-     converts to exit code 4).
-  4. Non-admin users do NOT receive admin wildcard caps via CLI
-     token (no privilege elevation bug).
-
-  ## What this test does NOT cover
-
-  - Caps that are present in the DB row but not yet in the in-memory
-    User Kind slice — populated on Kind spawn via `initial_caps`,
-    which requires Loader-style hydration (see ezagent.user.create mix
-    task line 106 comment). For fresh-created users in a unit-test
-    sandbox, slice caps start empty until restart hydration; the
-    parity invariant (both surfaces see THE SAME caps, whatever
-    those are) still holds because they share the lookup function.
-  - End-to-end dispatch from each surface (covered by
-    `cli_lv_same_server_invariant_test.exs` which proves both
-    reach the SAME `Ezagent.Invocation.dispatch` function in the
-    same BEAM).
-
-  Combined with the same-server invariant test, this gives us
-  "same caps + same BEAM = same authz decision" — V3.4 in its
-  observable form.
+  1. A minted token verifies back to the same agent URI it was
+     minted for (token path).
+  2. A user URI's caps via `Entity.authenticate` (password) and via
+     `list_caps_for` (LV mount) converge on the same MapSet
+     (V3.4 parity).
+  3. Invalid tokens cleanly return `{:error, :invalid_credentials}`
+     (the path CLI Exec converts to exit code 4).
+  4. Non-admin agents do NOT receive admin wildcard caps via token
+     (no privilege elevation bug).
   """
 
   use EzagentCore.DataCase, async: false
 
-  alias Ezagent.Users
-  alias Ezagent.Capability
+  alias Ezagent.{Capability, Entity, Users}
+  alias Ezagent.Entity.Token
 
   setup do
     suffix = "parity-#{System.unique_integer([:positive])}"
     user_uri = URI.new!("entity://user/#{suffix}")
-    {:ok, %{uri: user_uri, suffix: suffix}}
+    agent_uri = URI.new!("entity://agent/cc_#{suffix}")
+    {:ok, %{user_uri: user_uri, agent_uri: agent_uri, suffix: suffix}}
   end
 
   defp create_user_with_caps(uri, extra_caps) when is_list(extra_caps) do
@@ -64,18 +59,14 @@ defmodule EzagentCli.Integration.CliLvCapParityTest do
     :ok
   end
 
-  test "token lookup returns the user URI it was rotated for", %{uri: user_uri} do
-    :ok = create_user_with_caps(user_uri, [])
-    {:ok, token} = Users.rotate_cli_token(URI.to_string(user_uri))
+  test "minted token verifies back to its agent URI", %{agent_uri: agent_uri} do
+    {plain, _row} = Token.mint(agent_uri, label: "parity-test")
 
-    assert {:ok, returned_uri} = Users.lookup_by_cli_token(token)
-
-    assert URI.to_string(returned_uri) == URI.to_string(user_uri),
-           "lookup_by_cli_token returned a different user URI than created — " <>
-             "got #{URI.to_string(returned_uri)}, expected #{URI.to_string(user_uri)}"
+    assert {:ok, %{caps: _}} = Entity.authenticate(agent_uri, plain)
   end
 
-  test "CLI-resolved caps == LV-resolved caps for the same user (V3.4 parity)", %{uri: user_uri} do
+  test "CLI-resolved caps == LV-resolved caps for the same user (V3.4 parity)",
+       %{user_uri: user_uri} do
     workspace_cap = %Capability{
       kind: :workspace,
       behavior: :any,
@@ -85,19 +76,18 @@ defmodule EzagentCli.Integration.CliLvCapParityTest do
     }
 
     :ok = create_user_with_caps(user_uri, [workspace_cap])
-    {:ok, token} = Users.rotate_cli_token(URI.to_string(user_uri))
 
-    # CLI path: token → user URI → list_caps_for
-    {:ok, cli_user_uri} = Users.lookup_by_cli_token(token)
-    cli_caps = Ezagent.Identity.list_caps_for(cli_user_uri)
+    # CLI path: bcrypt → Entity.authenticate → caps
+    {:ok, %{caps: cli_caps}} = Entity.authenticate(user_uri, "test-password")
 
-    # LV path: session cookie → user URI → list_caps_for (same function)
+    # LV path: session cookie → URI → list_caps_for (same function
+    # Entity.authenticate calls under the hood)
     lv_caps = Ezagent.Identity.list_caps_for(user_uri)
 
-    # The two surfaces MUST converge on the same MapSet — that's
-    # the V3.4 parity invariant. Both call list_caps_for/1, so this
-    # is structurally guaranteed today; the test pins the contract
-    # so any future refactor that diverges the lookup paths fails CI.
+    # The two surfaces MUST converge on the same MapSet — that's the
+    # V3.4 parity invariant. Both go through list_caps_for/1, so this
+    # is structurally guaranteed today; the test pins the contract so
+    # any future refactor that diverges the lookup paths fails CI.
     assert cli_caps == lv_caps,
            "CLI-derived caps != LV-derived caps for the same user — " <>
              "the two auth surfaces have diverged on caps resolution. " <>
@@ -105,22 +95,24 @@ defmodule EzagentCli.Integration.CliLvCapParityTest do
              "CLI got #{MapSet.size(cli_caps)} caps; LV got #{MapSet.size(lv_caps)} caps."
   end
 
-  test "invalid token returns :error (the path CLI Exec converts to exit code 4)" do
+  test "invalid token returns :error (the path CLI Exec converts to exit code 4)",
+       %{agent_uri: agent_uri} do
+    {_real, _row} = Token.mint(agent_uri)
+
     fake_token = "not-a-real-token-#{System.unique_integer([:positive])}"
-    assert :error = Users.lookup_by_cli_token(fake_token)
+    assert {:error, :invalid_credentials} = Entity.authenticate(agent_uri, fake_token)
   end
 
-  test "non-admin token does NOT resolve to admin wildcard cap", %{uri: user_uri} do
-    :ok = create_user_with_caps(user_uri, [])
-    {:ok, token} = Users.rotate_cli_token(URI.to_string(user_uri))
+  test "non-admin agent token does NOT resolve to admin wildcard cap",
+       %{agent_uri: agent_uri} do
+    {plain, _row} = Token.mint(agent_uri)
 
-    {:ok, returned_uri} = Users.lookup_by_cli_token(token)
-    caps = Ezagent.Identity.list_caps_for(returned_uri)
+    {:ok, %{caps: caps}} = Entity.authenticate(agent_uri, plain)
 
     refute Enum.any?(caps, fn c ->
              c.kind == :any and c.behavior == :any and c.instance == :any
            end),
-           "non-admin user resolved to admin wildcard cap via CLI token — " <>
+           "non-admin agent resolved to admin wildcard cap via token — " <>
              "auth elevation bug; only entity://user/admin should hold this cap"
   end
 end

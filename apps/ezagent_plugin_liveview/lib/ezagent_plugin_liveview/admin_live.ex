@@ -60,10 +60,10 @@ defmodule EzagentPluginLiveview.AdminLive do
     end
 
     # PR #123 hardening: live_session :require_user on_mount hook
-    # (EzagentWeb.LiveAuth) guarantees socket.assigns.current_user_uri
+    # (EzagentWeb.LiveAuth) guarantees socket.assigns.current_entity_uri
     # is set by the time mount/3 runs. The previous nil → admin_uri
     # fallback was the public-exposure attack surface — gone.
-    caller_uri = socket.assigns.current_user_uri
+    caller_uri = socket.assigns.current_entity_uri
 
     caller_caps =
       if URI.to_string(caller_uri) == URI.to_string(Ezagent.Entity.User.admin_uri()) do

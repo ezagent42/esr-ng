@@ -12,7 +12,7 @@ defmodule EzagentPluginLiveview.RoutingLiveTest do
     conn =
       Phoenix.ConnTest.build_conn()
       |> Plug.Test.init_test_session(%{
-        "current_user_uri" => URI.to_string(Ezagent.Entity.User.admin_uri())
+        "current_entity_uri" => URI.to_string(Ezagent.Entity.User.admin_uri())
       })
 
     {:ok, conn: conn}

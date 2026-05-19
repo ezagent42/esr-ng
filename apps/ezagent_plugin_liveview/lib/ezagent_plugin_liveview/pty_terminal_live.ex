@@ -61,10 +61,10 @@ defmodule EzagentPluginLiveview.PtyTerminalLive do
   end
 
   defp assign_caller(socket, _session) do
-    # PR #123 hardening: on_mount hook set current_user_uri; admin
+    # PR #123 hardening: on_mount hook set current_entity_uri; admin
     # fallback deleted (was a public-WS-reconnect privilege-escalation
     # path pre-hardening).
-    caller_uri = socket.assigns.current_user_uri
+    caller_uri = socket.assigns.current_entity_uri
 
     caller_caps =
       if URI.to_string(caller_uri) == URI.to_string(Ezagent.Entity.User.admin_uri()) do
