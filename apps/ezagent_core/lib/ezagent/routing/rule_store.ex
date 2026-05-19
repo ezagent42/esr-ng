@@ -132,40 +132,57 @@ defmodule Ezagent.Routing.RuleStore do
   @doc """
   Bulk-load all rules for a table into the live `RoutingRegistry`.
 
-  Called at boot by the owning plugin. Each row's matcher gets parsed
-  back via `Matcher.from_json/1`. Bad rows are logged and skipped
-  (don't crash plugin boot for one bad rule).
+  Called at boot by the owning plugin **and** at runtime by the
+  `routing_admin` Behavior on every add/delete/disable/enable —
+  the live registry now reflects whatever the DB says, no phx
+  restart needed (PR #127 fix; previously runtime adds silently
+  no-op'd from non-owner LV processes).
+
+  Each row's matcher gets parsed back via `Matcher.from_json/1`.
+  Bad rows are logged and skipped (don't crash plugin boot for
+  one bad rule).
   """
   @spec load_into_registry(atom()) :: :ok
   def load_into_registry(table_name_atom) when is_atom(table_name_atom) do
     # Phase 4-completion PR 9: only load `enabled` rows. Admin can
     # disable a system_default rule without deleting it (system_defaults
     # are protected from delete by delete/1).
-    list(table_name_atom)
-    |> Enum.filter(& &1.enabled)
-    |> Enum.each(fn row ->
-      case Ezagent.Routing.Matcher.from_json(row.matcher_data) do
-        {:ok, matcher_tuple} ->
-          # Phase 6 PR 5: wrap receivers in a map with the applies_to_users
-          # filter. Resolver pattern-matches on the map shape. Legacy ETS
-          # entries written directly via RoutingRegistry.put (tests, old
-          # call sites) stay as plain lists — Resolver falls back to "no
-          # user filter" for those.
-          value = %{
-            receivers: row.receivers,
-            applies_to_users: applies_to_users(row),
-            workspace_uri: row.workspace_uri
-          }
+    entries =
+      list(table_name_atom)
+      |> Enum.filter(& &1.enabled)
+      |> Enum.flat_map(fn row ->
+        case Ezagent.Routing.Matcher.from_json(row.matcher_data) do
+          {:ok, matcher_tuple} ->
+            # Phase 6 PR 5: wrap receivers in a map with the applies_to_users
+            # filter. Resolver pattern-matches on the map shape. Legacy ETS
+            # entries written directly via RoutingRegistry.put (tests, old
+            # call sites) stay as plain lists — Resolver falls back to "no
+            # user filter" for those.
+            value = %{
+              receivers: row.receivers,
+              applies_to_users: applies_to_users(row),
+              workspace_uri: row.workspace_uri
+            }
 
-          Ezagent.RoutingRegistry.put(table_name_atom, matcher_tuple, value)
+            [{matcher_tuple, value}]
 
-        {:error, reason} ->
-          require Logger
-          Logger.error("RuleStore: skipping rule id=#{row.id} — bad matcher: #{inspect(reason)}")
-      end
-    end)
+          {:error, reason} ->
+            require Logger
 
-    :ok
+            Logger.error(
+              "RuleStore: skipping rule id=#{row.id} — bad matcher: #{inspect(reason)}"
+            )
+
+            []
+        end
+      end)
+
+    # PR #127: use replace_table_contents/2 so this works from any
+    # caller process (the routing_admin Behavior runs in the LV
+    # process, not the table-owner plugin Application process).
+    # Also fixes the stale-entry-on-delete bug — clearing + repopulating
+    # surfaces row deletions atomically.
+    Ezagent.RoutingRegistry.replace_table_contents(table_name_atom, entries)
   end
 
   @doc """

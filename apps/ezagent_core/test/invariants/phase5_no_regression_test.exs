@@ -80,10 +80,10 @@ defmodule EzagentCore.Invariants.Phase5NoRegressionTest do
 
   describe "Phase 5: routing tables declared" do
     test "MentionRouting + SessionRouting tables exist" do
-      assert :ets.whereis(:"esr_routing_Elixir.EzagentDomainChat.Routing.MentionRouting") !=
+      assert :ets.whereis(:"ezagent_routing_Elixir.EzagentDomainChat.Routing.MentionRouting") !=
                :undefined
 
-      assert :ets.whereis(:"esr_routing_Elixir.EzagentDomainChat.Routing.SessionRouting") !=
+      assert :ets.whereis(:"ezagent_routing_Elixir.EzagentDomainChat.Routing.SessionRouting") !=
                :undefined
     end
 

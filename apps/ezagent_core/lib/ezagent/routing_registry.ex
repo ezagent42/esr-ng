@@ -181,10 +181,52 @@ defmodule Ezagent.RoutingRegistry do
     :ets.lookup(reverse_table(name), value) |> Enum.map(fn {_, k} -> k end)
   end
 
+  @doc """
+  Replace **all** entries in `name` with `entries` (`[{key, value}]`).
+
+  Atomic from the reader's perspective: deletes everything then
+  re-inserts in a single ETS pass. Used by `Ezagent.Routing.RuleStore.load_into_registry/1`
+  to reflect the current persisted ruleset (including deletions, which
+  the original boot-only `put/3` pattern missed — Phase 7 PR #127).
+
+  **Bypasses `assert_owner/1`** intentionally. The owner-pid check on
+  `put/3` exists to prevent cross-plugin stomping; this function's
+  sole legitimate caller is `RuleStore` (in core), which already
+  gates writes upstream via CapBAC on the `routing_admin` Behavior
+  (admin-only). The earlier strict check made admin-triggered runtime
+  rule edits silently no-op when dispatched from a non-owner LV
+  process — exactly the bug PR #127 fixes.
+
+  ## Semantics
+
+  - For `:set` tables (unique): each key appears at most once.
+  - For `:bag` tables (duplicate): the same key can repeat in
+    `entries` with different values; all rows persist.
+
+  Reverse index (if enabled) is rebuilt from the new entries.
+  """
+  @spec replace_table_contents(table_name(), [{term(), term()}]) :: :ok
+  def replace_table_contents(name, entries) when is_atom(name) and is_list(entries) do
+    meta = get_meta(name)
+
+    :ets.delete_all_objects(data_table(name))
+
+    if meta.reverse_index? do
+      :ets.delete_all_objects(reverse_table(name))
+    end
+
+    for {key, value} <- entries do
+      :ets.insert(data_table(name), {key, value})
+      maybe_reverse_insert(name, key, value, meta)
+    end
+
+    :ok
+  end
+
   # --- Internals --------------------------------------------------------
 
-  defp data_table(name), do: :"esr_routing_#{name}"
-  defp reverse_table(name), do: :"esr_routing_reverse_#{name}"
+  defp data_table(name), do: :"ezagent_routing_#{name}"
+  defp reverse_table(name), do: :"ezagent_routing_reverse_#{name}"
 
   defp get_meta(name) do
     case :ets.lookup(@meta_table, name) do
