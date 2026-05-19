@@ -76,11 +76,16 @@ defmodule EzagentPluginCcChannel.McpConfigWriter do
       "EZAGENT_AGENT_TOKEN" => token
     }
 
+    # PR #129: use `uv run --script <path>` so uv honors the PEP 723
+    # inline metadata header (`# /// script` block) and provisions the
+    # `websockets` dep on first run. Without `--script`, `uv run python3 <path>`
+    # invokes Python directly and skips PEP 723 → `ModuleNotFoundError:
+    # No module named 'websockets'` at startup (Allen 2026-05-19 03:12).
     config = %{
       "mcpServers" => %{
         "esr-bridge" => %{
           "command" => "uv",
-          "args" => ["run", "python3", script_path],
+          "args" => ["run", "--script", script_path],
           "env" => env
         }
       }
