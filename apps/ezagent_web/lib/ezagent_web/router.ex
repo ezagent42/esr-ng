@@ -29,6 +29,15 @@ defmodule EzagentWeb.Router do
   # /admin* requires login (Phase 4-completion Spec 05 §A.2.3 +
   # PR #123 hardening: live_session on_mount gates the WS reconnect
   # path that bypasses the HTTP Plug pipeline).
+  # PR-B: file download route for chat compose uploads. Mounted in the
+  # EzagentWeb scope (so the controller resolves correctly), under the
+  # same RequireUser plug as /admin/*.
+  scope "/", EzagentWeb do
+    pipe_through [:browser, EzagentWeb.Plugs.RequireUser]
+
+    get "/admin/uploads/:filename", UploadsController, :show
+  end
+
   scope "/", EzagentPluginLiveview do
     pipe_through [:browser, EzagentWeb.Plugs.RequireUser]
 
