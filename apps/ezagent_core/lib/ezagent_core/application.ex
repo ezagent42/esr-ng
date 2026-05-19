@@ -38,9 +38,9 @@ defmodule EzagentCore.Application do
       Ezagent.Snapshot.Writer,
 
       # ⑧ Foundation singleton supervisor — Phase 6 PR 2. Hosts core
-      # singletons (RoutingAdmin and future cross-domain controllers).
-      # Workspace.Supervisor moved out to ezagent_domain_workspace as part
-      # of the three-layer split.
+      # singletons (System Kind sentinels + future cross-domain
+      # controllers). Workspace.Supervisor moved out to
+      # ezagent_domain_workspace as part of the three-layer split.
       {DynamicSupervisor, name: Ezagent.Core.SingletonSupervisor, strategy: :one_for_one}
     ]
 
@@ -49,11 +49,12 @@ defmodule EzagentCore.Application do
     # Attach telemetry handlers after the writer is up. Idempotent on restart.
     :ok = Ezagent.Audit.attach()
 
-    # Phase 5 PR 4: register RoutingAdmin Behavior + spawn singleton
-    # `routing-admin://default` so /admin/routing dispatches go through
-    # CapBAC check at step 5.5. Workspace registration moved to
-    # ezagent_domain_workspace.Application in Phase 6 PR 2.
-    :ok = register_routing_admin()
+    # PR #146 (SPEC v2 §5.7) — synthetic singleton `routing-admin://default`
+    # dissolved. `Ezagent.Behavior.Routing` is registered against the
+    # scope-owning Kinds (Workspace + Session + System) in their respective
+    # domain Applications and here for System. Global rules dispatch to
+    # `system://routing/default`, spawned below.
+    :ok = register_system_kind()
 
     # Post-Phase-5 (Allen 2026-05-17): start distributed Erlang as the
     # named runtime node so `mix esr` (CLI) can reach us via :rpc.call.
@@ -72,26 +73,36 @@ defmodule EzagentCore.Application do
     _ -> false
   end
 
-  defp register_routing_admin do
+  # PR #146 — register Routing Behavior on the System Kind, spawn the
+  # canonical global-rules sentinel `system://routing/default`, and
+  # register a SpawnRegistry fn for the `system://` scheme so future
+  # sentinels (`system://bootstrap/default`, `system://migration-<id>`)
+  # spawn through the standard SpawnRegistry path.
+  defp register_system_kind do
     alias Ezagent.BehaviorRegistry
-    alias Ezagent.Behavior.RoutingAdmin, as: RAB
-    alias Ezagent.Entity.RoutingAdmin, as: RAK
+    alias Ezagent.Behavior.Routing, as: RB
+    alias Ezagent.Entity.System, as: SK
 
-    Enum.each(RAB.actions(), fn action ->
-      :ok = BehaviorRegistry.register(RAK, action, RAB)
+    Enum.each(RB.actions(), fn action ->
+      :ok = BehaviorRegistry.register(SK, action, RB)
     end)
 
-    uri = RAK.default_uri()
+    :ok =
+      Ezagent.SpawnRegistry.register("system", fn %URI{} = uri ->
+        DynamicSupervisor.start_child(
+          Ezagent.Core.SingletonSupervisor,
+          {Ezagent.Kind.Server, {SK, %{uri: uri}}}
+        )
+      end)
+
+    uri = SK.routing_default_uri()
 
     case Ezagent.KindRegistry.lookup(uri) do
       {:ok, _pid} ->
         :ok
 
       :error ->
-        case DynamicSupervisor.start_child(
-               Ezagent.Core.SingletonSupervisor,
-               {Ezagent.Kind.Server, {RAK, %{uri: uri}}}
-             ) do
+        case Ezagent.SpawnRegistry.spawn(uri) do
           {:ok, _pid} -> :ok
           {:error, {:already_started, _pid}} -> :ok
           err -> err

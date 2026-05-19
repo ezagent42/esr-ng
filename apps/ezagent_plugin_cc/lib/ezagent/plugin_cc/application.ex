@@ -32,11 +32,14 @@ defmodule EzagentPluginCc.Application do
 
   1. Init BridgeRegistry (ETS table for agent_uri → Channel pid)
   2. Start PtyServerRegistry (:via name source for PtyServers) +
-     PtyServerSupervisor (DynamicSupervisor) + the synthetic
-     PtyInput Kind that hosts the `Behavior.Pty.write` action
-     (xterm.js input dispatch target)
+     PtyServerSupervisor (DynamicSupervisor)
   3. Register the `cc.agent` Template Class
-  4. Re-run `Workspace.Loader.load_all/0` to instantiate any
+  4. Register `Ezagent.Behavior.Pty` on `Ezagent.Entity.Agent` so
+     `entity://agent/cc_<X>/behavior/pty/write` dispatches resolve.
+     (PR #146: previously a synthetic `pty-input://default` singleton;
+     dissolved per SPEC v2 §5.7 — PTY input now dispatches to the
+     agent itself.)
+  5. Re-run `Workspace.Loader.load_all/0` to instantiate any
      cc.agent templates that were skipped during boot before this
      plugin was up. Idempotent at supervisor layer via the
      PtyServer :via Registry.
@@ -60,7 +63,7 @@ defmodule EzagentPluginCc.Application do
     case Supervisor.start_link(children, strategy: :one_for_one, name: __MODULE__) do
       {:ok, sup_pid} ->
         :ok = register_template_classes()
-        :ok = register_pty_input_kind()
+        :ok = register_pty_behavior_on_agent()
 
         # Boot-ordering fix: chat plugin's Application.start calls
         # Ezagent.Workspace.Loader.load_all/0 BEFORE this plugin
@@ -82,32 +85,19 @@ defmodule EzagentPluginCc.Application do
     :ok
   end
 
-  # Phase 5 PR 4: synthetic PtyInput Kind + Behavior.Pty for xterm.js
-  # LV's input dispatch path. Mirrors RoutingAdmin pattern (Decision #125).
-  defp register_pty_input_kind do
+  # PR #146 (SPEC v2 §5.7) — synthetic `pty-input://default` singleton
+  # dissolved. Register `Behavior.Pty` on `Ezagent.Entity.Agent` so
+  # xterm.js LV input dispatches to the agent's own URI:
+  # `entity://agent/cc_<X>/behavior/pty/write`.
+  defp register_pty_behavior_on_agent do
     alias Ezagent.BehaviorRegistry
     alias Ezagent.Behavior.Pty, as: PtyB
-    alias Ezagent.Entity.PtyInput, as: PtyK
+    alias Ezagent.Entity.Agent, as: AgentK
 
     Enum.each(PtyB.actions(), fn action ->
-      :ok = BehaviorRegistry.register(PtyK, action, PtyB)
+      :ok = BehaviorRegistry.register(AgentK, action, PtyB)
     end)
 
-    uri = PtyK.default_uri()
-
-    case Ezagent.KindRegistry.lookup(uri) do
-      {:ok, _pid} ->
-        :ok
-
-      :error ->
-        case DynamicSupervisor.start_child(
-               Ezagent.Workspace.Supervisor,
-               {Ezagent.Kind.Server, {PtyK, %{uri: uri}}}
-             ) do
-          {:ok, _pid} -> :ok
-          {:error, {:already_started, _pid}} -> :ok
-          err -> err
-        end
-    end
+    :ok
   end
 end
