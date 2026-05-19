@@ -16,8 +16,8 @@ defmodule Ezagent.Telemetry do
   | `[:ezagent, :authz, :denied]`              | `Ezagent.Kind.Runtime`     | (empty)           | kind_module, action, target, caller, needed |
   | `[:ezagent, :dispatch, :no_actor]`         | `Ezagent.Invocation`       | (empty)           | target |
   | `[:ezagent, :dlq, :write]`                 | `Ezagent.DLQ`              | (empty)           | reason, payload |
-  | `[:ezagent, :chat, :reply_session_mismatch]` | `Ezagent.Behavior.Chat`  | (empty)           | ref, target_sessions, ref_actual_sessions, reason |
-  | `[:ezagent, :chat, :reply_dispatch_failed]`  | `Ezagent.Behavior.Chat`  | (empty)           | agent, target_session, reason, message_uri |
+  | `[:ezagent, :chat, :reply_session_mismatch]` | `Ezagent.Behavior.Chat`  | (empty)           | ref_id, target_sessions, ref_actual_sessions, reason |
+  | `[:ezagent, :chat, :reply_dispatch_failed]`  | `Ezagent.Behavior.Chat`  | (empty)           | agent, target_session, reason, message_id |
 
   Phase 1-2 `:authz` event was `:stub_grant` (permissive stub). Phase 3d
   hard flip (P3-D6) replaces with real `:granted` / `:denied`. The

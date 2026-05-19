@@ -161,7 +161,7 @@ defmodule Ezagent.Audit do
       exception:
         Jason.encode!(%{
           reason: inspect(Map.get(meta, :reason)),
-          message_uri: Map.get(meta, :message_uri)
+          message_id: Map.get(meta, :message_id)
         }),
       inserted_at: DateTime.utc_now()
     }

@@ -78,7 +78,7 @@ defmodule EzagentDomainChat.Integration.RealClaudeHotfixesTest do
       assert_receive {:to_claude, %{"meta" => meta}}, 500
       assert meta["session"] == URI.to_string(session_uri)
       assert meta["sender"] == "entity://user/admin"
-      assert meta["message_uri"] == msg.uri
+      assert meta["message_id"] == msg.id
 
       BridgeRegistry.unbind(agent_uri)
       DynamicSupervisor.terminate_child(EzagentDomainChat.AgentSupervisor, agent_pid)

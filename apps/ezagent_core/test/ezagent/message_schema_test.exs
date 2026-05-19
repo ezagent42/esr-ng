@@ -5,6 +5,8 @@ defmodule Ezagent.MessageSchemaTest do
   Tests Repo.insert + Repo.get round-trip preserves all struct fields,
   including custom URI type encoding/decoding and {:array, Ezagent.Ecto.URI}
   for mentions.
+
+  PR #149 (SPEC v2 §5.13): id/ref_id field rename.
   """
 
   # Non-async because Repo state is shared via Sandbox.
@@ -22,13 +24,13 @@ defmodule Ezagent.MessageSchemaTest do
     sender = URI.new!("entity://user/admin")
     session = URI.new!("session://main")
     mention = URI.new!("entity://agent/test_cc-builder")
-    ref_uri = URI.new!("message://aabbccdd00000000")
+    ref_id = "aabbccdd00000000"
     fixed_at = ~U[2026-05-16 07:00:00.000000Z]
 
     msg =
       Message.new(sender, %{text: "schema round-trip", attachments: []},
         mentions: [mention],
-        ref: ref_uri,
+        ref_id: ref_id,
         inserted_at: fixed_at
       )
 
@@ -37,16 +39,16 @@ defmodule Ezagent.MessageSchemaTest do
     msg_with_session = %{msg | session_uri: session}
 
     {:ok, _inserted} = Repo.insert(msg_with_session)
-    loaded = Repo.get(Message, msg.uri)
+    loaded = Repo.get(Message, msg.id)
 
-    assert loaded.uri == msg.uri
+    assert loaded.id == msg.id
     assert loaded.session_uri == session
     assert loaded.sender == sender
     assert loaded.mentions == [mention]
     assert loaded.body == %{"text" => "schema round-trip", "attachments" => []}
     # body comes back with string keys because it's a generic :map column;
     # callers handle either form depending on consumer (LV uses string keys).
-    assert loaded.ref == ref_uri
+    assert loaded.ref_id == ref_id
     assert DateTime.compare(loaded.inserted_at, fixed_at) == :eq
   end
 
@@ -58,12 +60,12 @@ defmodule Ezagent.MessageSchemaTest do
     msg_with_session = %{msg | session_uri: session}
 
     {:ok, _} = Repo.insert(msg_with_session)
-    loaded = Repo.get(Message, msg.uri)
+    loaded = Repo.get(Message, msg.id)
 
     assert loaded.mentions == []
   end
 
-  test "insert with nil ref" do
+  test "insert with nil ref_id" do
     sender = URI.new!("entity://agent/test_cc-builder")
     session = URI.new!("session://main")
 
@@ -71,8 +73,8 @@ defmodule Ezagent.MessageSchemaTest do
     msg_with_session = %{msg | session_uri: session}
 
     {:ok, _} = Repo.insert(msg_with_session)
-    loaded = Repo.get(Message, msg.uri)
+    loaded = Repo.get(Message, msg.id)
 
-    assert loaded.ref == nil
+    assert loaded.ref_id == nil
   end
 end

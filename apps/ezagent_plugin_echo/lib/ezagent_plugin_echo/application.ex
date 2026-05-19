@@ -13,6 +13,16 @@ defmodule EzagentPluginEcho.Application do
      SPEC v2 — agent flavor lives in the name prefix) under that
      supervisor.
 
+  ## PR #149 (SPEC v2 §5.14)
+
+  `Ezagent.AgentTypeRegistry` was deleted. This plugin no longer
+  registers an `"echo"` flavor → spawn fn pair. The default Echo
+  instance still spawns under this plugin's own `Supervisor` at boot
+  (direct `DynamicSupervisor.start_child/2`); the chat plugin's
+  `entity://` SpawnRegistry fn resolves the `echo` flavor for
+  CLI-driven / test-time spawns via its three-step lookup (snapshot →
+  template → flavor-prefix).
+
   ## Why a DynamicSupervisor
 
   Phase 1 only has one Echo instance, but the supervisor pattern is
@@ -40,7 +50,6 @@ defmodule EzagentPluginEcho.Application do
   @impl true
   def start(_type, _args) do
     register_behaviors()
-    register_agent_type()
 
     children = [
       {DynamicSupervisor, name: __MODULE__.Supervisor, strategy: :one_for_one}
@@ -58,16 +67,6 @@ defmodule EzagentPluginEcho.Application do
 
   defp register_behaviors do
     :ok = Ezagent.BehaviorRegistry.register(Ezagent.Entity.Echo, :say, Ezagent.Behavior.Echo)
-  end
-
-  defp register_agent_type do
-    :ok =
-      Ezagent.AgentTypeRegistry.register("echo", fn uri, _name ->
-        DynamicSupervisor.start_child(
-          __MODULE__.Supervisor,
-          {Ezagent.Kind.Server, {Ezagent.Entity.Echo, %{uri: uri}}}
-        )
-      end)
   end
 
   defp spawn_default_instance do

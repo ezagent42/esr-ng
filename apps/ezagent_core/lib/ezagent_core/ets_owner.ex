@@ -45,12 +45,13 @@ defmodule EzagentCore.EtsOwner do
     # shape (Decision #137 / PR 42). Ezagent.Entity.Agent.spawn/4
     # records here; CapBAC step 5.5 (future PR 46+) reads here.
     {Ezagent.AgentLineage, :set},
-    # PR #141 (SPEC v2): agent flavor → spawn fn registry. Each plugin
-    # registers its agent flavor (e.g. "cc", "curl", "echo") → spawn
-    # fn; the chat plugin's `entity://` SpawnRegistry fn delegates here
-    # for `host = "agent"`, extracting flavor from the URI's name
-    # prefix `<flavor>_<rest>` (SPEC §5.14).
-    {Ezagent.AgentTypeRegistry, :set},
+    # PR #149 (SPEC v2 §5.14): `Ezagent.AgentTypeRegistry` deleted.
+    # Agent flavor is now a free-form prefix on the URI's name segment
+    # (`entity://agent/<flavor>_<name>`); the AgentTemplate that
+    # instantiated the agent is the authoritative source for the
+    # backing kind_module. The chat plugin's `entity://` SpawnRegistry
+    # fn looks up kind_module from snapshot first, AgentTemplate
+    # second — no per-flavor lookup table needed.
     # PR #145 (SPEC v2 §5.6 §5.11): runtime ETS allowlist of URI schemes
     # accepted by `Ezagent.URI.parse!/1`. Seeded at boot with the 6 core
     # schemes; plugins extend it ONLY via `Ezagent.SpawnRegistry.register/2`

@@ -35,6 +35,14 @@ defmodule EzagentWeb.LiveAuth do
   Renamed from `:require_user` → `:require_entity` to reflect that
   the gated session may belong to any Entity (a human User OR an
   Agent acting via bearer token).
+
+  ## PR #149 (S-8) hardening
+
+  WS reconnect path now asserts the session URI parses to an
+  `entity://` shape with `host in ["user", "agent"]`. A malformed
+  or non-entity URI in the cookie redirects to `/login` instead of
+  silently propagating into LV assigns. Same vigilance as PR #123:
+  prevent any silent fallback to admin on reconnect.
   """
 
   import Phoenix.Component, only: [assign: 3]
@@ -46,7 +54,26 @@ defmodule EzagentWeb.LiveAuth do
         {:halt, redirect(socket, to: "/login")}
 
       uri_str when is_binary(uri_str) ->
-        {:cont, assign(socket, :current_entity_uri, URI.parse(uri_str))}
+        case parse_entity_uri(uri_str) do
+          {:ok, uri} ->
+            {:cont, assign(socket, :current_entity_uri, uri)}
+
+          :error ->
+            # Malformed / non-entity URI → treat as unauthenticated.
+            {:halt, redirect(socket, to: "/login")}
+        end
+    end
+  end
+
+  # PR #149 (S-8): accept entity://user/* and entity://agent/* uniformly.
+  defp parse_entity_uri(uri_str) do
+    case URI.new(uri_str) do
+      {:ok, %URI{scheme: "entity", host: host, path: "/" <> name} = uri}
+      when host in ["user", "agent"] and name != "" ->
+        {:ok, uri}
+
+      _ ->
+        :error
     end
   end
 end

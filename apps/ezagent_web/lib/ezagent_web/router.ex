@@ -63,8 +63,10 @@ defmodule EzagentWeb.Router do
       # Phase 5 PR 3: Snapshots observability.
       live "/admin/snapshots", SnapshotsLive
 
-      # Real Phase 5 PR 3: PTY agent live status.
-      live "/admin/agents", AgentsLive
+      # PR #149 (S-5 entity-agnostic): unified live registry replaces
+      # the agent-only list page. Detail + terminal routes stay at
+      # `/admin/agents/:uri/...` because they're PTY-specific.
+      live "/admin/entities", EntitiesLive
       live "/admin/agents/:uri", AgentDetailLive
 
       # Real Phase 5 PR 4: Pty-Web (xterm.js in browser).

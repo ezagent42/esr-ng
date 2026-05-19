@@ -12,19 +12,22 @@ defmodule Ezagent.MessageTest do
       assert msg.sender == @sender
       assert msg.body == @body
       assert msg.mentions == []
-      assert msg.ref == nil
+      assert msg.ref_id == nil
       assert %DateTime{} = msg.inserted_at
-      assert String.starts_with?(msg.uri, "message://")
+      # PR #149 (SPEC v2 §5.13): id is a plain UUID hex string, no
+      # `message://` prefix.
+      assert is_binary(msg.id)
+      refute String.starts_with?(msg.id, "message://")
     end
 
-    test "URI auto-gen format is `message://<16 lowercase hex>`" do
+    test "id auto-gen format is 16 lowercase hex chars" do
       msg = Message.new(@sender, @body)
-      assert Regex.match?(~r/^message:\/\/[0-9a-f]{16}$/, msg.uri)
+      assert Regex.match?(~r/^[0-9a-f]{16}$/, msg.id)
     end
 
-    test "URI auto-gen unique across constructions" do
-      uris = for _ <- 1..20, do: Message.new(@sender, @body).uri
-      assert length(Enum.uniq(uris)) == 20
+    test "id auto-gen unique across constructions" do
+      ids = for _ <- 1..20, do: Message.new(@sender, @body).id
+      assert length(Enum.uniq(ids)) == 20
     end
 
     test ":mentions opt fills mentions field" do
@@ -33,10 +36,10 @@ defmodule Ezagent.MessageTest do
       assert msg.mentions == mentions
     end
 
-    test ":ref opt fills ref (URI) field" do
-      ref = URI.parse("message://deadbeef00000000")
-      msg = Message.new(@sender, @body, ref: ref)
-      assert msg.ref == ref
+    test ":ref_id opt fills ref_id (plain id string) field" do
+      ref_id = "deadbeef00000000"
+      msg = Message.new(@sender, @body, ref_id: ref_id)
+      assert msg.ref_id == ref_id
     end
 
     test ":inserted_at opt overrides default DateTime.utc_now" do
@@ -45,9 +48,9 @@ defmodule Ezagent.MessageTest do
       assert msg.inserted_at == fixed
     end
 
-    test ":uri opt overrides auto-gen (for replay / tests)" do
-      msg = Message.new(@sender, @body, uri: "message://test-fixed-uri")
-      assert msg.uri == "message://test-fixed-uri"
+    test ":id opt overrides auto-gen (for replay / tests)" do
+      msg = Message.new(@sender, @body, id: "test-fixed-id")
+      assert msg.id == "test-fixed-id"
     end
 
     test "body without :attachments defaults to empty list" do
@@ -87,8 +90,8 @@ defmodule Ezagent.MessageTest do
       assert decoded["body"]["text"] == "hello"
       assert decoded["body"]["attachments"] == []
       assert is_binary(decoded["inserted_at"])
-      assert is_binary(decoded["uri"])
-      assert is_nil(decoded["ref"])
+      assert is_binary(decoded["id"])
+      assert is_nil(decoded["ref_id"])
       # __struct__ should NOT leak into JSON
       refute Map.has_key?(decoded, "__struct__")
     end

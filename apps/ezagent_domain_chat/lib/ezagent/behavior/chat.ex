@@ -214,7 +214,7 @@ defmodule Ezagent.Behavior.Chat do
 
         base_meta = %{
           "sender" => URI.to_string(msg.sender),
-          "message_uri" => msg.uri,
+          "message_id" => msg.id,
           "session" => source_session
         }
 
@@ -539,11 +539,11 @@ defmodule Ezagent.Behavior.Chat do
 
   defp message_schema do
     %{
-      uri: :string,
+      id: :string,
       sender: :uri,
       mentions: {:list, :uri},
       body: :map,
-      ref: {:option, :uri},
+      ref_id: {:option, :string},
       inserted_at: :map
     }
   end

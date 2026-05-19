@@ -17,26 +17,27 @@ defmodule EzagentPluginFeishu.MentionParser do
   live and someone types `@architect 看看`, the message routes only
   to that agent via MentionRouting (the existing matcher).
 
-  ## Resolution (PR #141 SPEC v2)
+  ## Resolution (PR #149 SPEC v2 §5.14)
 
-  Each `@<name>` token expands to one candidate per registered agent
-  flavor (`entity://agent/<flavor>_<name>`); live agents in
-  `Ezagent.KindRegistry` pass through. Unknown names are ignored
-  (no Message mention added — admin sees the message in /admin but
-  no agent gets singled out).
+  `Ezagent.AgentTypeRegistry` was deleted; there's no per-flavor
+  enumeration anymore. Resolution now walks `Ezagent.KindRegistry`
+  and matches any live `entity://agent/<flavor>_<name>` whose tail
+  (everything after the first `_`) equals the typed `@<name>`.
+  Multiple live agents sharing a name (cc_alice + curl_alice) both
+  match — same UX as before.
 
   ## UX: name-only mention with flavor auto-discovery
 
-  Users type `@<name>`, not `@<flavor>_<name>` — the parser asks
-  `AgentTypeRegistry.registered_flavors/0` for every flavor and tries
-  each one. If the same name happens to exist under multiple flavors
-  (rare), both URIs are returned (both mentioned).
+  Users type `@<name>`, not `@<flavor>_<name>` — the parser scans
+  every live agent in the registry and pulls those whose name suffix
+  matches. Flavor stays an operator-side convention; the typed
+  `@<name>` is the natural-language handle.
 
-  Allen 2026-05-17: "B2 路线可以，暂时只考虑文字" — text only,
+  Allen 2026-05-17: "B2 路线可以,暂时只考虑文字" — text only,
   no attachment-level mentions.
   """
 
-  alias Ezagent.{AgentTypeRegistry, KindRegistry}
+  alias Ezagent.KindRegistry
 
   @mention_re ~r/@([A-Za-z0-9_\-\.]+)/
 
@@ -46,35 +47,48 @@ defmodule EzagentPluginFeishu.MentionParser do
       iex> EzagentPluginFeishu.MentionParser.extract_agent_mentions("@architect look")
       [%URI{scheme: "entity", host: "agent", path: "/cc_architect", ...}]  # if live
 
-  Returns `[]` if no `@name` tokens or none of them resolve.
+  Returns `[]` if no `@name` tokens or none of them resolve to a live agent.
   """
   @spec extract_agent_mentions(String.t()) :: [URI.t()]
   def extract_agent_mentions(text) when is_binary(text) do
-    @mention_re
-    |> Regex.scan(text, capture: :all_but_first)
-    |> List.flatten()
-    |> Enum.uniq()
-    |> Enum.flat_map(&candidate_uris/1)
-    |> Enum.filter(&live?/1)
-    |> Enum.uniq_by(&URI.to_string/1)
+    typed_names =
+      @mention_re
+      |> Regex.scan(text, capture: :all_but_first)
+      |> List.flatten()
+      |> Enum.uniq()
+
+    case typed_names do
+      [] ->
+        []
+
+      _ ->
+        live_agent_uris()
+        |> Enum.filter(&matches_any_typed_name?(&1, typed_names))
+        |> Enum.uniq_by(&URI.to_string/1)
+    end
   end
 
   def extract_agent_mentions(_), do: []
 
-  # Each `@name` token expands to one candidate per registered agent
-  # flavor. live? filters down to whichever URIs are actually alive.
-  # PR #141 SPEC v2: agent URIs are `entity://agent/<flavor>_<name>`
-  # (flavor as free-form name prefix).
-  defp candidate_uris(name) do
-    for flavor <- AgentTypeRegistry.registered_flavors() do
-      URI.parse("entity://agent/#{flavor}_#{name}")
+  # All currently-live `entity://agent/<flavor>_<name>` URIs.
+  defp live_agent_uris do
+    KindRegistry.list_all()
+    |> Enum.flat_map(fn {uri_str, _pid} ->
+      case URI.new(uri_str) do
+        {:ok, %URI{scheme: "entity", host: "agent"} = uri} -> [uri]
+        _ -> []
+      end
+    end)
+  end
+
+  # True if the URI's name-suffix (text after the first `_`) matches
+  # one of the typed `@<name>` tokens.
+  defp matches_any_typed_name?(%URI{path: "/" <> name}, typed_names) when name != "" do
+    case String.split(name, "_", parts: 2) do
+      [_flavor, suffix] when suffix != "" -> suffix in typed_names
+      _ -> false
     end
   end
 
-  defp live?(%URI{} = uri) do
-    case KindRegistry.lookup(uri) do
-      {:ok, _pid} -> true
-      :error -> false
-    end
-  end
+  defp matches_any_typed_name?(_, _), do: false
 end

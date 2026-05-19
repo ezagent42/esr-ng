@@ -119,12 +119,12 @@ defmodule Ezagent.Behavior.ChatTest do
                Chat.invoke(:send, slice, %{message: msg}, ctx)
 
       # MessageStore now has it
-      assert {:ok, loaded} = MessageStore.by_uri(msg.uri)
+      assert {:ok, loaded} = MessageStore.by_id(msg.id)
       assert loaded.session_uri == session_uri
 
       # Subscribers receive the chat_message broadcast
-      assert_receive {:chat_message, _session_uri, %Message{uri: stored_uri}}, 500
-      assert stored_uri == msg.uri
+      assert_receive {:chat_message, _session_uri, %Message{id: stored_id}}, 500
+      assert stored_id == msg.id
     end
 
     test "fan-out :receive on members when no mentions" do
@@ -181,8 +181,8 @@ defmodule Ezagent.Behavior.ChatTest do
       ctx = %{self_uri: user_uri, kind_module: Ezagent.Entity.User, caller: sender}
 
       assert {:ok, ^slice} = Chat.invoke(:receive, slice, %{message: msg}, ctx)
-      assert_receive {:message_received, %Message{uri: ru}}, 500
-      assert ru == msg.uri
+      assert_receive {:message_received, %Message{id: rid}}, 500
+      assert rid == msg.id
     end
   end
 
@@ -230,7 +230,7 @@ defmodule Ezagent.Behavior.ChatTest do
       end
 
       assert Map.has_key?(meta, "sender")
-      assert Map.has_key?(meta, "message_uri")
+      assert Map.has_key?(meta, "message_id")
       assert Map.has_key?(meta, "session")
       refute Map.has_key?(meta, "file_path")
     end
