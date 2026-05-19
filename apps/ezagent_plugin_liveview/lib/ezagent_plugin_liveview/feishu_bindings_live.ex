@@ -18,7 +18,7 @@ defmodule EzagentPluginLiveview.FeishuBindingsLive do
   @impl true
   def mount(_params, session, socket) do
     admin_uri =
-      case Map.get(session || %{}, "current_user_uri") do
+      case Map.get(session || %{}, "current_entity_uri") do
         nil -> "entity://user/admin"
         s -> s
       end

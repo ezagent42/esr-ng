@@ -26,9 +26,9 @@ defmodule EzagentPluginLiveview.UserCapsLive do
   @impl true
   def mount(%{"uri" => encoded}, _session, socket) do
     user_uri = encoded |> URI.decode_www_form() |> URI.new!()
-    # PR #123 hardening: on_mount sets current_user_uri; caller is
+    # PR #123 hardening: on_mount sets current_entity_uri; caller is
     # the logged-in user, not a hardcoded admin fallback.
-    caller_uri = socket.assigns.current_user_uri
+    caller_uri = socket.assigns.current_entity_uri
 
     caller_caps =
       if URI.to_string(caller_uri) == URI.to_string(Ezagent.Entity.User.admin_uri()) do

@@ -22,11 +22,12 @@ defmodule Ezagent.Users do
 
   @primary_key {:id, :id, autogenerate: true}
   schema "users" do
-    field :uri, :string
-    field :password_hash, :string
-    field :caps_json, :string
-    # Phase 6 PR 7: per-user bearer token for CLI auth.
-    field :cli_token, :string
+    field(:uri, :string)
+    field(:password_hash, :string)
+    field(:caps_json, :string)
+    # PR #142: per-user `cli_token` field removed — bearer tokens now
+    # live in `entity_tokens` (entity-agnostic, supports agents too).
+    # See `Ezagent.Entity.Token`.
     timestamps(type: :utc_datetime_usec)
   end
 
@@ -129,79 +130,13 @@ defmodule Ezagent.Users do
 
   @spec list_all() :: [decoded()]
   def list_all do
-    Repo.all(from u in __MODULE__, order_by: u.uri)
+    Repo.all(from(u in __MODULE__, order_by: u.uri))
     |> Enum.map(&decode/1)
   end
 
-  # --- CLI token (Phase 6 PR 7) -------------------------------------
-
-  @doc """
-  Generate + persist a new CLI bearer token for `uri`. Returns the
-  raw token string — operator should record it once; we store only the
-  same value (not a hash; the token IS the secret on a single-machine
-  deployment, like a Github classic-PAT).
-  """
-  @spec rotate_cli_token(URI.t() | String.t()) :: {:ok, String.t()} | {:error, :not_found}
-  def rotate_cli_token(uri) do
-    uri_str = uri_to_str(uri)
-    token = generate_token()
-
-    case Repo.get_by(__MODULE__, uri: uri_str) do
-      nil ->
-        {:error, :not_found}
-
-      row ->
-        case row
-             |> Ecto.Changeset.change(%{cli_token: token})
-             |> Repo.update() do
-          {:ok, _} -> {:ok, token}
-          err -> err
-        end
-    end
-  end
-
-  @doc """
-  Clear the CLI token (operator revokes CLI access for this user).
-  """
-  @spec revoke_cli_token(URI.t() | String.t()) :: :ok | {:error, :not_found}
-  def revoke_cli_token(uri) do
-    uri_str = uri_to_str(uri)
-
-    case Repo.get_by(__MODULE__, uri: uri_str) do
-      nil ->
-        {:error, :not_found}
-
-      row ->
-        row
-        |> Ecto.Changeset.change(%{cli_token: nil})
-        |> Repo.update()
-        |> case do
-          {:ok, _} -> :ok
-          err -> err
-        end
-    end
-  end
-
-  @doc """
-  Resolve a CLI bearer token back to a user URI. Returns `{:ok, uri}`
-  or `:error` (token unknown / revoked). Used by `EzagentCli.Exec` to
-  derive `caller` + `caps` for token-authenticated calls.
-  """
-  @spec lookup_by_cli_token(String.t()) :: {:ok, URI.t()} | :error
-  def lookup_by_cli_token(token) when is_binary(token) and token != "" do
-    case Repo.get_by(__MODULE__, cli_token: token) do
-      nil -> :error
-      row -> {:ok, URI.parse(row.uri)}
-    end
-  end
-
-  def lookup_by_cli_token(_), do: :error
-
-  defp generate_token do
-    # 32 bytes = 256 bits of entropy; base64 url-safe makes it copy-able
-    # in shell + URLs without escaping.
-    "esr_pat_" <> (:crypto.strong_rand_bytes(32) |> Base.url_encode64(padding: false))
-  end
+  # CLI token helpers removed in PR #142 — bearer tokens are now
+  # entity-agnostic via `Ezagent.Entity.Token` (`entity_tokens` table).
+  # See also `mix ezagent.user.token --mint|--list|--revoke`.
 
   # --- encoding helpers ---------------------------------------------
 

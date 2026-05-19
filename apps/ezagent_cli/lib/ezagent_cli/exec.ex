@@ -29,16 +29,19 @@ defmodule EzagentCli.Exec do
   def exec(argv) when is_list(argv), do: exec(argv, [])
 
   @doc """
-  Phase 6 PR 7: 2-arg form accepts CLI-level options. Currently:
+  PR #142: 2-arg form accepts CLI-level options. Currently:
 
-    * `:token` — bearer token (looked up via `Ezagent.Users.lookup_by_cli_token/1`).
-      If valid, derived caller = that user URI + their caps.
-      If absent / invalid, falls back to admin caps (BC for single-user
-      installs).
+    * `:token` — bearer token (verified via `Ezagent.Entity.authenticate/2`).
+    * `:entity_uri` — the URI the token belongs to (required when
+      `:token` is set; `entity_tokens` is keyed by URI).
+
+  If both are present and valid, derived caller = that entity URI +
+  its caps. If absent, falls back to admin caps (BC for single-user
+  installs).
   """
   @spec exec([String.t()], keyword()) :: %{output: String.t(), exit_code: integer()}
   def exec(argv, opts) when is_list(argv) and is_list(opts) do
-    case resolve_caller(opts[:token]) do
+    case resolve_caller(opts[:token], opts[:entity_uri]) do
       {:ok, caller_uri, caller_caps} ->
         # Store on the per-call process dict so Dispatch.derive_caller
         # (in the same RPC-handling pid) picks it up without threading
@@ -53,6 +56,14 @@ defmodule EzagentCli.Exec do
 
       {:error, :invalid_token} ->
         %{output: "error: invalid or revoked CLI token\n", exit_code: 4}
+
+      {:error, :missing_entity_uri} ->
+        %{
+          output:
+            "error: --token requires --uri (or EZAGENT_ENTITY_URI) since PR #142;\n" <>
+              "       tokens live in entity_tokens, keyed by entity URI\n",
+          exit_code: 4
+        }
     end
   end
 
@@ -85,20 +96,19 @@ defmodule EzagentCli.Exec do
   end
 
   # nil / empty token → no override → Dispatch falls through to admin.
-  defp resolve_caller(nil), do: {:ok, nil, nil}
-  defp resolve_caller(""), do: {:ok, nil, nil}
+  defp resolve_caller(nil, _), do: {:ok, nil, nil}
+  defp resolve_caller("", _), do: {:ok, nil, nil}
 
-  defp resolve_caller(token) when is_binary(token) do
-    case Ezagent.Users.lookup_by_cli_token(token) do
-      {:ok, user_uri} ->
-        # User Kind already has the caps in its :identity slice. We
-        # could route through Ezagent.Identity.list_caps_for/1 (the
-        # canonical lookup) — that returns a MapSet already.
-        caps = Ezagent.Identity.list_caps_for(user_uri)
-        {:ok, user_uri, caps}
+  defp resolve_caller(token, nil) when is_binary(token), do: {:error, :missing_entity_uri}
+  defp resolve_caller(token, "") when is_binary(token), do: {:error, :missing_entity_uri}
 
-      :error ->
-        {:error, :invalid_token}
+  defp resolve_caller(token, entity_uri_str)
+       when is_binary(token) and is_binary(entity_uri_str) do
+    uri = URI.parse(entity_uri_str)
+
+    case Ezagent.Entity.authenticate(uri, token) do
+      {:ok, %{caps: caps}} -> {:ok, uri, caps}
+      {:error, _} -> {:error, :invalid_token}
     end
   end
 

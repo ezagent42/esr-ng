@@ -34,7 +34,7 @@ defmodule EzagentPluginLiveview.UserApiKeysLive do
   @impl true
   def mount(%{"uri" => encoded}, _session, socket) do
     user_uri = encoded |> URI.decode_www_form() |> URI.new!()
-    caller_uri = socket.assigns.current_user_uri
+    caller_uri = socket.assigns.current_entity_uri
 
     caller_caps =
       if URI.to_string(caller_uri) == URI.to_string(Ezagent.Entity.User.admin_uri()) do

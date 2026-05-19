@@ -99,8 +99,11 @@ defmodule EzagentWeb.ApiV1Controller do
       safe_type_name(km) == kind_str and to_string(action) == action_str
     end)
     |> case do
-      nil -> {:error, 404, "unknown_behavior", "no behavior for kind=#{kind_str} action=#{action_str}"}
-      {{km, _}, bm} -> {:ok, km, bm}
+      nil ->
+        {:error, 404, "unknown_behavior", "no behavior for kind=#{kind_str} action=#{action_str}"}
+
+      {{km, _}, bm} ->
+        {:ok, km, bm}
     end
   end
 
@@ -124,23 +127,43 @@ defmodule EzagentWeb.ApiV1Controller do
   defp resolve_caller(conn) do
     case Plug.Conn.get_req_header(conn, "authorization") do
       ["Bearer " <> token] ->
-        case Ezagent.Users.lookup_by_cli_token(token) do
-          {:ok, user_uri} ->
-            caps = Ezagent.Identity.list_caps_for(user_uri)
-            {:ok, user_uri, caps}
+        # PR #142: bearer-token verify is entity-agnostic now. The
+        # caller MUST also provide `X-Ezagent-Entity-URI: entity://...`
+        # so we know which URI's tokens to verify against. (Token
+        # plaintext alone is not enough — `entity_tokens` is indexed
+        # by URI, and reverse lookup-by-hash would be a per-request
+        # bcrypt scan of the whole table.)
+        case Plug.Conn.get_req_header(conn, "x-ezagent-entity-uri") do
+          [uri_str | _] ->
+            uri = URI.parse(uri_str)
 
-          :error ->
-            {:error, 401, "invalid_token", "bearer token unknown or revoked"}
+            case Ezagent.Entity.authenticate(uri, token) do
+              {:ok, %{caps: caps}} ->
+                {:ok, uri, caps}
+
+              {:error, :invalid_credentials} ->
+                {:error, 401, "invalid_token", "bearer token unknown or revoked"}
+
+              {:error, :no_such_entity} ->
+                {:error, 401, "invalid_token", "no tokens minted for #{uri_str}"}
+
+              {:error, reason} ->
+                {:error, 401, "invalid_token", inspect(reason)}
+            end
+
+          [] ->
+            {:error, 401, "missing_entity_uri",
+             "X-Ezagent-Entity-URI header required (e.g. `entity://user/admin`)"}
         end
 
       _ ->
-        # PR #123 hardening: the pre-public-tunnel admin fallback
-        # was the largest open attack surface on /api/v1 — any
-        # anonymous internet caller could dispatch as admin. Now
-        # requires a valid `esr_pat_…` bearer token issued via
-        # `mix ezagent.user.rotate_cli_token <uri>`.
+        # PR #123 hardening: the pre-public-tunnel admin fallback was
+        # the largest open attack surface on /api/v1 — any anonymous
+        # internet caller could dispatch as admin. Now requires a
+        # valid `esr_pat_…` bearer token issued via
+        # `mix ezagent.user.token <uri> --mint`.
         {:error, 401, "missing_token",
-         "bearer token required; mint via `mix ezagent.user.rotate_cli_token <uri>`"}
+         "bearer token required; mint via `mix ezagent.user.token <uri> --mint`"}
     end
   end
 
@@ -153,7 +176,9 @@ defmodule EzagentWeb.ApiV1Controller do
       end
 
     cond do
-      requested -> requested
+      requested ->
+        requested
+
       function_exported?(behavior_module, :interface, 0) ->
         case Map.get(behavior_module.interface(), action) do
           %{modes: [first | _]} -> first
@@ -187,6 +212,7 @@ defmodule EzagentWeb.ApiV1Controller do
   defp encodable(%MapSet{} = ms), do: MapSet.to_list(ms) |> Enum.map(&encodable/1)
   defp encodable(%URI{} = u), do: URI.to_string(u)
   defp encodable(list) when is_list(list), do: Enum.map(list, &encodable/1)
+
   defp encodable(tuple) when is_tuple(tuple) do
     tuple |> Tuple.to_list() |> Enum.map(&encodable/1)
   end
@@ -196,7 +222,10 @@ defmodule EzagentWeb.ApiV1Controller do
   end
 
   defp encodable(struct) when is_struct(struct), do: inspect(struct)
-  defp encodable(atom) when is_atom(atom) and atom not in [nil, true, false], do: Atom.to_string(atom)
+
+  defp encodable(atom) when is_atom(atom) and atom not in [nil, true, false],
+    do: Atom.to_string(atom)
+
   defp encodable(other), do: other
 
   defp maybe_interface(behavior_module, action) do
