@@ -6,7 +6,7 @@ defmodule Ezagent.Behavior.CurlAgent do
 
   Registered for `(Ezagent.Entity.CurlAgent, :receive)` in
   `EzagentPluginCurlAgent.Application`. The chat router targets
-  `<curl-agent://x>/behavior/chat/receive`; the dispatcher pattern-
+  `agent://curl/<name>/behavior/chat/receive`; the dispatcher pattern-
   matches behavior_module to land here.
 
   ## Slice (state_slice :curl_agent)

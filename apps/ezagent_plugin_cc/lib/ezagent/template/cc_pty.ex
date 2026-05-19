@@ -2,12 +2,21 @@ defmodule Ezagent.PluginCc.Template do
   @moduledoc """
   Template Class for cc-pty managed claude sessions.
 
-  Phase 4-completion PR 8 — `Ezagent.Kind.Template` implementation. Workspaces
-  declare cc-pty agents by adding entries to `session_templates`:
+  ## Naming (kept after PR #130 plugin merger)
+
+  This Class's stable id is `cc.pty` — chosen as the canonical name
+  even though the cc.pty and cc.channel_instance Template Classes
+  now live in the same plugin (PR #130 merged the two). `cc.pty`
+  reads accurately: this Class spawns a **PTY-managed local claude
+  process**. The sibling `cc.channel_instance` spawns a **bridge
+  awaiting external WebSocket connections** (no local PTY). Same
+  plugin, two different ways to materialize a `cc` agent.
+
+  ## Workspace declaration (PR #131 strict shape)
 
       {:ok, _} = Ezagent.Workspace.add_template("dev-workspace", "cc-architect", %{
         "class" => "cc.pty",
-        "agent_uri" => "agent://cc-architect",
+        "agent_uri" => "agent://cc/cc-architect",
         "cwd" => "/Users/h2oslabs/Workspace/proj"
       })
 

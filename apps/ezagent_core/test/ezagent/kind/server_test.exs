@@ -4,7 +4,8 @@ defmodule Ezagent.Kind.ServerTest do
 
   setup do
     # Each test gets a unique URI so registry state doesn't leak.
-    uri = URI.parse("agent://kind-server-test-#{System.unique_integer([:positive])}")
+    # PR-A: agent URIs are typed (agent://<type>/<name>); use "test" type.
+    uri = URI.parse("agent://test/kind-server-#{System.unique_integer([:positive])}")
 
     # Wire TestKind/TestBehavior into the BehaviorRegistry for this test —
     # idempotent register so reruns are fine.

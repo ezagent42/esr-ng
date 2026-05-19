@@ -23,7 +23,8 @@ defmodule EzagentPluginFeishu.MentionParserTest do
     spawn_agent!(name)
 
     assert [%URI{} = uri] = MentionParser.extract_agent_mentions("@#{name} look")
-    assert URI.to_string(uri) == "agent://#{name}"
+    # PR-A: agent URIs include the type segment
+    assert URI.to_string(uri) == "agent://cc/#{name}"
   end
 
   test "duplicates dedup'd" do
@@ -52,7 +53,11 @@ defmodule EzagentPluginFeishu.MentionParserTest do
   end
 
   defp spawn_agent!(name) do
-    uri = URI.parse("agent://" <> name)
+    # PR-A: agent URIs require a type segment (agent://<type>/<name>);
+    # the AgentTypeRegistry needs a registered fn for whatever type we
+    # use. The chat plugin registers "cc" → Entity.Agent in normal boot,
+    # so spawn one of those here.
+    uri = URI.parse("agent://cc/" <> name)
     {:ok, _pid} = Ezagent.SpawnRegistry.spawn(uri)
     on_exit(fn -> :ok end)
     :ok

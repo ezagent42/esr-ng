@@ -120,17 +120,17 @@ defmodule Ezagent.CapabilityTest do
   describe "cap_for_action/3 (Phase 3d)" do
     test "extracts kind type name + behavior from registry + instance from URI" do
       # Echo plugin pre-registers BehaviorRegistry at boot
-      target = URI.new!("agent://echo/behavior/echo/say")
+      target = URI.new!("agent://echo/default/behavior/echo/say")
 
       needed = Capability.cap_for_action(Ezagent.Entity.Echo, :say, target)
 
       assert needed.kind == :echo
       assert needed.behavior == Ezagent.Behavior.Echo
-      assert needed.instance == URI.new!("agent://echo")
+      assert needed.instance == URI.new!("agent://echo/default")
     end
 
     test "unknown action returns :unknown behavior" do
-      target = URI.new!("agent://echo/behavior/echo/say")
+      target = URI.new!("agent://echo/default/behavior/echo/say")
       needed = Capability.cap_for_action(Ezagent.Entity.Echo, :nonexistent_action, target)
       assert needed.behavior == :unknown
     end
