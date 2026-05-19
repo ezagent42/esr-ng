@@ -22,7 +22,7 @@ defmodule EzagentDomainIdentity.Application do
 
   alias Ezagent.{BehaviorRegistry, SpawnRegistry}
   alias Ezagent.Entity.User
-  alias Ezagent.Behavior.Identity
+  alias Ezagent.Behavior.{Identity, ApiKeys}
 
   @impl true
   def start(_type, _args) do
@@ -54,6 +54,13 @@ defmodule EzagentDomainIdentity.Application do
       # registering against Ezagent.Entity.Agent here is safe even though
       # Agent is defined in ezagent_domain_chat.
       :ok = BehaviorRegistry.register(Ezagent.Entity.Agent, action, Identity)
+    end
+
+    # PR #126: per-user API key storage (DeepSeek/OpenAI/etc.). Only
+    # on User Kind — Agents don't own their own keys, they look up
+    # the caller User's key via dispatch.
+    for action <- ApiKeys.actions() do
+      :ok = BehaviorRegistry.register(User, action, ApiKeys)
     end
 
     :ok

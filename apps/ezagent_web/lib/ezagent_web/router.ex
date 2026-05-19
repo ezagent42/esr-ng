@@ -48,6 +48,8 @@ defmodule EzagentWeb.Router do
       live "/admin/users", UsersLive
       # Phase 6 PR 6: per-user cap-grant UI.
       live "/admin/users/:uri/caps", UserCapsLive
+      # PR #126: per-user API key management UI (for curl-agent etc.).
+      live "/admin/users/:uri/api-keys", UserApiKeysLive
 
       # Phase 5 PR 3: Snapshots observability.
       live "/admin/snapshots", SnapshotsLive
