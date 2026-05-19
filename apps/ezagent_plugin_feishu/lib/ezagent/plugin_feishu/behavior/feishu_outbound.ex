@@ -70,6 +70,12 @@ defmodule EzagentPluginFeishu.Behavior.FeishuOutbound do
   def invoke(@action, slice, %{message: %Message{} = msg}, ctx) do
     self_uri = Map.get(ctx, :self_uri) || ctx[:target_uri]
 
+    # Lazy slice init — Session Kinds that pre-date PR #144 don't
+    # have the feishu_outbound slice in their snapshot. Mirrors the
+    # PR #146 Pty Behavior lazy-init pattern (same reason: a Kind
+    # module can't list a plugin's Behavior statically).
+    slice = Map.merge(%{send_calls: 0, total_bytes: 0}, slice)
+
     cond do
       from_feishu?(msg) ->
         Logger.debug(
@@ -214,12 +220,14 @@ defmodule EzagentPluginFeishu.Behavior.FeishuOutbound do
     # dispatch path delivers the same payload. InterfaceValidator
     # rejects bare `:any` for the struct, so the per-field schema is
     # required.
+    # PR #149: Message struct renamed `uri` → `id` (plain UUID) and
+    # `ref` → `ref_id` (plain string). Schema must follow.
     msg_schema = %{
-      uri: :string,
+      id: :string,
       sender: :uri,
       mentions: {:list, :uri},
       body: :map,
-      ref: {:option, :uri},
+      ref_id: {:option, :string},
       inserted_at: :map
     }
 
