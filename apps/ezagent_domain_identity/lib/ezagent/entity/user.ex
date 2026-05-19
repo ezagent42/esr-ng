@@ -106,8 +106,13 @@ defmodule Ezagent.Entity.User do
   # state (Decision #24). admin_caps/0 above still provides the
   # bootstrap value — chat plugin passes it as initial_caps when
   # spawning admin User.
+  #
+  # PR #126 (2026-05-19): User Kinds also carry the ApiKeys Behavior
+  # so per-user secret storage (DeepSeek, OpenAI, etc.) coexists with
+  # cap state on the same Kind. Both slices serialize through the
+  # existing `{:snapshot, :on_change}` persistence.
   @impl Ezagent.Kind
-  def behaviors, do: [Ezagent.Behavior.Identity]
+  def behaviors, do: [Ezagent.Behavior.Identity, Ezagent.Behavior.ApiKeys]
 
   @impl Ezagent.Kind
   def persistence, do: {:snapshot, :on_change}
