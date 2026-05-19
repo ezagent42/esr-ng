@@ -24,9 +24,9 @@ defmodule EzagentPluginLiveview.RoutingLive do
   Routing mutations dispatch to the **scope-owning Kind** instead of
   a synthetic `routing-admin://default` singleton:
 
-  - Global rules → `system://routing/default/behavior/routing/<action>`
-  - Workspace rules → `workspace://<name>/behavior/routing/<action>`
-  - Session rules → `session://<name>/behavior/routing/<action>`
+  - Global rules → `system://routing/default?action=routing.<action>`
+  - Workspace rules → `workspace://<name>?action=routing.<action>`
+  - Session rules → `session://<name>?action=routing.<action>`
 
   Phase 4 v1 LV still defaults all rules to the global scope. The
   scope picker is the contract surface for future "narrow this rule
@@ -228,7 +228,7 @@ defmodule EzagentPluginLiveview.RoutingLive do
 
     target =
       URI.parse(
-        "#{URI.to_string(scope_uri)}/behavior/routing/#{Atom.to_string(action)}"
+        "#{URI.to_string(scope_uri)}?action=routing.#{Atom.to_string(action)}"
       )
 
     Ezagent.Invocation.dispatch(%Ezagent.Invocation{

@@ -191,14 +191,14 @@ defmodule EzagentWeb.ApiV1Controller do
   end
 
   defp append_action(target_uri, behavior_module, action) do
-    # Convention: dispatch URL is /behavior/<behavior_short>/<action>
+    # Convention: dispatch URL is ?action=<behavior_short>.<action>
     behavior_short =
       behavior_module
       |> Module.split()
       |> List.last()
       |> Macro.underscore()
 
-    URI.new!("#{URI.to_string(target_uri)}/behavior/#{behavior_short}/#{action}")
+    URI.new!("#{URI.to_string(target_uri)}?action=#{behavior_short}.#{action}")
   end
 
   defp atomize_keys(map) when is_map(map) do

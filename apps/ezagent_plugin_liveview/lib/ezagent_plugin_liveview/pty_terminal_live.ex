@@ -10,7 +10,7 @@ defmodule EzagentPluginLiveview.PtyTerminalLive do
     raw bytes to xterm via `push_event(socket, "pty_chunk", %{bytes})`
   - Input: xterm hook `onData` fires `pushEvent("pty_input", {bytes})`
     → this LV's `handle_event("pty_input", ...)` → `Ezagent.Invocation.dispatch`
-    to `entity://agent/<flavor>_<name>/behavior/pty/write` (CapBAC +
+    to `entity://agent/<flavor>_<name>?action=pty.write` (CapBAC +
     audit fire) → `Ezagent.Behavior.Pty.invoke(:write, ...)` looks up
     PtyServer for `ctx.self_uri` (the agent URI) and writes the bytes.
 
@@ -84,7 +84,7 @@ defmodule EzagentPluginLiveview.PtyTerminalLive do
   # PR #146: dispatch directly to the agent URI (pty-input://default
   # synthetic singleton dissolved per SPEC v2 §5.7).
   defp dispatch_target_for(%URI{} = agent_uri),
-    do: URI.parse(URI.to_string(agent_uri) <> "/behavior/pty/write")
+    do: URI.parse(URI.to_string(agent_uri) <> "?action=pty.write")
 
   # PR #141 + #145: entity:// scheme; agent URIs are entity://agent/<flavor>_<name>.
   defp parse_agent_uri(encoded) do

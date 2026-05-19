@@ -120,7 +120,7 @@ defmodule Ezagent.CapabilityTest do
   describe "cap_for_action/3 (Phase 3d)" do
     test "extracts kind type name + behavior from registry + instance from URI" do
       # Echo plugin pre-registers BehaviorRegistry at boot
-      target = URI.new!("entity://agent/echo_default/behavior/echo/say")
+      target = URI.new!("entity://agent/echo_default?action=echo.say")
 
       needed = Capability.cap_for_action(Ezagent.Entity.Echo, :say, target)
 
@@ -130,13 +130,13 @@ defmodule Ezagent.CapabilityTest do
     end
 
     test "unknown action returns :unknown behavior" do
-      target = URI.new!("entity://agent/echo_default/behavior/echo/say")
+      target = URI.new!("entity://agent/echo_default?action=echo.say")
       needed = Capability.cap_for_action(Ezagent.Entity.Echo, :nonexistent_action, target)
       assert needed.behavior == :unknown
     end
 
-    test "session://main/behavior/chat/send → :session + Chat + session://main instance" do
-      target = URI.new!("session://main/behavior/chat/send")
+    test "session://main?action=chat.send → :session + Chat + session://main instance" do
+      target = URI.new!("session://main?action=chat.send")
       needed = Capability.cap_for_action(Ezagent.Entity.Session, :send, target)
 
       assert needed.kind == :session
@@ -146,7 +146,7 @@ defmodule Ezagent.CapabilityTest do
 
     test "admin all-cap matches the needed shape (closed-loop integration)" do
       [admin_cap] = MapSet.to_list(Ezagent.Entity.User.admin_caps())
-      target = URI.new!("session://main/behavior/chat/send")
+      target = URI.new!("session://main?action=chat.send")
       needed = Capability.cap_for_action(Ezagent.Entity.Session, :send, target)
 
       assert Capability.matches?(admin_cap, needed)
@@ -171,7 +171,7 @@ defmodule Ezagent.CapabilityTest do
 
     test "{:within_session, S} matches needed targeting URI exactly equal to S" do
       cap = scoped_cap({:within_session, URI.new!("session://main")})
-      assert Capability.matches?(cap, needed("session://main/behavior/chat/send"))
+      assert Capability.matches?(cap, needed("session://main?action=chat.send"))
     end
 
     test "{:within_session, S} matches needed whose instance is a sub-URI of S (path prefix)" do
@@ -188,7 +188,7 @@ defmodule Ezagent.CapabilityTest do
 
     test "{:within_session, S} does NOT match needed in a different session (V3.2 scope leak)" do
       cap = scoped_cap({:within_session, URI.new!("session://main")})
-      refute Capability.matches?(cap, needed("session://other/behavior/chat/send"))
+      refute Capability.matches?(cap, needed("session://other?action=chat.send"))
     end
 
     test "{:within_session, session://main} does NOT false-match session://main2 (prefix boundary)" do
@@ -299,7 +299,7 @@ defmodule Ezagent.CapabilityTest do
         granted_at: ~U[2026-05-18 00:00:00Z]
       }
 
-      refute Capability.matches?(cap, needed("session://main/behavior/chat/send")),
+      refute Capability.matches?(cap, needed("session://main?action=chat.send")),
              "scope-tuple cap with wrong kind must NOT match"
     end
   end

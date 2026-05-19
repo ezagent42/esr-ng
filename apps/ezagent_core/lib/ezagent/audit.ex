@@ -152,7 +152,7 @@ defmodule Ezagent.Audit do
     %{
       trace_id: nil,
       caller: Map.get(meta, :agent),
-      target: "#{Map.get(meta, :target_session)}/behavior/chat/send",
+      target: "#{Map.get(meta, :target_session)}?action=chat.send",
       action: "send",
       args: nil,
       result: nil,

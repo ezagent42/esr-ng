@@ -46,7 +46,7 @@ defmodule EzagentDomainWorkspace.Application do
     end)
 
     # PR #146 (SPEC v2 §5.7) — workspace-scoped routing rule mutations
-    # dispatch to `workspace://<name>/behavior/routing/<action>` against
+    # dispatch to `workspace://<name>?action=routing.<action>` against
     # the Workspace Kind. CapBAC scopes naturally to the workspace
     # instance.
     alias Ezagent.Behavior.Routing, as: RB

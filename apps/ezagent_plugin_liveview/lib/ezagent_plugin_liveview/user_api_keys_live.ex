@@ -66,7 +66,7 @@ defmodule EzagentPluginLiveview.UserApiKeysLive do
 
       {:ok, _pid} ->
         target =
-          URI.new!("#{URI.to_string(socket.assigns.user_uri)}/behavior/identity/list_api_keys")
+          URI.new!("#{URI.to_string(socket.assigns.user_uri)}?action=identity.list_api_keys")
 
         case Invocation.dispatch(%Invocation{
                target: target,
@@ -117,7 +117,7 @@ defmodule EzagentPluginLiveview.UserApiKeysLive do
   defp authorized?(socket), do: socket.assigns.is_admin? or socket.assigns.self?
 
   defp dispatch(action, socket, args, success_msg) do
-    target = URI.new!("#{URI.to_string(socket.assigns.user_uri)}/behavior/identity/#{action}")
+    target = URI.new!("#{URI.to_string(socket.assigns.user_uri)}?action=identity.#{action}")
 
     case Invocation.dispatch(%Invocation{
            target: target,

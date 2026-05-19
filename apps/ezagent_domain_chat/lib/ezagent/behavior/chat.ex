@@ -387,7 +387,7 @@ defmodule Ezagent.Behavior.Chat do
   defp dispatch_cross_session(target_session_uri, %Message{} = msg) do
     # Recursively dispatch chat/send on the target session — that
     # session handles its own member fan-out + further routing rules.
-    target = URI.new!("#{URI.to_string(target_session_uri)}/behavior/chat/send")
+    target = URI.new!("#{URI.to_string(target_session_uri)}?action=chat.send")
 
     Invocation.dispatch(%Invocation{
       target: target,
@@ -402,7 +402,7 @@ defmodule Ezagent.Behavior.Chat do
   end
 
   defp dispatch_receive(recipient_uri, %Message{} = msg, session_uri) do
-    target = URI.new!("#{URI.to_string(recipient_uri)}/behavior/chat/receive")
+    target = URI.new!("#{URI.to_string(recipient_uri)}?action=chat.receive")
 
     # Phase 3d: Session's fan-out to recipients runs under admin caps —
     # the Session is acting on behalf of the system-routed message.
@@ -424,7 +424,7 @@ defmodule Ezagent.Behavior.Chat do
   #
   # Look up `BehaviorRegistry.lookup(kind_module, :notify_external)`. If
   # a plugin has registered a Behavior for that action on the Session
-  # Kind, dispatch `<session_uri>/behavior/notify_external/notify_external`.
+  # Kind, dispatch `<session_uri>?action=notify_external.notify_external`.
   # If nothing is registered, this is a cheap ETS lookup + no-op.
   #
   # The behavior path segment is `notify_external` (matches the action
@@ -448,7 +448,7 @@ defmodule Ezagent.Behavior.Chat do
   defp maybe_notify_external(kind_module, session_uri, %Message{} = msg) do
     case Ezagent.BehaviorRegistry.lookup(kind_module, :notify_external) do
       {:ok, _behavior_module} ->
-        target = URI.new!("#{URI.to_string(session_uri)}/behavior/notify_external/notify_external")
+        target = URI.new!("#{URI.to_string(session_uri)}?action=notify_external.notify_external")
 
         Invocation.dispatch(%Invocation{
           target: target,

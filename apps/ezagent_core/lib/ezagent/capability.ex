@@ -90,7 +90,7 @@ defmodule Ezagent.Capability do
     session_str = URI.to_string(session_uri)
 
     # Match if needed URI is the session URI itself, or a sub-URI of
-    # it (e.g. `session://main/behavior/chat/send` is within
+    # it (e.g. `session://main?action=chat.send` is within
     # `session://main`). String prefix is sufficient given URI
     # canonical form; we add a `/` boundary check to avoid false
     # positives like `session://main2` matching `{:within_session,
@@ -213,7 +213,7 @@ defmodule Ezagent.Capability do
 
   Phase 3d (P3-D6 hard flip + #P1-8): the target URI is required so
   we can extract the `instance` part (e.g. `session://main` from
-  `session://main/behavior/chat/send`). `behavior` is looked up via
+  `session://main?action=chat.send`). `behavior` is looked up via
   `BehaviorRegistry.lookup(kind_module, action)` — same lookup
   `Kind.Runtime` does for invoke routing.
 

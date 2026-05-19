@@ -11,7 +11,7 @@ defmodule EzagentPluginFeishu.Application do
     `sender_open_id → entity://user/<X>` via `FeishuUserBinding` and
     `chat_id → session://<template>/<name>` via the new
     `FeishuSessionBinding` join table, then dispatches
-    `<session_uri>/behavior/chat/send` with the message.
+    `<session_uri>?action=chat.send` with the message.
   - **Outbound** (Ezagent → Feishu): `Behavior.FeishuOutbound`
     registers against `Ezagent.Entity.Session` for action
     `:notify_external`. `Behavior.Chat.invoke(:send)` opportunistically

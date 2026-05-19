@@ -126,7 +126,7 @@ defmodule Ezagent.Behavior.Routing do
   #
   # `ctx.self_uri` is the URI of the scope-owning Kind instance the
   # Behavior is invoked against (injected by `Kind.Runtime` step 5);
-  # for `workspace://X/behavior/routing/add_rule` it is `workspace://X`.
+  # for `workspace://X?action=routing.add_rule` it is `workspace://X`.
   defp build_add_opts(args, ctx) do
     explicit_opts = Map.get(args, :opts, [])
 

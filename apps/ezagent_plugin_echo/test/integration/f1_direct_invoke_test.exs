@@ -42,7 +42,7 @@ defmodule EzagentPluginEcho.Integration.F1DirectInvokeTest do
   end
 
   test "F1: dispatch :say to entity://agent/echo_default, get reply, see audit event + SQLite row" do
-    target = URI.parse("#{URI.to_string(EchoApp.default_uri())}/behavior/echo/say")
+    target = URI.parse("#{URI.to_string(EchoApp.default_uri())}?action=echo.say")
 
     inv = %Invocation{
       target: target,
@@ -64,7 +64,7 @@ defmodule EzagentPluginEcho.Integration.F1DirectInvokeTest do
     # Both arrive; we care about the :stop event's metadata.
     assert_receive {:audit_event, %{event: [:ezagent, :authz, :granted]}}, 500
     assert_receive {:audit_event, %{event: [:ezagent, :invoke, :stop]} = stop_event}, 500
-    assert stop_event.metadata.target == "entity://agent/echo_default/behavior/echo/say"
+    assert stop_event.metadata.target == "entity://agent/echo_default?action=echo.say"
     assert stop_event.metadata.action == :say
 
     # Step 3: wait for Audit.Writer batch flush (100ms) + 50ms slack,
@@ -78,7 +78,7 @@ defmodule EzagentPluginEcho.Integration.F1DirectInvokeTest do
       ).rows
 
     assert [[target_col, action_col, authz_col, duration_col]] = rows
-    assert target_col == "entity://agent/echo_default/behavior/echo/say"
+    assert target_col == "entity://agent/echo_default?action=echo.say"
     assert action_col == "say"
     # Phase 3d: hard flip removed :stub_grant in favor of real "granted"
     # from cap check. invocations.authz column is "granted" for the
@@ -88,7 +88,7 @@ defmodule EzagentPluginEcho.Integration.F1DirectInvokeTest do
   end
 
   test "F1 via :cast — reply lands in caller_inbox" do
-    target = URI.parse("#{URI.to_string(EchoApp.default_uri())}/behavior/echo/say")
+    target = URI.parse("#{URI.to_string(EchoApp.default_uri())}?action=echo.say")
 
     inv = %Invocation{
       target: target,
@@ -107,7 +107,7 @@ defmodule EzagentPluginEcho.Integration.F1DirectInvokeTest do
   end
 
   test "F1 invalid args fail-stop at validator (does not reach Echo slice)" do
-    target = URI.parse("#{URI.to_string(EchoApp.default_uri())}/behavior/echo/say")
+    target = URI.parse("#{URI.to_string(EchoApp.default_uri())}?action=echo.say")
 
     inv = %Invocation{
       target: target,

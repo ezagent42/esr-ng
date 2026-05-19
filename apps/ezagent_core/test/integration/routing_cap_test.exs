@@ -4,8 +4,8 @@ defmodule Ezagent.Integration.RoutingCapTest do
   dispatch to **scope-owning Kinds** (the `routing-admin://default`
   synthetic singleton has been dissolved):
 
-  - Global rules → `system://routing/default/behavior/routing/<action>`
-  - Workspace rules → `workspace://<name>/behavior/routing/<action>`
+  - Global rules → `system://routing/default?action=routing.<action>`
+  - Workspace rules → `workspace://<name>?action=routing.<action>`
     (this test covers global; workspace/session paths share the same
     Behavior + same Capability shape modulo `kind:`/`instance:`)
 
@@ -41,7 +41,7 @@ defmodule Ezagent.Integration.RoutingCapTest do
 
   defp global_routing_target(action) do
     URI.parse(
-      "#{URI.to_string(Ezagent.Entity.System.routing_default_uri())}/behavior/routing/#{action}"
+      "#{URI.to_string(Ezagent.Entity.System.routing_default_uri())}?action=routing.#{action}"
     )
   end
 

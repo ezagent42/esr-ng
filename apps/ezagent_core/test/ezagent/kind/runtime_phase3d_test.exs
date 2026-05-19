@@ -44,7 +44,7 @@ defmodule Ezagent.Kind.RuntimePhase3dTest do
 
   test "dispatch with empty caps → {:error, :unauthorized} + :denied telemetry" do
     # Echo plugin pre-spawns entity://agent/echo_default at boot; use it as the target.
-    target = URI.new!("entity://agent/echo_default/behavior/echo/say")
+    target = URI.new!("entity://agent/echo_default?action=echo.say")
 
     inv = %Invocation{
       target: target,
@@ -66,7 +66,7 @@ defmodule Ezagent.Kind.RuntimePhase3dTest do
   end
 
   test "dispatch with admin caps → success + :granted telemetry" do
-    target = URI.new!("entity://agent/echo_default/behavior/echo/say")
+    target = URI.new!("entity://agent/echo_default?action=echo.say")
 
     inv = %Invocation{
       target: target,

@@ -52,7 +52,7 @@ defmodule EzagentCli.Integration.CLIDispatchTest do
       Process.sleep(50)
 
       # Verify via list_members
-      target = URI.parse("workspace://#{name}/behavior/workspace/list_members")
+      target = URI.parse("workspace://#{name}?action=workspace.list_members")
 
       assert {:ok, %{members: members}} =
                Ezagent.Invocation.dispatch(%Ezagent.Invocation{

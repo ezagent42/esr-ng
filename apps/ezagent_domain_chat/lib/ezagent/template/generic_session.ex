@@ -111,7 +111,7 @@ defmodule Ezagent.Template.GenericSession do
 
   defp join_members(session_uri, members) do
     target =
-      URI.parse("#{URI.to_string(session_uri)}/behavior/chat/join")
+      URI.parse("#{URI.to_string(session_uri)}?action=chat.join")
 
     Enum.each(members, fn member_uri_str ->
       case URI.new(member_uri_str) do

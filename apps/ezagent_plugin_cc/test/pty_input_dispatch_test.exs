@@ -6,7 +6,7 @@ defmodule Ezagent.PluginCc.PtyInputDispatchTest do
 
   The previous synthetic `pty-input://default` singleton Kind is
   dissolved. Dispatch target is now:
-  `entity://agent/<flavor>_<name>/behavior/pty/write`.
+  `entity://agent/<flavor>_<name>?action=pty.write`.
 
   Sends N writes via dispatch and asserts:
   1. The slice counter (write_calls, total_bytes) reflects every write
@@ -37,7 +37,7 @@ defmodule Ezagent.PluginCc.PtyInputDispatchTest do
     agent_uri = URI.parse("entity://agent/#{name}")
 
     # Ensure the Agent Kind is alive so `Behavior.Pty.invoke(:write, ...)`
-    # against `entity://agent/<name>/behavior/pty/write` resolves.
+    # against `entity://agent/<name>?action=pty.write` resolves.
     {:ok, _kind_pid} = Ezagent.SpawnRegistry.spawn(agent_uri)
 
     {:ok, pty_pid} =
@@ -62,7 +62,7 @@ defmodule Ezagent.PluginCc.PtyInputDispatchTest do
   end
 
   defp dispatch_target(agent_uri),
-    do: URI.parse(URI.to_string(agent_uri) <> "/behavior/pty/write")
+    do: URI.parse(URI.to_string(agent_uri) <> "?action=pty.write")
 
   test "100-byte stream via dispatch hits PtyServer + bumps slice counters", %{
     agent_uri: agent_uri,

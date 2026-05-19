@@ -33,7 +33,7 @@ defmodule Ezagent.Kind.ServerTest do
     :ok = wait_until_ready(uri, 500)
 
     inv = %Ezagent.Invocation{
-      target: URI.parse("#{URI.to_string(uri)}/behavior/test/noop"),
+      target: URI.parse("#{URI.to_string(uri)}?action=test.noop"),
       mode: :call,
       args: %{msg: "hello"},
       ctx: %{
@@ -51,7 +51,7 @@ defmodule Ezagent.Kind.ServerTest do
     :ok = wait_until_ready(uri, 500)
 
     inv = %Ezagent.Invocation{
-      target: URI.parse("#{URI.to_string(uri)}/behavior/test/noop"),
+      target: URI.parse("#{URI.to_string(uri)}?action=test.noop"),
       mode: :cast,
       args: %{msg: "via-cast"},
       ctx: %{
@@ -70,7 +70,7 @@ defmodule Ezagent.Kind.ServerTest do
     # Buffer a message *before* the server exists, then start the server —
     # the message should be drained during announce_ready.
     pre_inv = %Ezagent.Invocation{
-      target: URI.parse("#{URI.to_string(uri)}/behavior/test/noop"),
+      target: URI.parse("#{URI.to_string(uri)}?action=test.noop"),
       mode: :cast,
       args: %{msg: "pre-ready"},
       ctx: %{
