@@ -9,7 +9,8 @@ defmodule Ezagent.URI do
 
       <scheme>://<type>/<name>[/<sub-resource>...]
 
-  - `<scheme>` is one of the registered schemes (see `@known_schemes`).
+  - `<scheme>` is one of the registered schemes (see
+    `Ezagent.URI.SchemeRegistry` — runtime ETS allowlist, PR #145).
   - `<type>` is the value on the scheme's type axis (e.g. `user` /
     `agent` for `entity://`, free-form tenant name for `workspace://`).
   - `<name>` is the instance identity within `<scheme>/<type>`.
@@ -52,21 +53,30 @@ defmodule Ezagent.URI do
     would do the same for `auth/`. Each named parser returns `:error`
     for sub-resources it doesn't recognize.
 
-  ## Deferred-deletion schemes
+  ## Scheme allowlist — runtime ETS (PR #145)
 
-  `message` remains in `@known_schemes` for now — PR #147 deletes it.
+  The set of accepted schemes is the live `Ezagent.URI.SchemeRegistry`
+  ETS table, NOT a compile-time list. Plugins extend it only via
+  `Ezagent.SpawnRegistry.register/2` (which co-registers).
 
-  - PR #144 deleted `feishu` (Feishu plugin re-shaped per SPEC §5.8)
-  - PR #146 deleted `routing-admin` + `pty-input` (synthetic singletons
-    dissolved per SPEC §5.7 — Behaviors moved to scope-owning Kinds)
-  - PR #147 deletes `message`
+  Boot-time seeded schemes (SPEC §5.6):
+  `entity`, `workspace`, `session`, `template`, `resource`, `system`.
+
+  Deleted (rejected by `parse!/1`):
+  - `user`, `agent` (PR #141 — merged into `entity://`)
+  - `feishu` (PR #143 — plugin re-shaped, SPEC §5.8)
+  - `routing-admin`, `pty-input` (PR #144 — synthetic singletons
+    dissolved per SPEC §5.7)
+  - `message` (PR #145 — `Ezagent.Message.uri` renamed `id`, SPEC §5.13)
   """
-
-  @known_schemes ~w(entity workspace session template resource system message)
 
   @doc """
   Parse a binary URI into a stdlib `%URI{}`. Raises on malformed input
   (let-it-crash — adapter is responsible for clean URIs).
+
+  Rejects any scheme not registered in `Ezagent.URI.SchemeRegistry` —
+  the SPEC v2 §5.11 lockdown that prevents documentation-drift bugs
+  like the deleted-but-still-accepted `feishu://` scheme.
   """
   @spec parse!(String.t()) :: URI.t()
   def parse!(s) when is_binary(s) do
@@ -74,12 +84,14 @@ defmodule Ezagent.URI do
       {:ok, %URI{scheme: nil}} ->
         raise ArgumentError, "URI missing scheme: #{inspect(s)}"
 
-      {:ok, %URI{scheme: scheme} = u} when scheme in @known_schemes ->
-        u
-
-      {:ok, %URI{scheme: scheme}} ->
-        raise ArgumentError,
-              "URI scheme #{inspect(scheme)} not in known set: #{inspect(@known_schemes)}"
+      {:ok, %URI{scheme: scheme} = u} ->
+        if Ezagent.URI.SchemeRegistry.registered?(scheme) do
+          u
+        else
+          raise ArgumentError,
+                "URI scheme #{inspect(scheme)} not registered. " <>
+                  "Known: #{inspect(Ezagent.URI.SchemeRegistry.list_all())}"
+        end
 
       {:error, part} ->
         raise ArgumentError, "URI parse failed at #{inspect(part)}: #{inspect(s)}"
@@ -221,6 +233,12 @@ defmodule Ezagent.URI do
   def subresource(%URI{path: "/" <> sub}), do: sub
   def subresource(%URI{path: ""}), do: ""
 
-  @doc "Known scheme allowlist — used by `parse!/1`."
-  def known_schemes, do: @known_schemes
+  @doc """
+  Known scheme allowlist — delegates to `Ezagent.URI.SchemeRegistry.list_all/0`
+  (runtime ETS, PR #145). Returns the live set so diagnostics + tests
+  reflect plugin-added schemes (e.g. those registered via
+  `Ezagent.SpawnRegistry.register/2`).
+  """
+  @spec known_schemes() :: [String.t()]
+  def known_schemes, do: Ezagent.URI.SchemeRegistry.list_all()
 end

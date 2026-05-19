@@ -50,7 +50,13 @@ defmodule EzagentCore.EtsOwner do
     # fn; the chat plugin's `entity://` SpawnRegistry fn delegates here
     # for `host = "agent"`, extracting flavor from the URI's name
     # prefix `<flavor>_<rest>` (SPEC §5.14).
-    {Ezagent.AgentTypeRegistry, :set}
+    {Ezagent.AgentTypeRegistry, :set},
+    # PR #145 (SPEC v2 §5.6 §5.11): runtime ETS allowlist of URI schemes
+    # accepted by `Ezagent.URI.parse!/1`. Seeded at boot with the 6 core
+    # schemes; plugins extend it ONLY via `Ezagent.SpawnRegistry.register/2`
+    # (which co-registers). Eliminates the hardcoded `@known_schemes`
+    # drift bug.
+    {Ezagent.URI.SchemeRegistry, :set}
   ]
 
   def start_link(_opts) do
