@@ -27,6 +27,8 @@ defmodule EzagentWeb.Router do
     delete "/logout", SessionController, :delete
     post "/logout", SessionController, :delete
     get "/auth/magic/:token", MagicLinkController, :consume
+    get "/register/complete", RegistrationController, :complete_new
+    post "/register/complete", RegistrationController, :complete_create
   end
 
   # /admin* requires login (Phase 4-completion Spec 05 §A.2.3 +

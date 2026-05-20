@@ -1,0 +1,42 @@
+defmodule EzagentWeb.RegistrationControllerTest do
+  use EzagentWeb.ConnCase
+
+  # String session key — get_session/2 looks keys up as strings; an
+  # atom key here would simply not be found.
+  defp pending_conn(conn, email) do
+    Plug.Test.init_test_session(conn, %{"pending_registration_email" => email})
+  end
+
+  test "GET /register/complete shows the form prefilled with a derived slug", %{conn: conn} do
+    conn = conn |> pending_conn("allen.woods@good.com") |> get("/register/complete")
+    assert html_response(conn, 200) =~ "allen-woods"
+  end
+
+  test "GET /register/complete without a pending email redirects to /login", %{conn: conn} do
+    conn = get(conn, "/register/complete")
+    assert redirected_to(conn) == "/login"
+  end
+
+  test "POST /register/complete creates the principal and logs in", %{conn: conn} do
+    conn =
+      conn
+      |> pending_conn("newbie@good.com")
+      |> post("/register/complete", %{"handle" => "newbie", "display_name" => "New Bie"})
+
+    assert redirected_to(conn) == "/admin"
+    assert get_session(conn, :current_entity_uri) == "entity://user/newbie"
+    assert get_session(conn, :pending_registration_email) == nil
+    assert Ezagent.Entity.Profile.by_email("newbie@good.com").entity_uri == "entity://user/newbie"
+  end
+
+  test "POST with a taken handle re-renders the form with a suggestion", %{conn: conn} do
+    {:ok, _} = Ezagent.Users.create("entity://user/taken", nil, [])
+
+    conn =
+      conn
+      |> pending_conn("taken@good.com")
+      |> post("/register/complete", %{"handle" => "taken", "display_name" => "T"})
+
+    assert html_response(conn, 200) =~ "taken-2"
+  end
+end
