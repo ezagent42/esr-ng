@@ -40,9 +40,9 @@ defmodule EzagentCore.Invariants.NoV1BridgeAfterCutoverTest do
       |> Path.wildcard()
       |> Enum.reject(fn p ->
         # Allow this test itself.
+        # Allow ezagent_plugin_cc_bridge_v1_prototype/ if it ever
+        # re-appears — the test below catches the dep + dir resurrection.
         String.ends_with?(p, self_path) or
-          # Allow ezagent_plugin_cc_bridge_v1_prototype/ if it ever
-          # re-appears — the test below catches the dep + dir resurrection.
           String.contains?(p, "/ezagent_plugin_cc_bridge_v1_prototype/")
       end)
       |> Enum.flat_map(fn p ->

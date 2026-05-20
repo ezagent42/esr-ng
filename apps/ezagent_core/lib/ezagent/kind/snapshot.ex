@@ -183,9 +183,7 @@ defmodule Ezagent.Kind.Snapshot do
         :ok
 
       {:error, reason} = err ->
-        Logger.warning(
-          "Ezagent.Kind.Snapshot: save failed for #{uri_str}: #{inspect(reason)}"
-        )
+        Logger.warning("Ezagent.Kind.Snapshot: save failed for #{uri_str}: #{inspect(reason)}")
 
         :telemetry.execute(
           [:ezagent, :persistence, :failed],

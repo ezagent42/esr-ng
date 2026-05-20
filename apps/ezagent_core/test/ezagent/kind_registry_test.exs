@@ -13,7 +13,9 @@ defmodule Ezagent.KindRegistryTest do
 
   test "lookup returns :error for unregistered URI" do
     assert :error =
-             KindRegistry.lookup("entity://agent/test_nonexistent-#{System.unique_integer([:positive])}")
+             KindRegistry.lookup(
+               "entity://agent/test_nonexistent-#{System.unique_integer([:positive])}"
+             )
   end
 
   test "duplicate put_new returns {:error, {:already_registered, pid}}" do

@@ -21,9 +21,7 @@ defmodule Mix.Tasks.Ezagent.Plugin.InstallTest do
 
   test "moduledoc covers the D7-8 contract surface" do
     source =
-      File.read!(
-        Path.join(__DIR__, "../../../lib/mix/tasks/ezagent.plugin.install.ex")
-      )
+      File.read!(Path.join(__DIR__, "../../../lib/mix/tasks/ezagent.plugin.install.ex"))
 
     assert source =~ "D7-8",
            "moduledoc should reference D7-8 (the Decision Log entry this task closes)"

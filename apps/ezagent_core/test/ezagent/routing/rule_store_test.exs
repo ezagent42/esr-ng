@@ -61,7 +61,12 @@ defmodule Ezagent.Routing.RuleStoreTest do
 
   test "delete removes by id" do
     {:ok, row} =
-      RuleStore.add(EzagentDomainChat.Routing.MentionRouting, Matcher.always(), ["session://x"], nil)
+      RuleStore.add(
+        EzagentDomainChat.Routing.MentionRouting,
+        Matcher.always(),
+        ["session://x"],
+        nil
+      )
 
     assert :ok = RuleStore.delete(row.id)
     assert {:error, :not_found} = RuleStore.delete(row.id)

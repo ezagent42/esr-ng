@@ -54,7 +54,7 @@ defmodule EzagentCore.Invariants.LayerPurityTest do
       offending =
         Enum.reject(deps, fn dep ->
           dep == :ezagent_core or
-            (Atom.to_string(dep) |> String.starts_with?("ezagent_domain_")) or
+            Atom.to_string(dep) |> String.starts_with?("ezagent_domain_") or
             exempt?(app, dep)
         end)
 

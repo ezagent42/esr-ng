@@ -90,7 +90,11 @@ defmodule Ezagent.Runtime do
 
       err ->
         require Logger
-        Logger.warning("Ezagent.Runtime: net_kernel start failed (#{inspect(err)}); CLI will fall back to error path")
+
+        Logger.warning(
+          "Ezagent.Runtime: net_kernel start failed (#{inspect(err)}); CLI will fall back to error path"
+        )
+
         :ok
     end
   end

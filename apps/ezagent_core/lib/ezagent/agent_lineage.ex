@@ -87,7 +87,8 @@ defmodule Ezagent.AgentLineage do
   Bounded by `max_depth` to prevent cycles (which shouldn't happen
   in practice — orchestrator spawn graph is a tree — but defensive).
   """
-  @spec spawned_in_lineage?(URI.t() | String.t(), URI.t() | String.t(), pos_integer()) :: boolean()
+  @spec spawned_in_lineage?(URI.t() | String.t(), URI.t() | String.t(), pos_integer()) ::
+          boolean()
   def spawned_in_lineage?(agent_uri, principal_uri, max_depth \\ 100) do
     target = uri_to_str(principal_uri)
     walk_lineage(uri_to_str(agent_uri), target, max_depth)

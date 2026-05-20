@@ -21,7 +21,9 @@ defmodule Ezagent.Routing.MatcherCombinatorsTest do
     end
 
     test "false when any leaf fails" do
-      m = Matcher.all_of([Matcher.mention("entity://agent/test_x"), Matcher.text_contains("never")])
+      m =
+        Matcher.all_of([Matcher.mention("entity://agent/test_x"), Matcher.text_contains("never")])
+
       refute Matcher.match?(m, msg("hi", ["entity://agent/test_x"]))
     end
 
@@ -64,7 +66,10 @@ defmodule Ezagent.Routing.MatcherCombinatorsTest do
     test "and(or(mention X, mention Y), not from Z)" do
       m =
         Matcher.all_of([
-          Matcher.any_of([Matcher.mention("entity://agent/test_x"), Matcher.mention("entity://agent/test_y")]),
+          Matcher.any_of([
+            Matcher.mention("entity://agent/test_x"),
+            Matcher.mention("entity://agent/test_y")
+          ]),
           Matcher.negate(Matcher.from("entity://user/blocked"))
         ])
 
@@ -76,7 +81,12 @@ defmodule Ezagent.Routing.MatcherCombinatorsTest do
 
   describe "JSON serde for combinators" do
     test "and round-trip" do
-      m = Matcher.all_of([Matcher.mention("entity://agent/test_x"), Matcher.from("entity://user/admin")])
+      m =
+        Matcher.all_of([
+          Matcher.mention("entity://agent/test_x"),
+          Matcher.from("entity://user/admin")
+        ])
+
       assert {:ok, ^m} = m |> Matcher.to_json() |> Matcher.from_json()
     end
 
@@ -93,7 +103,10 @@ defmodule Ezagent.Routing.MatcherCombinatorsTest do
     test "deeply nested round-trip" do
       m =
         Matcher.all_of([
-          Matcher.any_of([Matcher.mention("entity://agent/test_x"), Matcher.mention("entity://agent/test_y")]),
+          Matcher.any_of([
+            Matcher.mention("entity://agent/test_x"),
+            Matcher.mention("entity://agent/test_y")
+          ]),
           Matcher.negate(Matcher.from("entity://user/blocked")),
           Matcher.text_matches("^/help")
         ])

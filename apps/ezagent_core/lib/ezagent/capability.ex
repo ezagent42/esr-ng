@@ -178,6 +178,7 @@ defmodule Ezagent.Capability do
   defp atom_or_module_to_string(value) when is_atom(value), do: Atom.to_string(value)
 
   defp string_to_atom_or_module("any"), do: :any
+
   defp string_to_atom_or_module(s) when is_binary(s) do
     cond do
       String.starts_with?(s, "Elixir.") ->
@@ -200,6 +201,7 @@ defmodule Ezagent.Capability do
   defp string_to_uri_or_any(s) when is_binary(s), do: URI.parse(s)
 
   defp parse_datetime(nil), do: DateTime.utc_now()
+
   defp parse_datetime(s) when is_binary(s) do
     case DateTime.from_iso8601(s) do
       {:ok, dt, _offset} -> dt

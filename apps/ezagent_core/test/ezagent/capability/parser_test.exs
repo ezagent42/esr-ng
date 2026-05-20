@@ -40,7 +40,8 @@ defmodule Ezagent.Capability.ParserTest do
 
     test "rejects unknown kind atom" do
       assert {:error, {:unknown_kind, _}} =
-               Parser.parse("never-known-#{System.unique_integer([:positive])}.something",
+               Parser.parse(
+                 "never-known-#{System.unique_integer([:positive])}.something",
                  @granter,
                  @now
                )
@@ -54,7 +55,11 @@ defmodule Ezagent.Capability.ParserTest do
       # Use a kind atom that exists but a behavior name that doesn't
       # resolve to a loaded module.
       {:ok, [cap]} =
-        Parser.parse("workspace.never_known_behavior_#{System.unique_integer([:positive])}", @granter, @now)
+        Parser.parse(
+          "workspace.never_known_behavior_#{System.unique_integer([:positive])}",
+          @granter,
+          @now
+        )
 
       assert cap.kind == :workspace
       assert cap.behavior == :any

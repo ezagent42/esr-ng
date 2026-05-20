@@ -11,6 +11,7 @@ defmodule Ezagent.HomeTest do
     tmp = Path.join(System.tmp_dir!(), "esr-home-test-#{System.unique_integer([:positive])}")
     System.put_env("EZAGENT_HOME", tmp)
     System.put_env("EZAGENT_PROFILE", "default")
+
     on_exit(fn ->
       System.delete_env("EZAGENT_HOME")
       System.delete_env("EZAGENT_PROFILE")
@@ -24,7 +25,9 @@ defmodule Ezagent.HomeTest do
     assert Ezagent.Home.home() == Path.expand(tmp)
     assert Ezagent.Home.profile() == "default"
     assert Ezagent.Home.profile_dir() == Path.join(Path.expand(tmp), "default")
-    assert Ezagent.Home.path(:credentials) == Path.join([Path.expand(tmp), "default", "credentials"])
+
+    assert Ezagent.Home.path(:credentials) ==
+             Path.join([Path.expand(tmp), "default", "credentials"])
   end
 
   test "skeleton_dirs lists the documented sub-dirs" do
@@ -61,6 +64,7 @@ defmodule Ezagent.HomeTest do
 
   test "read_credentials returns :not_found when missing", %{tmp: _tmp} do
     Mix.Task.rerun("ezagent.home.init", ["--inside-repo"])
+
     # template file exists but is_map shape isn't a Feishu-cred map yet — read returns parsed map
     assert {:ok, parsed} = Ezagent.Home.read_credentials("feishu")
     assert parsed["app_id"] == "cli_REPLACE_ME"

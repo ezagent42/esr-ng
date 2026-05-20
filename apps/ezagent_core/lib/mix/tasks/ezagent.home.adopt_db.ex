@@ -58,8 +58,13 @@ defmodule Mix.Tasks.Ezagent.Home.AdoptDb do
 
     case moved do
       [] ->
-        Mix.shell().info("No repo-root dev DB found at #{repo_root}/ezagent_core_dev.db — nothing to adopt.")
-        Mix.shell().info("Dev server already reads from #{target_dir}/ezagent_core.db on next start.")
+        Mix.shell().info(
+          "No repo-root dev DB found at #{repo_root}/ezagent_core_dev.db — nothing to adopt."
+        )
+
+        Mix.shell().info(
+          "Dev server already reads from #{target_dir}/ezagent_core.db on next start."
+        )
 
       files ->
         Mix.shell().info("Adopted #{length(files)} file(s) into #{target_dir}:")
