@@ -231,11 +231,32 @@ defmodule Ezagent.Behavior.Chat do
             send(channel_pid, {:to_claude, payload})
 
           :error ->
-            # No bound bridge. Drop silently — telemetry-only after
-            # v1 fallback removal (Phase 7 PR 32c). Agents with no
-            # active bridge are expected (e.g. cc-demo while claude
-            # is restarting); inbound messages buffer at the source
-            # transport (Feishu) on retry.
+            # No bound bridge. The agent's PtyServer might be alive but
+            # the claude TUI hasn't opened its Phoenix.Channel WS back
+            # to ezagent (via `--dangerously-load-development-channels
+            # server:esr-bridge`). Until that handshake completes,
+            # inbound chat dispatches have nowhere to go.
+            #
+            # Phase 8c follow-up (Allen 2026-05-20): the prior comment
+            # said "Drop silently — telemetry only" but no telemetry
+            # was actually emitted, making this the hardest class of
+            # "why didn't the agent reply?" bug to debug. Now logs at
+            # warning so operators see the drop in /admin/logs +
+            # `phx.log`.
+            require Logger
+            Logger.warning(
+              "Chat receive dropped — no BridgeRegistry binding for #{URI.to_string(ctx.self_uri)} " <>
+                "(claude TUI hasn't opened its WS channel yet, or the agent has no PtyServer). " <>
+                "Message from #{URI.to_string(msg.sender)}: " <>
+                String.slice(body_text(msg.body), 0, 80)
+            )
+
+            :telemetry.execute(
+              [:ezagent, :chat, :receive, :dropped],
+              %{count: 1},
+              %{recipient: ctx.self_uri, sender: msg.sender, reason: :no_bridge}
+            )
+
             :ok
         end
 
