@@ -53,7 +53,10 @@ defmodule EzagentWeb.HomeLive do
           socket
           |> assign(:current_entity_uri_str, entity_uri_str)
           |> assign(:flash_error, nil)
-          |> assign(:form, to_form(%{"short_name" => "main"}, as: "wizard"))
+          |> assign(
+            :form,
+            to_form(%{"short_name" => "main", "with_echo" => "true"}, as: "wizard")
+          )
 
         {:ok, socket, layout: false}
 
@@ -66,6 +69,7 @@ defmodule EzagentWeb.HomeLive do
   @impl true
   def handle_event("create_default_session", %{"wizard" => params}, socket) do
     short_name = params |> Map.get("short_name", "main") |> String.trim()
+    with_echo? = params |> Map.get("with_echo") |> truthy?()
 
     if short_name == "" do
       {:noreply, assign(socket, :flash_error, "Session name is required.")}
@@ -73,7 +77,8 @@ defmodule EzagentWeb.HomeLive do
       creator_uri = parse_entity_uri(socket.assigns.current_entity_uri_str)
 
       case EzagentDomainChat.create_session(short_name, creator_uri) do
-        {:ok, _session_uri} ->
+        {:ok, session_uri} ->
+          if with_echo?, do: join_echo_agent(session_uri, creator_uri)
           {:noreply, push_navigate(socket, to: "/sessions")}
 
         {:error, reason} ->
@@ -85,6 +90,40 @@ defmodule EzagentWeb.HomeLive do
            )}
       end
     end
+  end
+
+  defp truthy?("true"), do: true
+  defp truthy?("on"), do: true
+  defp truthy?(true), do: true
+  defp truthy?(_), do: false
+
+  # Phase 8c PR-J follow-up (Allen 2026-05-20) — wizard optionally
+  # seeds an echo agent into the new session for first-time demo.
+  # Echo's :receive action emits a chat reply (PR-J), so the user
+  # gets a working ping-pong loop out of the box.
+  defp join_echo_agent(session_uri, caller_uri) do
+    echo_uri = URI.parse("entity://agent/echo_default")
+    # Make sure the echo Kind is live (spawn is idempotent — returns
+    # `{:error, {:already_started, _}}` if already up). Spawn happens
+    # in the echo plugin's Application.start; this is a defensive
+    # rehydrate in case the Kind was snapshot-restored stale.
+    _ = Ezagent.SpawnRegistry.spawn(echo_uri)
+
+    target = URI.new!("#{URI.to_string(session_uri)}?action=chat.join")
+
+    _ =
+      Ezagent.Invocation.dispatch(%Ezagent.Invocation{
+        target: target,
+        mode: :cast,
+        args: %{member: echo_uri},
+        ctx: %{
+          caller: caller_uri,
+          caps: Ezagent.Entity.User.admin_caps(),
+          reply: :ignore
+        }
+      })
+
+    :ok
   end
 
   # Defensive parser — LiveAuth already validated this string at session

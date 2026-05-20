@@ -790,10 +790,15 @@ defmodule EzagentPluginLiveview.AdminLive do
   end
 
   defp clear_compose(socket) do
+    # Phase 8c follow-up (Allen 2026-05-20) — Phoenix's DOM patcher
+    # leaves phx-hook-owned inputs alone, so the form-state reset
+    # below doesn't clear the browser DOM. Push an LV event the
+    # MentionAutocomplete hook listens for to do the actual clear.
     {:noreply,
      socket
      |> assign(:flash_error, nil)
-     |> assign(:compose_form, to_form(%{"text" => ""}, as: "chat"))}
+     |> assign(:compose_form, to_form(%{"text" => ""}, as: "chat"))
+     |> Phoenix.LiveView.push_event("clear_compose", %{})}
   end
 
   defp friendly_error(_action, :unauthorized) do

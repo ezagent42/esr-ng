@@ -407,8 +407,17 @@ defmodule EzagentDomainUi.IdeShell do
         <.icon name="chevron-down" size="xs" class="text-zinc-400 dark:text-zinc-600" />
       </button>
 
+      <%!-- Phase 8c follow-up (Allen 2026-05-20) — phx-click-away
+            dismisses the menu when the user clicks anywhere outside.
+            JS.hide mirrors the open transition reversed; popovers
+            without this stay sticky after losing focus. --%>
       <div
         id={@menu_id}
+        phx-click-away={
+          JS.hide(
+            transition: {"ease-in duration-100", "opacity-100 translate-y-0", "opacity-0 -translate-y-1"}
+          )
+        }
         class="hidden absolute left-0 top-full mt-1 w-64 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md shadow-lg z-40 transition transform"
       >
         <div class="px-3 py-2 border-b border-zinc-200 dark:border-zinc-800">
@@ -510,8 +519,14 @@ defmodule EzagentDomainUi.IdeShell do
         <.avatar uri={@current_entity_uri} size="sm" />
       </button>
 
+      <%!-- Phase 8c follow-up (Allen 2026-05-20) — outside-click dismiss --%>
       <div
         id={@menu_id}
+        phx-click-away={
+          JS.hide(
+            transition: {"ease-in duration-100", "opacity-100 translate-y-0", "opacity-0 -translate-y-1"}
+          )
+        }
         class="hidden absolute right-0 top-full mt-1 w-64 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md shadow-lg z-40 transition transform"
       >
         <div class="px-3 py-3 border-b border-zinc-200 dark:border-zinc-800 flex items-center gap-2">

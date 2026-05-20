@@ -32,6 +32,17 @@ export const MentionAutocomplete = {
     // Re-read members when the LV re-renders the input with a new
     // members list (e.g. after member_joined).
     this.handleEvent = this.handleEvent || (() => {})
+
+    // Phase 8c follow-up (Allen 2026-05-20) — Phoenix's DOM patcher
+    // leaves inputs with phx-hook alone (hook "owns" the value), so
+    // a server-side `to_form(%{text: ""})` after submit doesn't
+    // actually clear the browser DOM. The LV pushes a
+    // `clear_compose` event on successful send; this hook resets
+    // the input value + closes the popover.
+    this.handleEvent("clear_compose", () => {
+      this.el.value = ""
+      this.hidePopover()
+    })
   },
 
   updated() {
