@@ -9,6 +9,7 @@ defmodule EzagentPluginLiveview.SnapshotsLive do
   """
 
   use Phoenix.LiveView
+  alias EzagentDomainUi.IdeShell
   import Phoenix.Component
 
   alias Ezagent.Ecto.KindSnapshot
@@ -85,8 +86,19 @@ defmodule EzagentPluginLiveview.SnapshotsLive do
 
   @impl true
   def render(assigns) do
+    assigns =
+      assign_new(assigns, :current_entity_uri_str, fn ->
+        URI.to_string(Map.get(assigns, :current_entity_uri) || URI.parse("entity://user/admin"))
+      end)
+
     ~H"""
-    <div style="max-width: 1100px; margin: 0 auto; padding: 24px; font-family: -apple-system, sans-serif;">
+    <IdeShell.ide_shell
+      current_entity_uri={@current_entity_uri_str}
+      current_path="/admin/snapshots"
+      status={%{agents_alive: 0, bridges: 0, debug_events: 0, version: "dev"}}
+    >
+      <:main_window>
+        <div class="flex-1 overflow-auto px-6 py-6 text-zinc-900">
       <header>
         <h1 style="font-size: 22px; font-weight: 600;">Snapshots</h1>
         <p style="font-size: 13px; color: #666;">
@@ -150,7 +162,9 @@ defmodule EzagentPluginLiveview.SnapshotsLive do
       </section>
 
       <p :if={@flash_error} style="color: #cf222e; font-size: 12px; margin-top: 8px;">{@flash_error}</p>
-    </div>
+        </div>
+      </:main_window>
+    </IdeShell.ide_shell>
     """
   end
 end

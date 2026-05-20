@@ -431,55 +431,123 @@ defmodule EzagentDomainUi.Primitives do
   # --- icon ------------------------------------------------------------------
 
   @doc """
-  Icon stub — uses emoji or short text fallback. Phase 9 swaps for
-  lucide-icons SVG sprite.
+  SVG icon using Heroicons (24/outline). Phase 9 — replaced the
+  Phase 8 emoji fallback. Logical names like `message-square` are
+  mapped to Heroicons canonical names (`chat-bubble-left-right`)
+  via `heroicon_name/1`.
 
       <.icon name="message-square" />
       <.icon name="settings" size="md" />
+
+  Reads SVG from `deps/heroicons/optimized/24/outline/<name>.svg`
+  at compile time (via `__heroicon__/1` macro-ish function lookup).
+  Unknown names fall back to the small text glyph.
   """
   attr :name, :string, required: true
   attr :size, :string, default: "sm", values: ~w(xs sm md lg)
   attr :class, :string, default: ""
 
   def icon(assigns) do
-    emoji = icon_emoji(assigns.name)
-    assigns = assign(assigns, :emoji, emoji)
+    {svg_path, fallback} = resolve_icon(assigns.name)
+    svg = if svg_path, do: load_svg(svg_path), else: nil
+    assigns = assigns |> assign(:svg, svg) |> assign(:fallback, fallback)
 
     ~H"""
     <span
       class={[
         "inline-flex items-center justify-center leading-none select-none",
-        @size == "xs" && "text-xs",
-        @size == "sm" && "text-sm",
-        @size == "md" && "text-base",
-        @size == "lg" && "text-xl",
+        @size == "xs" && "w-3 h-3",
+        @size == "sm" && "w-4 h-4",
+        @size == "md" && "w-5 h-5",
+        @size == "lg" && "w-6 h-6",
         @class
       ]}
       aria-label={@name}
     >
-      {@emoji}
+      <%= if @svg do %>
+        {Phoenix.HTML.raw(@svg)}
+      <% else %>
+        {@fallback}
+      <% end %>
     </span>
     """
   end
 
-  defp icon_emoji("message-square"), do: "💬"
-  defp icon_emoji("folder"), do: "📁"
-  defp icon_emoji("users"), do: "👥"
-  defp icon_emoji("route"), do: "🔀"
-  defp icon_emoji("puzzle"), do: "🧩"
-  defp icon_emoji("activity"), do: "📈"
-  defp icon_emoji("settings"), do: "⚙️"
-  defp icon_emoji("search"), do: "🔍"
-  defp icon_emoji("bell"), do: "🔔"
-  defp icon_emoji("help"), do: "❓"
-  defp icon_emoji("terminal"), do: "🖥️"
-  defp icon_emoji("chevron-right"), do: "›"
-  defp icon_emoji("chevron-left"), do: "‹"
-  defp icon_emoji("chevron-down"), do: "⌄"
-  defp icon_emoji("x"), do: "✕"
-  defp icon_emoji("plus"), do: "+"
-  defp icon_emoji("dot"), do: "•"
-  defp icon_emoji("bug"), do: "🐞"
-  defp icon_emoji("dashboard"), do: "📊"
-  defp icon_emoji(_), do: "◇"
+  # Map our logical icon names → Heroicons (24/outline) basenames.
+  defp resolve_icon(name) do
+    case heroicon_for(name) do
+      nil -> {nil, text_fallback(name)}
+      hname -> {heroicons_path(hname), text_fallback(name)}
+    end
+  end
+
+  defp heroicon_for("message-square"), do: "chat-bubble-left-right"
+  defp heroicon_for("folder"), do: "folder"
+  defp heroicon_for("users"), do: "users"
+  defp heroicon_for("route"), do: "arrows-right-left"
+  defp heroicon_for("puzzle"), do: "puzzle-piece"
+  defp heroicon_for("activity"), do: "chart-bar"
+  defp heroicon_for("settings"), do: "cog-6-tooth"
+  defp heroicon_for("search"), do: "magnifying-glass"
+  defp heroicon_for("bell"), do: "bell"
+  defp heroicon_for("help"), do: "question-mark-circle"
+  defp heroicon_for("terminal"), do: "command-line"
+  defp heroicon_for("chevron-right"), do: "chevron-right"
+  defp heroicon_for("chevron-left"), do: "chevron-left"
+  defp heroicon_for("chevron-down"), do: "chevron-down"
+  defp heroicon_for("x"), do: "x-mark"
+  defp heroicon_for("plus"), do: "plus"
+  defp heroicon_for("bug"), do: "bug-ant"
+  defp heroicon_for("dashboard"), do: "rectangle-group"
+  defp heroicon_for(_), do: nil
+
+  defp text_fallback("dot"), do: "•"
+  defp text_fallback("chevron-right"), do: "›"
+  defp text_fallback("chevron-left"), do: "‹"
+  defp text_fallback("chevron-down"), do: "⌄"
+  defp text_fallback("x"), do: "✕"
+  defp text_fallback("plus"), do: "+"
+  defp text_fallback(_), do: "◇"
+
+  # Heroicons SVG source path. The :heroicons dep is checked out under
+  # the umbrella root's deps/. Use Application.app_dir for stability —
+  # works whether ezagent_domain_ui has a priv dir or not (deps/heroicons
+  # is co-located with the umbrella's _build, not with any individual app).
+  defp heroicons_path(basename) do
+    umbrella_root = File.cwd!()
+
+    # Try umbrella root first (works from `mix phx.server` at root)
+    candidate1 = Path.join([umbrella_root, "deps", "heroicons", "optimized", "24", "outline", "#{basename}.svg"])
+
+    if File.exists?(candidate1) do
+      candidate1
+    else
+      # Fallback: walk from any app's :code.lib_dir to umbrella deps
+      candidate2 =
+        :code.lib_dir(:ezagent_domain_ui)
+        |> to_string()
+        |> Path.join(["..", "..", "..", "deps", "heroicons", "optimized", "24", "outline", "#{basename}.svg"])
+        |> Path.expand()
+
+      candidate2
+    end
+  end
+
+  # File reads happen at runtime; cached by the BEAM filesystem cache.
+  # For higher perf, Phase 9+ can compile-time inline via @external_resource.
+  defp load_svg(path) do
+    case File.read(path) do
+      {:ok, content} ->
+        # Strip leading XML/comment + inject default classes for sizing
+        # parent span already constrains w/h, so we just remove any
+        # width/height attrs on the <svg> root to let parent control size.
+        content
+        |> String.replace(~r/width="[^"]*"/, "")
+        |> String.replace(~r/height="[^"]*"/, "")
+        |> String.replace("<svg", ~s(<svg class="w-full h-full" stroke-width="1.5"))
+
+      {:error, _} ->
+        nil
+    end
+  end
 end
