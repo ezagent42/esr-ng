@@ -90,10 +90,21 @@ defmodule EzagentDomainUi.AdminSettingsShell do
         id="admin-settings-topbar"
         class="h-10 border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 flex items-center shrink-0"
       >
-        <div class="flex-1 flex items-center">
+        <div class="flex-1 flex items-center gap-2">
+          <%!-- Phase 8c follow-up (Allen 2026-05-20) — mobile toggle for
+                the admin sidebar nav. Mirrors the IdeShell pattern. --%>
+          <button
+            type="button"
+            phx-click={Phoenix.LiveView.JS.toggle(to: "#admin-settings-sidebar", display: "flex")}
+            class="lg:hidden p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-500"
+            title="Toggle settings nav"
+            aria-label="Toggle settings nav"
+          >
+            <.icon name="folder" size="sm" />
+          </button>
           <a
             href={@back_href}
-            class="inline-flex items-center gap-1 px-2 py-1 -ml-2 rounded text-xs text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+            class="inline-flex items-center gap-1 px-2 py-1 -ml-1 rounded text-xs text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
           >
             <.icon name="chevron-left" size="xs" />
             <span>Back to ezagent</span>
@@ -145,7 +156,8 @@ defmodule EzagentDomainUi.AdminSettingsShell do
     ~H"""
     <nav
       id="admin-settings-sidebar"
-      class="w-56 border-r border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 flex flex-col py-2 px-2 gap-px shrink-0"
+      phx-click-away={Phoenix.LiveView.JS.hide(to: "#admin-settings-sidebar")}
+      class="hidden lg:flex lg:static fixed top-10 bottom-0 left-0 z-40 w-56 max-w-[80vw] border-r border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 flex-col py-2 px-2 gap-px shrink-0 shadow-xl lg:shadow-none"
     >
       <div class="text-[10px] uppercase tracking-wide text-zinc-500 px-2 mb-1">
         Admin Settings

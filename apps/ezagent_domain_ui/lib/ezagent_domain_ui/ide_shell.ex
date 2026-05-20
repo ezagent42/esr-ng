@@ -119,14 +119,32 @@ defmodule EzagentDomainUi.IdeShell do
         workspace_name={@workspace_name}
         workspaces={@workspaces}
         is_admin?={@is_admin?}
+        has_resource_panel={@resource_panel != []}
+        has_right_sidebar={@right_sidebar != []}
       />
 
-      <div class="flex-1 flex min-h-0">
+      <div class="flex-1 flex min-h-0 relative">
         <.activity_bar current_path={@current_path} />
+
+        <%!-- Phase 8c follow-up (Allen 2026-05-20) — mobile-responsive
+              side panels.
+
+              On `lg+` (≥1024px): both panels render inline (`lg:static`
+              + `lg:block`) at their fixed widths, same as before.
+
+              Below `lg`: both panels default to `hidden`; toggle buttons
+              in `top_command_bar` (also `lg:hidden`) flip the `hidden`
+              class via JS.toggle. When shown on mobile, the panel
+              becomes a fixed-position overlay anchored to the viewport
+              edge (top: header height, bottom: status bar height). The
+              backdrop is a sibling that closes on click. Same pattern
+              for both panels so the toggle JS is symmetric. --%>
 
         <div
           :if={@resource_panel != []}
-          class="w-56 border-r border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 overflow-y-auto"
+          id="left-resource-panel"
+          phx-click-away={JS.hide(to: "#left-resource-panel")}
+          class="hidden lg:block lg:static fixed top-10 bottom-6 left-12 z-40 w-56 max-w-[80vw] border-r border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 overflow-y-auto shadow-xl lg:shadow-none"
         >
           {render_slot(@resource_panel)}
         </div>
@@ -138,7 +156,8 @@ defmodule EzagentDomainUi.IdeShell do
         <div
           :if={@right_sidebar != []}
           id="right-sidebar"
-          class="w-72 border-l border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 overflow-y-auto hidden lg:block"
+          phx-click-away={JS.hide(to: "#right-sidebar")}
+          class="hidden lg:block lg:static fixed top-10 bottom-6 right-0 z-40 w-72 max-w-[80vw] border-l border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 overflow-y-auto shadow-xl lg:shadow-none"
         >
           {render_slot(@right_sidebar)}
         </div>
@@ -272,9 +291,35 @@ defmodule EzagentDomainUi.IdeShell do
   attr(:workspaces, :list, default: [])
   attr(:is_admin?, :boolean, default: false)
 
+  attr(:has_resource_panel, :boolean,
+    default: false,
+    doc: "Phase 8c follow-up — mobile toggle button for the left resource panel renders when this is true."
+  )
+
+  attr(:has_right_sidebar, :boolean,
+    default: false,
+    doc: "Phase 8c follow-up — mobile toggle button for the right sidebar renders when this is true."
+  )
+
   def top_command_bar(assigns) do
     ~H"""
     <header class="h-10 border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 flex items-center gap-3 shrink-0">
+      <%!-- Phase 8c follow-up (Allen 2026-05-20) — mobile-only toggle
+            for the left resource panel. `lg:hidden` so the button
+            disappears on desktop (where the panel is always visible
+            inline). Toggles `hidden` on the panel element which
+            switches between the default "hidden" state and the
+            "fixed overlay" state via Tailwind responsive classes. --%>
+      <button
+        :if={@has_resource_panel}
+        type="button"
+        phx-click={JS.toggle(to: "#left-resource-panel")}
+        class="lg:hidden p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-500"
+        title="Toggle resource panel"
+        aria-label="Toggle resource panel"
+      >
+        <.icon name="folder" size="sm" />
+      </button>
       <%!-- Phase 8c PR-F (Allen 2026-05-20) — workspace label in the
             top-left. Format: `ezagent / <workspace>` when a workspace
             is in scope; bare `ezagent` otherwise.
@@ -330,6 +375,19 @@ defmodule EzagentDomainUi.IdeShell do
       </div>
 
       <div class="flex items-center gap-2 shrink-0">
+        <%!-- Phase 8c follow-up — mobile-only toggle for the right
+              sidebar (Members panel etc). Same pattern as the left
+              panel button above. `lg:hidden`. --%>
+        <button
+          :if={@has_right_sidebar}
+          type="button"
+          phx-click={JS.toggle(to: "#right-sidebar")}
+          class="lg:hidden p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-500"
+          title="Toggle members panel"
+          aria-label="Toggle members panel"
+        >
+          <.icon name="users" size="sm" />
+        </button>
         <.icon
           name="bell"
           size="sm"
