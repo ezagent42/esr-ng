@@ -152,18 +152,26 @@ defmodule EzagentWeb.SessionController do
       <p class="brand">ezagent</p>
       <h1>Sign in</h1>
       {{ERROR}}
-      <form method="post" action="/login">
+      <%!-- Phase 8c follow-up (Allen 2026-05-20): form posts to
+            /login/credentials, NOT /login (which is the email magic-link
+            endpoint and would silently re-render the email page).
+            Field accepts bare handle ("admin") OR full URI
+            ("entity://user/admin") — server normalizes via
+            normalize_principal/1. Display name is intentionally
+            not accepted: not unique. --%>
+      <form method="post" action="/login/credentials">
         <input type="hidden" name="_csrf_token" value="{{CSRF}}">
-        <label for="entity_uri">Entity URI</label>
-        <input type="text" id="entity_uri" name="entity_uri" placeholder="entity://user/allen" required autofocus>
+        <label for="entity_uri">Username or Entity URI</label>
+        <input type="text" id="entity_uri" name="entity_uri" placeholder="admin   or   entity://user/admin" required autofocus>
         <label for="secret">Password or token</label>
         <input type="password" id="secret" name="secret" required>
         <button type="submit">Sign in</button>
       </form>
       <p class="hint">
-        First-time admin setup: <code>mix ezagent.user.set_password entity://user/admin --password X</code>.
-        Agent URIs (<code>entity://agent/&lt;flavor&gt;_&lt;name&gt;</code>) sign in with a bearer token
-        minted via the <code>entity_tokens</code> admin.
+        Bare handles (<code>admin</code>) resolve to <code>entity://user/admin</code>.
+        Full URIs (<code>entity://user/&lt;name&gt;</code> /
+        <code>entity://agent/&lt;flavor&gt;_&lt;name&gt;</code>) also accepted.
+        First-time admin password setup: <code>mix ezagent.user.set_password entity://user/admin --password X</code>.
       </p>
     </div>
   </body>
@@ -299,7 +307,7 @@ defmodule EzagentWeb.SessionController do
   end
 
   defp authenticate(uri_str, secret) when is_binary(uri_str) and is_binary(secret) do
-    case URI.parse(uri_str) do
+    case URI.parse(normalize_principal(uri_str)) do
       %URI{scheme: "entity"} = uri ->
         case Entity.authenticate(uri, secret) do
           {:ok, _} -> :ok
@@ -308,6 +316,30 @@ defmodule EzagentWeb.SessionController do
 
       _ ->
         :error
+    end
+  end
+
+  # Phase 8c follow-up (Allen 2026-05-20) — accept bare handles at the
+  # credentials login: "admin" → "entity://user/admin", "allen" →
+  # "entity://user/allen". Full `entity://...` URIs pass through
+  # unchanged so existing flows / scripts keep working.
+  #
+  # Display name is intentionally NOT accepted as a login key — it's
+  # not unique (two entities can share the same display name).
+  defp normalize_principal(input) do
+    trimmed = String.trim(input)
+
+    cond do
+      String.starts_with?(trimmed, "entity://") ->
+        trimmed
+
+      # bare handle: alphanumerics + dash/underscore, no slashes or @
+      String.match?(trimmed, ~r/^[a-zA-Z0-9_-]+$/) ->
+        "entity://user/" <> String.downcase(trimmed)
+
+      # anything else — let URI.parse classify it as :error
+      true ->
+        trimmed
     end
   end
 
