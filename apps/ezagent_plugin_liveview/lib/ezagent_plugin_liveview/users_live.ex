@@ -10,7 +10,7 @@ defmodule EzagentPluginLiveview.UsersLive do
   - Display name primary, URI mono subtitle (Task 1).
   - Inline display-name editing via pencil button (Task 2).
   - Bare-handle input on create form (Task 3) — type `allen`, get
-    `entity://user/allen` (also accepts full URI).
+    `entity://user/default/allen` (also accepts full URI).
   """
 
   use Phoenix.LiveView
@@ -55,7 +55,7 @@ defmodule EzagentPluginLiveview.UsersLive do
 
   @impl true
   def handle_event("create_user", %{"user" => params}, socket) do
-    # Task 3 — accept bare handle (`allen`) OR full URI (`entity://user/allen`).
+    # Task 3 — accept bare handle (`allen`) OR full URI (`entity://user/default/allen`).
     # Backend normalizes to canonical entity://user/<slug>.
     handle_or_uri = Map.get(params, "handle", "") |> String.trim()
     password = Map.get(params, "password", "")
@@ -167,7 +167,7 @@ defmodule EzagentPluginLiveview.UsersLive do
     :ok
   end
 
-  # Task 3 — bare handle (`allen`) or full URI (`entity://user/allen`).
+  # Task 3 — bare handle (`allen`) or full URI (`entity://user/default/allen`).
   # Anything else falls through and parse_user_uri rejects with a
   # helpful error.
   defp normalize_handle_to_uri(""), do: ""
@@ -199,7 +199,7 @@ defmodule EzagentPluginLiveview.UsersLive do
   def render(assigns) do
     assigns =
       assign_new(assigns, :current_entity_uri_str, fn ->
-        URI.to_string(assigns.current_entity_uri || URI.parse("entity://user/admin"))
+        URI.to_string(assigns.current_entity_uri || URI.parse("entity://user/default/admin"))
       end)
 
     ~H"""
@@ -311,7 +311,7 @@ defmodule EzagentPluginLiveview.UsersLive do
                       value={@create_form.params["handle"]}
                       class="w-full px-2 py-1.5 text-xs border border-zinc-300 dark:border-zinc-700 rounded font-mono bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100"
                     />
-                    <p class="mt-1 text-[11px] text-zinc-500">Accepts bare handle (<code>allen</code>) or full URI (<code>entity://user/allen</code>).</p>
+                    <p class="mt-1 text-[11px] text-zinc-500">Accepts bare handle (<code>allen</code>) or full URI (<code>entity://user/default/allen</code>).</p>
                   </div>
                   <div>
                     <label for="user_display_name" class="block text-xs font-medium text-zinc-700 dark:text-zinc-300 mb-1">Display name</label>

@@ -5,12 +5,12 @@ defmodule EzagentDomainChat.ApplicationTest do
 
   These assertions run against the live KindRegistry / DynamicSupervisor
   populated at application boot — not test-spawned fixtures. The Phase 1
-  echo plugin uses the same pattern (its boot spawns `entity://agent/test_echo` and
+  echo plugin uses the same pattern (its boot spawns `entity://agent/default/test_echo` and
   tests assert on the live registry entry).
 
   ## PR-M (Allen 2026-05-20) — admin spawns lazily, test-seeded
 
-  `entity://user/admin` is no longer a static supervisor child. In
+  `entity://user/default/admin` is no longer a static supervisor child. In
   dev/prod it spawns lazily via SpawnRegistry on first dispatch
   reference (login, session join, cap lookup). The chat test-env
   seed `maybe_seed_main_session_for_tests/0` pre-spawns admin before
@@ -33,13 +33,13 @@ defmodule EzagentDomainChat.ApplicationTest do
     assert :ready = ReadyGate.status(uri_str)
   end
 
-  test "entity://user/admin is registered in KindRegistry (post-first-reference)" do
+  test "entity://user/default/admin is registered in KindRegistry (post-first-reference)" do
     uri = Ezagent.Entity.User.admin_uri()
     assert {:ok, pid} = KindRegistry.lookup(uri)
     assert Process.alive?(pid)
   end
 
-  test "entity://user/admin is marked :ready in ReadyGate (post-first-reference)" do
+  test "entity://user/default/admin is marked :ready in ReadyGate (post-first-reference)" do
     uri_str = URI.to_string(Ezagent.Entity.User.admin_uri())
     assert :ready = ReadyGate.status(uri_str)
   end

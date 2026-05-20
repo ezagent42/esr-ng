@@ -23,14 +23,14 @@ defmodule EzagentWeb.RegistrationControllerTest do
       |> pending_conn("newbie@good.com")
       |> post("/register/complete", %{"handle" => "newbie", "display_name" => "New Bie"})
 
-    assert redirected_to(conn) == "/admin"
-    assert get_session(conn, :current_entity_uri) == "entity://user/newbie"
+    assert redirected_to(conn) == "/sessions"
+    assert get_session(conn, :current_entity_uri) == "entity://user/default/newbie"
     assert get_session(conn, :pending_registration_email) == nil
-    assert Ezagent.Entity.Profile.by_email("newbie@good.com").entity_uri == "entity://user/newbie"
+    assert Ezagent.Entity.Profile.by_email("newbie@good.com").entity_uri == "entity://user/default/newbie"
   end
 
   test "POST with a taken handle re-renders the form with a suggestion", %{conn: conn} do
-    {:ok, _} = Ezagent.Users.create("entity://user/taken", nil, [])
+    {:ok, _} = Ezagent.Users.create("entity://user/default/taken", nil, [])
 
     conn =
       conn

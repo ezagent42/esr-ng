@@ -37,7 +37,7 @@ defmodule EzagentPluginFeishu.Behavior.FeishuOutbound do
 
   The flag travels on the Message envelope's body map. The
   alternative (sniff `msg.sender` for a feishu-origin URI shape) is
-  fragile because today's bound users have plain `entity://user/X`
+  fragile because today's bound users have plain `entity://user/default/X`
   URIs with no origin marker.
 
   ## Slice

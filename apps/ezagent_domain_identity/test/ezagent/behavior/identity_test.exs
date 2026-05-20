@@ -5,7 +5,7 @@ defmodule Ezagent.Behavior.IdentityTest do
 
   describe "init_slice/1" do
     test "default initial_caps is empty MapSet" do
-      assert %{caps: caps} = Identity.init_slice(%{uri: URI.new!("entity://user/x")})
+      assert %{caps: caps} = Identity.init_slice(%{uri: URI.new!("entity://user/default/x")})
       assert MapSet.size(caps) == 0
     end
 
@@ -84,7 +84,7 @@ defmodule Ezagent.Behavior.IdentityTest do
       assert Capability.matches?(admin_cap, %{
                kind: :anything,
                behavior: SomeMod,
-               instance: URI.new!("entity://agent/test_X")
+               instance: URI.new!("entity://agent/default/test_X")
              })
     end
   end

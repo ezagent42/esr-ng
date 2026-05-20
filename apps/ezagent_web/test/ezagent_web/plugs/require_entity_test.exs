@@ -26,24 +26,24 @@ defmodule EzagentWeb.Plugs.RequireEntityTest do
     test "passes through + assigns current_entity_uri for entity://user/*" do
       conn =
         conn(:get, "/admin")
-        |> init_test_session(%{"current_entity_uri" => "entity://user/admin"})
+        |> init_test_session(%{"current_entity_uri" => "entity://user/default/admin"})
         |> RequireEntity.call([])
 
       refute conn.halted
 
-      assert %URI{scheme: "entity", host: "user", path: "/admin"} =
+      assert %URI{scheme: "entity", host: "user", path: "/default/admin"} =
                conn.assigns.current_entity_uri
     end
 
     test "passes through + assigns current_entity_uri for entity://agent/*" do
       conn =
         conn(:get, "/admin")
-        |> init_test_session(%{"current_entity_uri" => "entity://agent/cc_test"})
+        |> init_test_session(%{"current_entity_uri" => "entity://agent/default/cc_test"})
         |> RequireEntity.call([])
 
       refute conn.halted
 
-      assert %URI{scheme: "entity", host: "agent", path: "/cc_test"} =
+      assert %URI{scheme: "entity", host: "agent", path: "/default/cc_test"} =
                conn.assigns.current_entity_uri
     end
 

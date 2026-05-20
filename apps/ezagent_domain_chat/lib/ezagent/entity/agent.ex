@@ -121,7 +121,11 @@ defmodule Ezagent.Entity.Agent do
         ) :: {:ok, URI.t()} | {:error, term()}
   def spawn(%URI{} = _template_uri, instance_name, %URI{} = workspace_uri, %URI{} = granted_by)
       when is_binary(instance_name) do
-    agent_uri = URI.new!("entity://agent/#{instance_name}")
+    # Phase 9 PR-2 (SPEC v3 §3): agent URI carries its workspace name
+    # as the first path segment under the type axis. Workspace URI
+    # host carries the bare workspace name (workspace:// is 1-seg).
+    workspace_name = workspace_uri.host || "default"
+    agent_uri = URI.new!("entity://agent/#{workspace_name}/#{instance_name}")
 
     with {:ok, _pid} <- spawn_or_resume(agent_uri),
          :ok <- Ezagent.WorkspaceRegistry.bind(agent_uri, workspace_uri),

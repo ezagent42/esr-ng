@@ -19,7 +19,7 @@ defmodule Ezagent.PluginCc.Template.CcAgent do
 
       %{
         "class" => "cc.agent",
-        "agent_uri" => "entity://agent/cc_<name>",  # PR #141 SPEC v2
+        "agent_uri" => "entity://agent/default/cc_<name>",  # PR #141 SPEC v2
         "mode" => "local-pty" | "remote-channel",
         "cwd" => "/path"                     # required for local-pty
       }
@@ -66,20 +66,31 @@ defmodule Ezagent.PluginCc.Template.CcAgent do
 
   defp check_agent_uri(%{"agent_uri" => uri_str}) when is_binary(uri_str) and uri_str != "" do
     case URI.new(uri_str) do
-      {:ok, %URI{scheme: "entity", host: "agent", path: "/" <> name}} when name != "" ->
-        # PR #141 SPEC v2 §5.14: agent flavor lives in the name prefix
-        # as `<flavor>_<rest>`. cc.agent template requires flavor=cc.
-        case String.split(name, "_", parts: 2) do
-          ["cc", rest] when rest != "" -> :ok
-          [flavor, _] -> {:error, {:wrong_agent_flavor, flavor, expected: "cc"}}
-          _ -> {:error, {:missing_flavor_prefix, uri_str,
-                         "agent URIs must be `entity://agent/cc_<name>` (PR #141)"}}
+      {:ok, %URI{scheme: "entity", host: "agent", path: "/" <> rest}} when rest != "" ->
+        # Phase 9 PR-2 (SPEC v3 §3): entity URIs are 3-segment:
+        # /<workspace>/<entity_name>. Flavor lives in the entity_name
+        # prefix as `<flavor>_<rest>` (SPEC v2 §5.14). cc.agent
+        # template requires flavor=cc.
+        with [_workspace, entity_name] when entity_name != "" <-
+               String.split(rest, "/", parts: 2),
+             [flavor, suffix] when flavor != "" and suffix != "" <-
+               String.split(entity_name, "_", parts: 2) do
+          if flavor == "cc" do
+            :ok
+          else
+            {:error, {:wrong_agent_flavor, flavor, expected: "cc"}}
+          end
+        else
+          _ ->
+            {:error,
+             {:missing_flavor_prefix, uri_str,
+              "agent URIs must be `entity://agent/<workspace>/cc_<name>` (Phase 9 PR-2)"}}
         end
 
       {:ok, %URI{scheme: "entity"}} ->
         {:error,
          {:invalid_agent_uri, uri_str,
-          "agent URIs must be `entity://agent/cc_<name>` (PR #141)"}}
+          "agent URIs must be `entity://agent/<workspace>/cc_<name>` (Phase 9 PR-2)"}}
 
       _ ->
         {:error, {:bad_agent_uri, uri_str}}
@@ -173,9 +184,9 @@ defmodule Ezagent.PluginCc.Template.CcAgent do
       %{
         name: "agent_uri",
         type: :uri,
-        label: "Agent URI (entity://agent/cc_<name>)",
+        label: "Agent URI (entity://agent/default/cc_<name>)",
         required: true,
-        placeholder: "entity://agent/cc_architect"
+        placeholder: "entity://agent/default/cc_architect"
       },
       %{
         name: "mode",

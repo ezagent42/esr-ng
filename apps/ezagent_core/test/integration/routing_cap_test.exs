@@ -33,7 +33,7 @@ defmodule Ezagent.Integration.RoutingCapTest do
 
   defp non_admin_ctx do
     %{
-      caller: URI.parse("entity://user/non-admin-test"),
+      caller: URI.parse("entity://user/default/non-admin-test"),
       caps: MapSet.new(),
       reply: {:caller_inbox, self()}
     }

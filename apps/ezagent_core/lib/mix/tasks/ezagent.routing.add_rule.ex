@@ -23,7 +23,7 @@ defmodule Mix.Tasks.Ezagent.Routing.AddRule do
 
       # mention rule: @cc_builder → architect session
       mix ezagent.routing.add_rule EzagentDomainChat.Routing.MentionRouting \\
-          mention:entity://agent/cc_builder receivers:session://default/architect
+          mention:entity://agent/default/cc_builder receivers:session://default/architect
 
   ## Behavior
 

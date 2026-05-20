@@ -3,7 +3,7 @@ defmodule Ezagent.IdentityTest do
 
   describe "list_caps_for/1" do
     test "returns empty MapSet for not-yet-spawned user" do
-      uri = URI.parse("entity://user/never-spawned-#{System.unique_integer([:positive])}")
+      uri = URI.parse("entity://user/default/never-spawned-#{System.unique_integer([:positive])}")
       caps = Ezagent.Identity.list_caps_for(uri)
       assert %MapSet{} = caps
       assert MapSet.size(caps) == 0
@@ -36,16 +36,16 @@ defmodule Ezagent.IdentityTest do
     end
 
     test "returns true for the seeded admin URI (string form)" do
-      assert Ezagent.Identity.admin?("entity://user/admin")
+      assert Ezagent.Identity.admin?("entity://user/default/admin")
     end
 
     test "returns false for a non-admin user URI" do
-      refute Ezagent.Identity.admin?("entity://user/alice")
-      refute Ezagent.Identity.admin?(URI.parse("entity://user/bob"))
+      refute Ezagent.Identity.admin?("entity://user/default/alice")
+      refute Ezagent.Identity.admin?(URI.parse("entity://user/default/bob"))
     end
 
     test "returns false for an agent URI" do
-      refute Ezagent.Identity.admin?("entity://agent/claude-1")
+      refute Ezagent.Identity.admin?("entity://agent/default/claude-1")
     end
 
     test "returns false for nil" do

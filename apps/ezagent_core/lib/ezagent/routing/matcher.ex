@@ -26,8 +26,8 @@ defmodule Ezagent.Routing.Matcher do
   ## Shape
 
   Matchers are plain Elixir tuples (Decision #42 JSON-serializable):
-  - `{:mention, "entity://user/admin"}` (URI as string for JSON round-trip)
-  - `{:from, "entity://agent/cc_builder"}`
+  - `{:mention, "entity://user/default/admin"}` (URI as string for JSON round-trip)
+  - `{:from, "entity://agent/default/cc_builder"}`
   - `{:text_contains, "urgent"}`
   - `{:text_matches, "^/help"}`
   - `{:always}`
@@ -89,7 +89,7 @@ defmodule Ezagent.Routing.Matcher do
   Match if message originated in a specific session.
 
   Without this, all routing rules apply globally — a rule
-  `always() → [entity://agent/cc_alerts]` would fire for EVERY
+  `always() → [entity://agent/default/cc_alerts]` would fire for EVERY
   session's send. `in_session(session_uri)` scopes a rule to one
   session so an agent / receiver can subscribe to one session via
   routing rule without affecting unrelated sessions.

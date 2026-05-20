@@ -8,7 +8,7 @@ defmodule EzagentPluginCc.Views.PtyView do
   (set when the operator clicks a Members panel PTY button, or when
   the view-switcher opens with a default cc member).
 
-  Applies only to sessions that have at least one `entity://agent/cc_*`
+  Applies only to sessions that have at least one `entity://agent/default/cc_*`
   member — peeked via `:sys.get_state` on the Session Kind with a
   short timeout + try/catch so a slow session doesn't block the LV
   render. Returning false is the safe failure mode (Terminal button
@@ -50,13 +50,18 @@ defmodule EzagentPluginCc.Views.PtyView do
 
   def applies_to?(_), do: false
 
-  # `entity://agent/cc_<name>` — the `cc_` prefix is the agent-flavor
-  # marker (per PR #149 entity-agnostic reflection: flavor is a free-form
-  # prefix on the URI's name segment). Any agent whose name begins with
-  # `cc_` is a cc-managed agent.
-  defp cc_agent_uri?(%URI{scheme: "entity", host: "agent", path: "/" <> name})
-       when is_binary(name) do
-    String.starts_with?(name, "cc_")
+  # `entity://agent/<workspace>/cc_<name>` — the `cc_` prefix is the
+  # agent-flavor marker (per PR #149 entity-agnostic reflection: flavor
+  # is a free-form prefix on the URI's name segment). Any agent whose
+  # entity-name begins with `cc_` is a cc-managed agent.
+  # Phase 9 PR-2 (SPEC v3 §3): entity URI is 3-segment; extract the
+  # entity_name (second path segment) before checking the prefix.
+  defp cc_agent_uri?(%URI{scheme: "entity", host: "agent", path: "/" <> rest})
+       when is_binary(rest) do
+    case String.split(rest, "/", parts: 2) do
+      [_workspace, entity_name] -> String.starts_with?(entity_name, "cc_")
+      _ -> false
+    end
   end
 
   defp cc_agent_uri?(_), do: false

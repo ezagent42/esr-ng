@@ -49,7 +49,7 @@ defmodule EzagentPluginLiveview.EntitiesLiveTest do
 
   test "PTY agent detail route still works at /identities/agents/:uri", %{conn: conn} do
     agent_uri =
-      URI.parse("entity://agent/test_pty-status-test-#{System.unique_integer([:positive])}")
+      URI.parse("entity://agent/default/test_pty-status-test-#{System.unique_integer([:positive])}")
 
     {:ok, pid} =
       DynamicSupervisor.start_child(

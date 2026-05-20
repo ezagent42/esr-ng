@@ -35,7 +35,7 @@ defmodule EzagentDomainChat.Integration.RoutingConsolidationInvariantTest do
     :ok
   end
 
-  defp build_msg(text \\ "hi", mentions \\ [], sender \\ "entity://user/admin") do
+  defp build_msg(text \\ "hi", mentions \\ [], sender \\ "entity://user/default/admin") do
     %Ezagent.Message{
       id: "test-#{System.unique_integer([:positive])}",
       sender: URI.parse(sender),
@@ -89,19 +89,19 @@ defmodule EzagentDomainChat.Integration.RoutingConsolidationInvariantTest do
         )
 
         members = [
-          URI.parse("entity://user/admin"),
-          URI.parse("entity://agent/test_x"),
-          URI.parse("entity://agent/test_y")
+          URI.parse("entity://user/default/admin"),
+          URI.parse("entity://agent/default/test_x"),
+          URI.parse("entity://agent/default/test_y")
         ]
 
-        msg = build_msg("hi", [], "entity://user/admin")
+        msg = build_msg("hi", [], "entity://user/default/admin")
         recipients = Resolver.resolve(msg, URI.parse("session://test"), members)
 
         # admin is sender → excluded; remaining 2 → recipients
         assert length(recipients) == 2
 
         recipient_strs = Enum.map(recipients, &URI.to_string/1) |> Enum.sort()
-        assert recipient_strs == ["entity://agent/test_x", "entity://agent/test_y"]
+        assert recipient_strs == ["entity://agent/default/test_x", "entity://agent/default/test_y"]
       after
         Application.put_env(:ezagent_core, :routing_tables, original_tables)
       end

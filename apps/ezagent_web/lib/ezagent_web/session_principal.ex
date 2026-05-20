@@ -32,7 +32,7 @@ defmodule EzagentWeb.SessionPrincipal do
   Stores a canonical `entity://...` URI string in the session's
   `:current_entity_uri` slot. Accepts:
 
-  - a full URI string (`"entity://user/admin"`) — passes through
+  - a full URI string (`"entity://user/default/admin"`) — passes through
   - a bare handle (`"admin"`, `"allen"`) — normalized to
     `"entity://user/<handle>"` (lowercased)
 
@@ -83,6 +83,9 @@ defmodule EzagentWeb.SessionPrincipal do
           "EzagentWeb.SessionPrincipal.canonicalize/1 expects a String, got: #{inspect(other)}"
   end
 
+  # Phase 9 PR-2 (SPEC v3 §6.2 option A): bare-handle login defaults to
+  # the `default` workspace. Full URIs pass through; tenant-aware login
+  # form will add an explicit workspace field in PR-5.
   defp normalize(input) do
     trimmed = String.trim(input)
 
@@ -91,7 +94,7 @@ defmodule EzagentWeb.SessionPrincipal do
         trimmed
 
       String.match?(trimmed, ~r/^[a-zA-Z0-9_-]+$/) ->
-        "entity://user/" <> String.downcase(trimmed)
+        "entity://user/default/" <> String.downcase(trimmed)
 
       true ->
         trimmed

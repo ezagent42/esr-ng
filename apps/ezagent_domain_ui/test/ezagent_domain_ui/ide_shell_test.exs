@@ -14,7 +14,7 @@ defmodule EzagentDomainUi.IdeShellTest do
   describe "ide_shell/1" do
     test "renders the 6 layout regions" do
       assigns = %{
-        current_entity_uri: "entity://user/admin",
+        current_entity_uri: "entity://user/default/admin",
         current_path: "/sessions",
         status: %{agents_alive: 0, bridges: 0, debug_events: 0, version: "test"}
       }
@@ -67,7 +67,7 @@ defmodule EzagentDomainUi.IdeShellTest do
 
     test "Phase 8c PR-F — top-left shows `ezagent / <workspace_name>` when given" do
       assigns = %{
-        current_entity_uri: "entity://user/admin",
+        current_entity_uri: "entity://user/default/admin",
         current_path: "/sessions",
         status: %{},
         workspace_name: "default"
@@ -91,7 +91,7 @@ defmodule EzagentDomainUi.IdeShellTest do
 
     test "Phase 8c PR-F — top-left shows bare `ezagent` when workspace_name is nil" do
       assigns = %{
-        current_entity_uri: "entity://user/admin",
+        current_entity_uri: "entity://user/default/admin",
         current_path: "/sessions",
         status: %{}
       }
@@ -112,7 +112,7 @@ defmodule EzagentDomainUi.IdeShellTest do
 
     test "Phase 8c PR-L — top-left becomes a dropdown when workspaces list is non-empty" do
       assigns = %{
-        current_entity_uri: "entity://user/admin",
+        current_entity_uri: "entity://user/default/admin",
         current_path: "/sessions",
         status: %{},
         workspace_name: "default",
@@ -155,7 +155,7 @@ defmodule EzagentDomainUi.IdeShellTest do
 
     test "Phase 8c PR-L — empty workspaces list keeps plain text label (no dropdown)" do
       assigns = %{
-        current_entity_uri: "entity://user/admin",
+        current_entity_uri: "entity://user/default/admin",
         current_path: "/sessions",
         status: %{},
         workspace_name: "default",
@@ -185,7 +185,7 @@ defmodule EzagentDomainUi.IdeShellTest do
 
     test "Phase 8c PR-F — avatar dropdown gains Admin link when is_admin?=true" do
       assigns = %{
-        current_entity_uri: "entity://user/admin",
+        current_entity_uri: "entity://user/default/admin",
         current_path: "/sessions",
         status: %{},
         is_admin?: true
@@ -209,7 +209,7 @@ defmodule EzagentDomainUi.IdeShellTest do
 
     test "Phase 8c PR-F — avatar dropdown hides Admin link when is_admin?=false" do
       assigns = %{
-        current_entity_uri: "entity://user/alice",
+        current_entity_uri: "entity://user/default/alice",
         current_path: "/sessions",
         status: %{},
         is_admin?: false
@@ -308,7 +308,7 @@ defmodule EzagentDomainUi.IdeShellTest do
       # from status bar (workspace context is shown in the URL/route,
       # not the bottom bar).
       assigns = %{
-        current_entity_uri: "entity://user/admin",
+        current_entity_uri: "entity://user/default/admin",
         status: %{
           session_uri: "session://main",
           agents_alive: 3,
@@ -326,7 +326,7 @@ defmodule EzagentDomainUi.IdeShellTest do
         />
         """)
 
-      assert html =~ "entity://user/admin"
+      assert html =~ "entity://user/default/admin"
       assert html =~ "session://main"
       assert html =~ "3 agents"
       assert html =~ "1 bridges"

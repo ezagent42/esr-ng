@@ -17,7 +17,7 @@ defmodule Ezagent.MessageStoreMultiSessionTest do
   end
 
   test "same message id written to 2 sessions → messages 1 row + routings 2 rows" do
-    sender = URI.new!("entity://agent/test_cc-builder")
+    sender = URI.new!("entity://agent/default/test_cc-builder")
     msg = Message.new(sender, %{text: "reply to both", attachments: []})
 
     session_a = URI.new!("session://main")
@@ -36,7 +36,7 @@ defmodule Ezagent.MessageStoreMultiSessionTest do
   end
 
   test "recent_in_session scoped via JOIN — message in both sessions appears in both queries" do
-    sender = URI.new!("entity://agent/test_cc-builder")
+    sender = URI.new!("entity://agent/default/test_cc-builder")
     session_a = URI.new!("session://A")
     session_b = URI.new!("session://B")
 
@@ -66,7 +66,7 @@ defmodule Ezagent.MessageStoreMultiSessionTest do
   end
 
   test "write is idempotent on (message_id, session_uri) — duplicate write doesn't fail or double-insert routing" do
-    sender = URI.new!("entity://user/admin")
+    sender = URI.new!("entity://user/default/admin")
     msg = Message.new(sender, %{text: "once", attachments: []})
     session = URI.new!("session://main")
 

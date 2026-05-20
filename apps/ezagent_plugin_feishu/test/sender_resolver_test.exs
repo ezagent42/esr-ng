@@ -8,8 +8,8 @@ defmodule EzagentPluginFeishu.SenderResolverTest do
 
   test "bound open_id resolves to caller URI" do
     open_id = "ou_resolver_test_#{System.unique_integer([:positive])}"
-    user_uri = "entity://user/resolver_test_#{System.unique_integer([:positive])}"
-    {:ok, _} = UserBinding.bind(open_id, user_uri, "entity://user/admin")
+    user_uri = "entity://user/default/resolver_test_#{System.unique_integer([:positive])}"
+    {:ok, _} = UserBinding.bind(open_id, user_uri, "entity://user/default/admin")
 
     sender = %{"sender_id" => %{"open_id" => open_id}}
     assert {:ok, %URI{} = caller, _caps} = SenderResolver.resolve(sender)

@@ -115,7 +115,7 @@ defmodule EzagentPluginLiveview.AgentDetailLive do
   def render(%{not_found: true} = assigns) do
     assigns =
       assign_new(assigns, :current_entity_uri_str, fn ->
-        URI.to_string(Map.get(assigns, :current_entity_uri) || URI.parse("entity://user/admin"))
+        URI.to_string(Map.get(assigns, :current_entity_uri) || URI.parse("entity://user/default/admin"))
       end)
 
     ~H"""
@@ -146,7 +146,7 @@ defmodule EzagentPluginLiveview.AgentDetailLive do
   def render(assigns) do
     assigns =
       assign_new(assigns, :current_entity_uri_str, fn ->
-        URI.to_string(Map.get(assigns, :current_entity_uri) || URI.parse("entity://user/admin"))
+        URI.to_string(Map.get(assigns, :current_entity_uri) || URI.parse("entity://user/default/admin"))
       end)
 
     ~H"""

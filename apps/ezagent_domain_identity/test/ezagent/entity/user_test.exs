@@ -3,12 +3,12 @@ defmodule Ezagent.Entity.UserTest do
   alias Ezagent.Entity.User
   alias Ezagent.Capability
 
-  test "admin_uri/0 returns entity://user/admin" do
+  test "admin_uri/0 returns entity://user/default/admin" do
     uri = User.admin_uri()
     assert %URI{} = uri
     assert uri.scheme == "entity"
     assert uri.host == "user"
-    assert uri.path == "/admin"
+    assert uri.path == "/default/admin"
   end
 
   test "admin_caps/0 returns a MapSet containing exactly the structural all-caps cap" do
@@ -32,7 +32,7 @@ defmodule Ezagent.Entity.UserTest do
     assert Capability.matches?(cap, %{
              kind: :random,
              behavior: SomeMod,
-             instance: URI.parse("entity://agent/test_anything")
+             instance: URI.parse("entity://agent/default/test_anything")
            })
   end
 

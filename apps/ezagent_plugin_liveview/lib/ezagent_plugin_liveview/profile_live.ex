@@ -16,7 +16,7 @@ defmodule EzagentPluginLiveview.ProfileLive do
 
   @impl true
   def mount(_params, _session, socket) do
-    entity_uri = socket.assigns.current_entity_uri || URI.parse("entity://user/admin")
+    entity_uri = socket.assigns.current_entity_uri || URI.parse("entity://user/default/admin")
     entity_uri_str = URI.to_string(entity_uri)
 
     {:ok,

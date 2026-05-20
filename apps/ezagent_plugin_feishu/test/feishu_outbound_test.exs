@@ -46,7 +46,7 @@ defmodule EzagentPluginFeishu.Behavior.FeishuOutboundTest do
 
     msg =
       Message.new(
-        URI.parse("entity://user/admin"),
+        URI.parse("entity://user/default/admin"),
         %{text: "hello"}
       )
 
@@ -66,7 +66,7 @@ defmodule EzagentPluginFeishu.Behavior.FeishuOutboundTest do
     chat_id = "oc_echo_#{System.unique_integer([:positive])}"
     {:ok, _} = SessionBinding.bind(chat_id, URI.to_string(session_uri))
 
-    sender = URI.parse("entity://user/admin")
+    sender = URI.parse("entity://user/default/admin")
 
     # Body carries the origin tag that InboundDispatcher stamps on
     # every webhook-built message. FeishuOutbound must short-circuit
@@ -89,7 +89,7 @@ defmodule EzagentPluginFeishu.Behavior.FeishuOutboundTest do
     chat_id = "oc_strkey_#{System.unique_integer([:positive])}"
     {:ok, _} = SessionBinding.bind(chat_id, URI.to_string(session_uri))
 
-    sender = URI.parse("entity://user/admin")
+    sender = URI.parse("entity://user/default/admin")
 
     # Simulate a message reloaded from MessageStore (Message.new
     # requires atom-keyed body, but MessageStore JSON-decodes with

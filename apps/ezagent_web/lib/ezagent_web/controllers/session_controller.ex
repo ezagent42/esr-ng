@@ -226,7 +226,7 @@ defmodule EzagentWeb.SessionController do
       <form method="post" action="/login/credentials">
         <input type="hidden" name="_csrf_token" value="{{CSRF}}">
         <label for="entity_uri">Username or entity URI</label>
-        <input type="text" id="entity_uri" name="entity_uri" placeholder="admin   or   entity://user/admin" required autofocus>
+        <input type="text" id="entity_uri" name="entity_uri" placeholder="admin   or   entity://user/default/admin" required autofocus>
         <label for="secret">Password or token</label>
         <input type="password" id="secret" name="secret" required>
         <button type="submit">Sign in</button>
@@ -238,10 +238,10 @@ defmodule EzagentWeb.SessionController do
       {{EMAIL_SECTION}}
 
       <p class="hint">
-        Bare handles (<code>admin</code>) resolve to <code>entity://user/admin</code>.
+        Bare handles (<code>admin</code>) resolve to <code>entity://user/default/admin</code>.
         Full URIs (<code>entity://user/&lt;name&gt;</code> /
         <code>entity://agent/&lt;flavor&gt;_&lt;name&gt;</code>) also accepted.
-        First-time admin: <code>mix ezagent.user.set_password entity://user/admin --password X</code>.
+        First-time admin: <code>mix ezagent.user.set_password entity://user/default/admin --password X</code>.
       </p>
     </div>
   </body>

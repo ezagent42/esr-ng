@@ -4,7 +4,7 @@ defmodule Ezagent.Routing.MatcherTest do
   alias Ezagent.Message
 
   defp msg(opts \\ []) do
-    sender = Keyword.get(opts, :sender, URI.new!("entity://user/admin"))
+    sender = Keyword.get(opts, :sender, URI.new!("entity://user/default/admin"))
     mentions = Keyword.get(opts, :mentions, [])
     text = Keyword.get(opts, :text, "hello world")
     Message.new(sender, %{text: text, attachments: []}, mentions: mentions)
@@ -12,31 +12,31 @@ defmodule Ezagent.Routing.MatcherTest do
 
   describe "mention/1" do
     test "matches when URI present in mentions" do
-      target = URI.new!("entity://agent/test_cc-builder")
+      target = URI.new!("entity://agent/default/test_cc-builder")
       m = msg(mentions: [target])
 
       assert Matcher.match?(Matcher.mention(target), m)
-      assert Matcher.match?(Matcher.mention("entity://agent/test_cc-builder"), m)
+      assert Matcher.match?(Matcher.mention("entity://agent/default/test_cc-builder"), m)
     end
 
     test "no match when mentions empty" do
-      refute Matcher.match?(Matcher.mention("entity://agent/test_cc-builder"), msg())
+      refute Matcher.match?(Matcher.mention("entity://agent/default/test_cc-builder"), msg())
     end
 
     test "no match for different URI" do
-      m = msg(mentions: [URI.new!("entity://agent/test_other")])
-      refute Matcher.match?(Matcher.mention("entity://agent/test_cc-builder"), m)
+      m = msg(mentions: [URI.new!("entity://agent/default/test_other")])
+      refute Matcher.match?(Matcher.mention("entity://agent/default/test_cc-builder"), m)
     end
   end
 
   describe "from/1" do
     test "matches when sender == uri" do
-      m = msg(sender: URI.new!("entity://agent/test_cc-builder"))
-      assert Matcher.match?(Matcher.from("entity://agent/test_cc-builder"), m)
+      m = msg(sender: URI.new!("entity://agent/default/test_cc-builder"))
+      assert Matcher.match?(Matcher.from("entity://agent/default/test_cc-builder"), m)
     end
 
     test "no match for different sender" do
-      refute Matcher.match?(Matcher.from("entity://agent/test_cc-builder"), msg())
+      refute Matcher.match?(Matcher.from("entity://agent/default/test_cc-builder"), msg())
     end
   end
 
@@ -50,7 +50,7 @@ defmodule Ezagent.Routing.MatcherTest do
     test "handles body with string keys (loaded from store)" do
       # Simulate body returned from Ecto :map column (string keys)
       m = %Message{
-        sender: URI.new!("entity://user/admin"),
+        sender: URI.new!("entity://user/default/admin"),
         body: %{"text" => "abc"},
         mentions: [],
         inserted_at: DateTime.utc_now(),
@@ -84,8 +84,8 @@ defmodule Ezagent.Routing.MatcherTest do
   describe "to_json/1 + from_json/1 round-trip" do
     test "all 5 matchers round-trip cleanly" do
       cases = [
-        Matcher.mention("entity://user/admin"),
-        Matcher.from("entity://agent/test_cc-builder"),
+        Matcher.mention("entity://user/default/admin"),
+        Matcher.from("entity://agent/default/test_cc-builder"),
         Matcher.text_contains("hi"),
         Matcher.text_matches("^cmd"),
         Matcher.always()

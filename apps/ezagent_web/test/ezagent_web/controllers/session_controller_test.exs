@@ -40,7 +40,7 @@ defmodule EzagentWeb.SessionControllerTest do
 
   describe "POST /login/credentials" do
     test "happy path: valid creds → session set + redirect to /sessions" do
-      uri = "entity://user/login-happy-#{System.unique_integer([:positive])}"
+      uri = "entity://user/default/login-happy-#{System.unique_integer([:positive])}"
       {:ok, _} = Ezagent.Users.create(uri, "right-pw", [])
 
       conn =
@@ -53,7 +53,7 @@ defmodule EzagentWeb.SessionControllerTest do
     end
 
     test "bad password: renders unified page with inline cred error (no redirect)" do
-      uri = "entity://user/login-bad-#{System.unique_integer([:positive])}"
+      uri = "entity://user/default/login-bad-#{System.unique_integer([:positive])}"
       {:ok, _} = Ezagent.Users.create(uri, "right-pw", [])
 
       conn =
@@ -74,7 +74,7 @@ defmodule EzagentWeb.SessionControllerTest do
         build_conn()
         |> Plug.Test.init_test_session(%{})
         |> post("/login/credentials", %{
-          "entity_uri" => "entity://user/never-existed",
+          "entity_uri" => "entity://user/default/never-existed",
           "secret" => "x"
         })
 
@@ -86,10 +86,11 @@ defmodule EzagentWeb.SessionControllerTest do
     # auth but the RAW input was put into the session as :current_entity_uri.
     # On the next request RequireEntity called URI.parse("admin") → no
     # scheme → bounced to /login. Login appeared to fail to the user.
-    # Fix: store canonical "entity://user/admin", not raw "admin".
+    # Fix: store canonical "entity://user/default/admin", not raw "admin".
     test "bare handle stores CANONICAL entity:// URI in session (regression)" do
       handle = "barehandle#{System.unique_integer([:positive])}"
-      uri = "entity://user/" <> handle
+      # Phase 9 PR-2 (SPEC v3 §3): entity URIs carry workspace segment.
+      uri = "entity://user/default/" <> handle
       {:ok, _} = Ezagent.Users.create(uri, "pw", [])
 
       conn =
@@ -104,10 +105,12 @@ defmodule EzagentWeb.SessionControllerTest do
     end
 
     test "bare handle is lowercased before lookup; canonical is stored" do
-      uri = "entity://user/admincase#{System.unique_integer([:positive])}"
+      uri = "entity://user/default/admincase#{System.unique_integer([:positive])}"
       {:ok, _} = Ezagent.Users.create(uri, "pw", [])
 
-      handle = uri |> String.replace_prefix("entity://user/", "") |> String.upcase()
+      # Phase 9 PR-2 (SPEC v3 §3): canonical URI is 3-segment;
+      # bare-handle login defaults to `default` workspace.
+      handle = uri |> String.replace_prefix("entity://user/default/", "") |> String.upcase()
 
       conn =
         build_conn()
@@ -127,7 +130,8 @@ defmodule EzagentWeb.SessionControllerTest do
     # request -> assert RequireEntity passes through.
     test "round-trip: bare-handle login → next request passes RequireEntity (regression)" do
       handle = "round#{System.unique_integer([:positive])}"
-      uri = "entity://user/" <> handle
+      # Phase 9 PR-2 (SPEC v3 §3): entity URIs carry workspace segment.
+      uri = "entity://user/default/" <> handle
       {:ok, _} = Ezagent.Users.create(uri, "pw", [])
 
       login_conn =
@@ -166,10 +170,11 @@ defmodule EzagentWeb.SessionControllerTest do
     end
 
     # Regression: Allen 2026-05-20 — bare handle "admin" must be accepted as
-    # shortcut for "entity://user/admin"; session stores canonical URI.
-    test "bare handle: 'foo' → authenticates as entity://user/foo, session stores canonical URI" do
+    # shortcut for "entity://user/default/admin"; session stores canonical URI.
+    test "bare handle: 'foo' → authenticates as entity://user/default/foo, session stores canonical URI" do
       handle = "barehandle#{System.unique_integer([:positive])}"
-      uri = "entity://user/" <> handle
+      # Phase 9 PR-2 (SPEC v3 §3): entity URIs carry workspace segment.
+      uri = "entity://user/default/" <> handle
       {:ok, _} = Ezagent.Users.create(uri, "pw", [])
 
       conn =
@@ -183,11 +188,12 @@ defmodule EzagentWeb.SessionControllerTest do
 
     # Regression: Allen 2026-05-20 — bare handle case-insensitive lowercasing.
     test "bare handle is lowercased before lookup" do
-      uri = "entity://user/admincase#{System.unique_integer([:positive])}"
+      uri = "entity://user/default/admincase#{System.unique_integer([:positive])}"
       {:ok, _} = Ezagent.Users.create(uri, "pw", [])
 
-      # Compose the mixed-case handle the user might type
-      handle = uri |> String.replace_prefix("entity://user/", "") |> String.upcase()
+      # Compose the mixed-case handle the user might type. Phase 9 PR-2
+      # (SPEC v3 §3): canonical URI carries workspace segment.
+      handle = uri |> String.replace_prefix("entity://user/default/", "") |> String.upcase()
 
       conn =
         build_conn()
@@ -217,7 +223,7 @@ defmodule EzagentWeb.SessionControllerTest do
     test "DELETE /logout clears session and redirects to /login" do
       conn =
         build_conn()
-        |> Plug.Test.init_test_session(%{"current_entity_uri" => "entity://user/allen"})
+        |> Plug.Test.init_test_session(%{"current_entity_uri" => "entity://user/default/allen"})
         |> delete("/logout")
 
       assert redirected_to(conn) == "/login"

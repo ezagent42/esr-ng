@@ -56,8 +56,8 @@ defmodule EzagentDomainUi.Primitives do
   @doc """
   Monogram or icon avatar for an Entity URI.
 
-      <.avatar uri="entity://user/admin" />
-      <.avatar uri="entity://agent/cc_demo" size="md" />
+      <.avatar uri="entity://user/default/admin" />
+      <.avatar uri="entity://agent/default/cc_demo" size="md" />
   """
   attr :uri, :any, required: true
   attr :size, :string, default: "sm", values: ~w(xs sm md)
@@ -99,10 +99,14 @@ defmodule EzagentDomainUi.Primitives do
 
     {label, hue_seed} =
       case URI.new(str) do
-        {:ok, %URI{scheme: "entity", host: "user", path: "/" <> name}} ->
+        # Phase 9 PR-2 (SPEC v3 §3): entity URIs are 3-segment;
+        # extract entity_name (second path segment) for label/hue.
+        {:ok, %URI{scheme: "entity", host: "user", path: "/" <> rest}} ->
+          name = entity_name_from_path(rest)
           {String.upcase(String.first(name) || "?"), name}
 
-        {:ok, %URI{scheme: "entity", host: "agent", path: "/" <> name}} ->
+        {:ok, %URI{scheme: "entity", host: "agent", path: "/" <> rest}} ->
+          name = entity_name_from_path(rest)
           flavor = name |> String.split("_", parts: 2) |> List.first()
           {flavor |> String.first() |> String.upcase(), flavor}
 
@@ -122,6 +126,15 @@ defmodule EzagentDomainUi.Primitives do
   defp uri_to_string(%URI{} = uri), do: URI.to_string(uri)
   defp uri_to_string(s) when is_binary(s), do: s
   defp uri_to_string(_), do: ""
+
+  # Phase 9 PR-2 (SPEC v3 §3): pull the entity-name segment out of a
+  # 3-segment entity URI path (`<workspace>/<entity_name>`).
+  defp entity_name_from_path(rest) when is_binary(rest) do
+    case String.split(rest, "/", parts: 2) do
+      [_workspace, entity_name] -> entity_name
+      [name] -> name
+    end
+  end
 
   # --- tabs ------------------------------------------------------------------
 
@@ -360,7 +373,7 @@ defmodule EzagentDomainUi.Primitives do
   Monospaced pill displaying a URI.
 
       <.uri_chip uri={@current_entity_uri} />
-      <.uri_chip uri="entity://user/admin" copyable />
+      <.uri_chip uri="entity://user/default/admin" copyable />
   """
   attr :uri, :any, required: true
   attr :copyable, :boolean, default: false

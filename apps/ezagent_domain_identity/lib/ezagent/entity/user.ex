@@ -13,14 +13,16 @@ defmodule Ezagent.Entity.User do
     landed real snapshot impl; granted caps survive restart
 
   Non-admin Users (Phase 4-completion PR 4-5):
-  - Provisioned via `mix ezagent.user.create entity://user/X --password Y --caps ...`
+  - Provisioned via `mix ezagent.user.create entity://user/default/X --password Y --caps ...`
   - Authenticated via `/login` (`EzagentWeb.SessionController` +
     `Ezagent.Users.verify_password/2`)
   - Their caps live in `Ezagent.Users.caps_json` SQLite column AND mirror
     into Identity slice via `init_slice/1`
   """
 
-  @admin_uri URI.parse("entity://user/admin")
+  # Phase 9 PR-2 (SPEC v3 §3): entity URIs carry a workspace segment.
+  # Admin lives in the bootstrap `default` workspace.
+  @admin_uri URI.parse("entity://user/default/admin")
   @system_bootstrap_uri URI.parse("system://bootstrap/default")
 
   # Static granted_at — admin capability is a structural bootstrap, not
@@ -28,7 +30,7 @@ defmodule Ezagent.Entity.User do
   # deterministic.
   @admin_granted_at ~U[2026-01-01 00:00:00Z]
 
-  @doc "Bootstrap admin principal URI: `entity://user/admin`."
+  @doc "Bootstrap admin principal URI: `entity://user/default/admin`."
   @spec admin_uri() :: URI.t()
   def admin_uri, do: @admin_uri
 
@@ -69,7 +71,7 @@ defmodule Ezagent.Entity.User do
   instance"; whether the message actually lands depends on session
   membership and routing rules, not on this cap. Admin's wildcard
   `admin_caps/0` is the only true escape hatch, and is granted only
-  to `entity://user/admin`.
+  to `entity://user/default/admin`.
 
   **Behavior wildcard**: `:any` follows the existing project
   convention. Modeling specific behaviors here would require

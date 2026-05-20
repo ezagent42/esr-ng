@@ -35,7 +35,7 @@ defmodule EzagentCli.Integration.CliLvSameServerInvariantTest do
     session_name = "cli-same-server-test-#{System.unique_integer([:positive])}"
     session_uri = URI.parse("session://" <> session_name)
     # PR-A: agent URIs include a type segment.
-    member_uri = URI.parse("entity://agent/cc_cli-test-member-#{System.unique_integer([:positive])}")
+    member_uri = URI.parse("entity://agent/default/cc_cli-test-member-#{System.unique_integer([:positive])}")
 
     # Spawn session in this BEAM
     {:ok, session_pid} = Ezagent.SpawnRegistry.spawn(session_uri)

@@ -58,15 +58,23 @@ defmodule EzagentPluginLiveview.IdentitiesLive do
       Ezagent.KindRegistry.list_all()
       |> Enum.flat_map(fn {uri_str, pid} ->
         case URI.new(uri_str) do
-          {:ok, %URI{scheme: "entity", host: host, path: "/" <> name} = uri}
+          {:ok, %URI{scheme: "entity", host: host, path: "/" <> rest} = uri}
           when host in ["user", "agent"] ->
+            # Phase 9 PR-2 (SPEC v3 §3): entity URIs are 3-segment;
+            # extract entity_name (second path segment) for display.
+            entity_name =
+              case String.split(rest, "/", parts: 2) do
+                [_workspace, name] -> name
+                [name] -> name
+              end
+
             [
               %{
                 uri: uri,
                 uri_str: uri_str,
                 host: host,
-                name: name,
-                flavor: flavor_for(host, name),
+                name: entity_name,
+                flavor: flavor_for(host, entity_name),
                 pid: pid,
                 alive: is_pid(pid) and Process.alive?(pid)
               }
@@ -116,7 +124,7 @@ defmodule EzagentPluginLiveview.IdentitiesLive do
   def render(assigns) do
     assigns =
       assign_new(assigns, :current_entity_uri_str, fn ->
-        URI.to_string(Map.get(assigns, :current_entity_uri) || URI.parse("entity://user/admin"))
+        URI.to_string(Map.get(assigns, :current_entity_uri) || URI.parse("entity://user/default/admin"))
       end)
 
     ~H"""

@@ -102,7 +102,7 @@ defmodule EzagentWeb.HomeLive do
   # Echo's :receive action emits a chat reply (PR-J), so the user
   # gets a working ping-pong loop out of the box.
   defp join_echo_agent(session_uri, caller_uri) do
-    echo_uri = URI.parse("entity://agent/echo_default")
+    echo_uri = URI.parse("entity://agent/default/echo_default")
     # Make sure the echo Kind is live (spawn is idempotent — returns
     # `{:error, {:already_started, _}}` if already up). Spawn happens
     # in the echo plugin's Application.start; this is a defensive
@@ -197,7 +197,7 @@ defmodule EzagentWeb.HomeLive do
               <span class="text-xs text-zinc-700 dark:text-zinc-300">
                 Include echo demo agent
                 <span class="block text-zinc-500">
-                  Adds <span class="font-mono">entity://agent/echo_default</span> as a session member so you can verify the chat round-trip works.
+                  Adds <span class="font-mono">entity://agent/default/echo_default</span> as a session member so you can verify the chat round-trip works.
                 </span>
               </span>
             </label>

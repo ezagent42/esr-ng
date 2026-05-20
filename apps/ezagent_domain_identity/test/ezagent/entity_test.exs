@@ -13,7 +13,7 @@ defmodule Ezagent.EntityTest do
   - anything else → `{:error, {:unsupported_entity_uri, uri}}`
 
   These tests assume PR #141 has merged (entity:// scheme registered;
-  admin URI is `entity://user/admin`).
+  admin URI is `entity://user/default/admin`).
   """
   use EzagentCore.DataCase, async: false
 
@@ -22,7 +22,7 @@ defmodule Ezagent.EntityTest do
 
   describe "authenticate/2 — user URI + password (bcrypt path)" do
     test "happy: known user + correct password → {:ok, %{caps: caps}}" do
-      uri_str = "entity://user/auth-test-#{System.unique_integer([:positive])}"
+      uri_str = "entity://user/default/auth-test-#{System.unique_integer([:positive])}"
       {:ok, _} = Users.create(uri_str, "correct-password", [])
 
       uri = URI.parse(uri_str)
@@ -34,7 +34,7 @@ defmodule Ezagent.EntityTest do
     end
 
     test "wrong password → {:error, :invalid_credentials}" do
-      uri_str = "entity://user/auth-wrong-pw-#{System.unique_integer([:positive])}"
+      uri_str = "entity://user/default/auth-wrong-pw-#{System.unique_integer([:positive])}"
       {:ok, _} = Users.create(uri_str, "correct-password", [])
 
       uri = URI.parse(uri_str)
@@ -43,14 +43,14 @@ defmodule Ezagent.EntityTest do
     end
 
     test "unknown user → {:error, :no_such_user}" do
-      uri = URI.parse("entity://user/never-existed-#{System.unique_integer([:positive])}")
+      uri = URI.parse("entity://user/default/never-existed-#{System.unique_integer([:positive])}")
       assert {:error, :no_such_user} = Entity.authenticate(uri, "anything")
     end
 
-    test "admin (canonical entity://user/admin) + admin password works" do
+    test "admin (canonical entity://user/default/admin) + admin password works" do
       # Reseed sets admin's password to a known value via mix task —
       # this test mints fresh here to avoid coupling.
-      admin_uri_str = "entity://user/admin"
+      admin_uri_str = "entity://user/default/admin"
 
       case Users.get_by_uri(admin_uri_str) do
         nil -> {:ok, _} = Users.create(admin_uri_str, "test-admin-pw", [])
@@ -63,7 +63,7 @@ defmodule Ezagent.EntityTest do
 
   describe "authenticate/2 — agent URI + token (entity_tokens path)" do
     test "happy: agent + valid token → {:ok, %{caps: caps}}" do
-      uri = URI.parse("entity://agent/cc_auth-test-#{System.unique_integer([:positive])}")
+      uri = URI.parse("entity://agent/default/cc_auth-test-#{System.unique_integer([:positive])}")
       {plain_token, _row} = Ezagent.Entity.Token.mint(uri, label: "test-token")
 
       assert {:ok, %{caps: caps}} = Entity.authenticate(uri, plain_token)
@@ -71,14 +71,14 @@ defmodule Ezagent.EntityTest do
     end
 
     test "wrong token → {:error, :invalid_credentials}" do
-      uri = URI.parse("entity://agent/cc_wrong-token-#{System.unique_integer([:positive])}")
+      uri = URI.parse("entity://agent/default/cc_wrong-token-#{System.unique_integer([:positive])}")
       {_plain, _row} = Ezagent.Entity.Token.mint(uri, label: "real")
 
       assert {:error, :invalid_credentials} = Entity.authenticate(uri, "fake-token-string")
     end
 
     test "unknown agent (no tokens) → {:error, :no_such_entity}" do
-      uri = URI.parse("entity://agent/cc_never-#{System.unique_integer([:positive])}")
+      uri = URI.parse("entity://agent/default/cc_never-#{System.unique_integer([:positive])}")
       assert {:error, :no_such_entity} = Entity.authenticate(uri, "any-token")
     end
   end

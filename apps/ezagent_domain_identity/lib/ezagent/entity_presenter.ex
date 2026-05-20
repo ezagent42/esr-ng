@@ -7,7 +7,7 @@ defmodule Ezagent.EntityPresenter do
   lists, message history — MUST use `display_many/1` so display-name
   lookup stays O(1) queries, never O(rows). (Design铁律 #2.)
 
-  Falls back to the URI path segment (`entity://user/admin` → `admin`)
+  Falls back to the URI path segment (`entity://user/default/admin` → `admin`)
   when no `entity_profiles` row exists, so unprofiled entities (e.g.
   the bootstrap admin, freshly-spawned agents) still render sanely.
   """
@@ -48,8 +48,20 @@ defmodule Ezagent.EntityPresenter do
 
   defp fallback(uri_str) do
     case URI.new(uri_str) do
-      {:ok, %URI{path: "/" <> name}} when name != "" -> name
-      _ -> uri_str
+      {:ok, %URI{scheme: "entity", path: "/" <> rest}} when rest != "" ->
+        # Phase 9 PR-2 (SPEC v3 §3): entity URIs are 3-segment —
+        # `/<workspace>/<entity_name>`. Display only the entity name;
+        # workspace is shown elsewhere.
+        case String.split(rest, "/", parts: 2) do
+          [_workspace, name] when name != "" -> name
+          _ -> rest
+        end
+
+      {:ok, %URI{path: "/" <> name}} when name != "" ->
+        name
+
+      _ ->
+        uri_str
     end
   end
 

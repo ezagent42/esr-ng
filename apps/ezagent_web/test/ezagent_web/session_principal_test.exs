@@ -13,15 +13,15 @@ defmodule EzagentWeb.SessionPrincipalTest do
 
   describe "canonicalize/1" do
     test "full entity URIs pass through unchanged" do
-      assert SessionPrincipal.canonicalize("entity://user/admin") == "entity://user/admin"
-      assert SessionPrincipal.canonicalize("entity://agent/echo_default") == "entity://agent/echo_default"
+      assert SessionPrincipal.canonicalize("entity://user/default/admin") == "entity://user/default/admin"
+      assert SessionPrincipal.canonicalize("entity://agent/default/echo_default") == "entity://agent/default/echo_default"
     end
 
     test "bare handle is normalized to entity://user/<handle> (lowercased)" do
-      assert SessionPrincipal.canonicalize("admin") == "entity://user/admin"
-      assert SessionPrincipal.canonicalize("ADMIN") == "entity://user/admin"
-      assert SessionPrincipal.canonicalize("  allen  ") == "entity://user/allen"
-      assert SessionPrincipal.canonicalize("user_123") == "entity://user/user_123"
+      assert SessionPrincipal.canonicalize("admin") == "entity://user/default/admin"
+      assert SessionPrincipal.canonicalize("ADMIN") == "entity://user/default/admin"
+      assert SessionPrincipal.canonicalize("  allen  ") == "entity://user/default/allen"
+      assert SessionPrincipal.canonicalize("user_123") == "entity://user/default/user_123"
     end
 
     test "raises ArgumentError on inputs that don't yield a valid entity URI" do
@@ -61,7 +61,7 @@ defmodule EzagentWeb.SessionPrincipalTest do
         |> Plug.Test.init_test_session(%{})
         |> SessionPrincipal.put("admin")
 
-      assert Plug.Conn.get_session(conn, :current_entity_uri) == "entity://user/admin"
+      assert Plug.Conn.get_session(conn, :current_entity_uri) == "entity://user/default/admin"
     end
 
     test "rotates the session ID (fixation defence)" do
@@ -75,7 +75,7 @@ defmodule EzagentWeb.SessionPrincipalTest do
       # private session options — we can't fully observe ID rotation
       # in a test harness, but the operation must succeed and the
       # principal slot is set.
-      assert Plug.Conn.get_session(conn_after, :current_entity_uri) == "entity://user/admin"
+      assert Plug.Conn.get_session(conn_after, :current_entity_uri) == "entity://user/default/admin"
     end
 
     test "raises on invalid input — same boundary as canonicalize/1" do

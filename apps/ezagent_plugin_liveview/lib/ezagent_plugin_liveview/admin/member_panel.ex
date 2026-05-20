@@ -4,7 +4,7 @@ defmodule EzagentPluginLiveview.Admin.MemberPanel do
   Stateless — parent (AdminLive) reads members from the Session Kind
   via :sys.get_state and refreshes on member_joined/member_left/member_offline.
 
-  Phase 8b — for every `entity://agent/cc_*` member, renders a small
+  Phase 8b — for every `entity://agent/default/cc_*` member, renders a small
   PTY (🖥️) button next to the URI. Click dispatches
   `switch_to_pty_for_agent` which sets the SessionEditor view-mode
   to `:pty` and binds xterm.js to the chosen agent.
@@ -99,9 +99,9 @@ defmodule EzagentPluginLiveview.Admin.MemberPanel do
     end
   end
 
-  # Phase 8b — `entity://agent/cc_<name>` is the cc-managed agent
+  # Phase 8b — `entity://agent/default/cc_<name>` is the cc-managed agent
   # convention (PR #149 flavor-prefix scheme).
-  defp cc_agent_uri?("entity://agent/cc_" <> _), do: true
+  defp cc_agent_uri?("entity://agent/default/cc_" <> _), do: true
   defp cc_agent_uri?(_), do: false
 
   defp member_status_class(true), do: "text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold"

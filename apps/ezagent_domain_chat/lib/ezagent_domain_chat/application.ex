@@ -553,16 +553,19 @@ defmodule EzagentDomainChat.Application do
     _ -> :error
   end
 
-  defp lookup_via_flavor_prefix(%URI{host: "agent", path: "/" <> name}) when name != "" do
-    case String.split(name, "_", parts: 2) do
-      [flavor, rest] when flavor != "" and rest != "" ->
-        case kind_module_from_flavor(flavor) do
-          nil -> :error
-          mod -> {:ok, mod}
-        end
-
-      _ ->
-        :error
+  defp lookup_via_flavor_prefix(%URI{host: "agent", path: "/" <> rest}) when rest != "" do
+    # Phase 9 PR-2 (SPEC v3 §3): entity URI is 3-segment
+    # `/<workspace>/<entity_name>`; flavor lives in entity_name prefix.
+    with [_workspace, entity_name] when entity_name != "" <-
+           String.split(rest, "/", parts: 2),
+         [flavor, suffix] when flavor != "" and suffix != "" <-
+           String.split(entity_name, "_", parts: 2) do
+      case kind_module_from_flavor(flavor) do
+        nil -> :error
+        mod -> {:ok, mod}
+      end
+    else
+      _ -> :error
     end
   end
 

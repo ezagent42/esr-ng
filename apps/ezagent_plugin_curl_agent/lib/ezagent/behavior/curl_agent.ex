@@ -6,7 +6,7 @@ defmodule Ezagent.Behavior.CurlAgent do
 
   Registered for `(Ezagent.Entity.CurlAgent, :receive)` in
   `EzagentPluginCurlAgent.Application`. The chat router targets
-  `entity://agent/curl_<name>?action=chat.receive`; the dispatcher pattern-
+  `entity://agent/default/curl_<name>?action=chat.receive`; the dispatcher pattern-
   matches behavior_module to land here.
 
   ## Slice (state_slice :curl_agent)
@@ -69,7 +69,7 @@ defmodule Ezagent.Behavior.CurlAgent do
       model: Map.get(args, :model, "deepseek-chat"),
       system_prompt: Map.get(args, :system_prompt),
       max_history: Map.get(args, :max_history, 20),
-      owner_uri: Map.get(args, :owner_uri, URI.parse("entity://user/admin")),
+      owner_uri: Map.get(args, :owner_uri, URI.parse("entity://user/default/admin")),
       conversation: [],
       last_error: nil,
       last_tokens: nil

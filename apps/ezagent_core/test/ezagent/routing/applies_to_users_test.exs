@@ -14,10 +14,10 @@ defmodule Ezagent.Routing.AppliesToUsersTest do
   alias Ezagent.Routing.{Matcher, Resolver, RuleStore}
 
   @session_uri URI.new!("session://test")
-  @user_a URI.new!("entity://user/alice")
-  @user_b URI.new!("entity://user/bob")
-  @recv_a URI.new!("entity://user/recv-a")
-  @recv_b URI.new!("entity://user/recv-b")
+  @user_a URI.new!("entity://user/default/alice")
+  @user_b URI.new!("entity://user/default/bob")
+  @recv_a URI.new!("entity://user/default/recv-a")
+  @recv_b URI.new!("entity://user/default/recv-b")
 
   # Per-test unique table — declared by the test pid (owner), so puts
   # in this test succeed. Table dies with test pid — no cross-test
@@ -75,7 +75,7 @@ defmodule Ezagent.Routing.AppliesToUsersTest do
 
     msg_alice = Message.new(@user_a, %{text: "hi"})
     msg_bob = Message.new(@user_b, %{text: "hi"})
-    msg_other = Message.new(URI.new!("entity://user/carol"), %{text: "hi"})
+    msg_other = Message.new(URI.new!("entity://user/default/carol"), %{text: "hi"})
 
     assert Resolver.resolve(msg_alice, @session_uri, []) != []
     assert Resolver.resolve(msg_bob, @session_uri, []) != []

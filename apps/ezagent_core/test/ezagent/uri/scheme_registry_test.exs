@@ -48,7 +48,7 @@ defmodule Ezagent.URI.SchemeRegistryTest do
 
   describe "Ezagent.URI.parse!/1 — SchemeRegistry-backed" do
     test "accepts a registered scheme" do
-      assert %URI{} = Ezagent.URI.parse!("entity://user/admin")
+      assert %URI{} = Ezagent.URI.parse!("entity://user/default/admin")
     end
 
     test "rejects an unregistered scheme with clear error" do

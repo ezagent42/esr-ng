@@ -20,7 +20,7 @@ defmodule EzagentCore.Repo.Migrations.Pr141SchemeMigrationCleanRebuild do
 
   Drops the SQLite file, recreates it, replays every migration
   (this marker included) starting from a clean slate. The admin
-  User seed in `phase4_users` now writes `entity://user/admin`
+  User seed in `phase4_users` now writes `entity://user/default/admin`
   directly (PR #141 in-place rewrite of the seed string).
   """
 

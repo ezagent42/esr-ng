@@ -13,14 +13,14 @@ defmodule EzagentCore.Repo.Migrations.Phase4Users do
 
     # Seed admin row. caps_json is empty; admin uses User.admin_caps/0
     # at runtime (structural, not data-driven). password_hash is NULL
-    # initially — must be set via `mix ezagent.user.set_password entity://user/admin --password X`
+    # initially — must be set via `mix ezagent.user.set_password entity://user/default/admin --password X`
     # before /login accepts the admin (per Spec 05 Q-MU-1).
     execute """
             INSERT INTO users (uri, password_hash, caps_json, inserted_at, updated_at)
-            VALUES ('entity://user/admin', NULL, '[]',
+            VALUES ('entity://user/default/admin', NULL, '[]',
                     strftime('%Y-%m-%d %H:%M:%f', 'now'),
                     strftime('%Y-%m-%d %H:%M:%f', 'now'))
             """,
-            "DELETE FROM users WHERE uri = 'entity://user/admin'"
+            "DELETE FROM users WHERE uri = 'entity://user/default/admin'"
   end
 end

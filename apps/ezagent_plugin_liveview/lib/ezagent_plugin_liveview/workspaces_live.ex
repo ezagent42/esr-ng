@@ -76,7 +76,7 @@ defmodule EzagentPluginLiveview.WorkspacesLive do
     # "no two header types" rule.
     assigns =
       assign_new(assigns, :current_entity_uri_str, fn ->
-        URI.to_string(assigns.current_entity_uri || URI.parse("entity://user/admin"))
+        URI.to_string(assigns.current_entity_uri || URI.parse("entity://user/default/admin"))
       end)
 
     ~H"""

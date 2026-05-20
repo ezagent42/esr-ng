@@ -5,8 +5,8 @@ defmodule Mix.Tasks.Ezagent.User.Token do
   §5.12).
 
   Replaces the old per-user-only `cli_token` flow with entity-agnostic
-  token minting — works for any `entity://user/X` or
-  `entity://agent/Y_Z` URI.
+  token minting — works for any `entity://user/default/X` or
+  `entity://agent/default/Y_Z` URI.
 
   ## Usage
 
@@ -16,10 +16,10 @@ defmodule Mix.Tasks.Ezagent.User.Token do
 
   ## Examples
 
-      mix ezagent.user.token entity://user/admin --mint --label cli-laptop
-      mix ezagent.user.token entity://agent/cc_demo --mint
-      mix ezagent.user.token entity://user/admin --list
-      mix ezagent.user.token entity://user/admin --revoke 17
+      mix ezagent.user.token entity://user/default/admin --mint --label cli-laptop
+      mix ezagent.user.token entity://agent/default/cc_demo --mint
+      mix ezagent.user.token entity://user/default/admin --list
+      mix ezagent.user.token entity://user/default/admin --revoke 17
 
   ## After minting
 
