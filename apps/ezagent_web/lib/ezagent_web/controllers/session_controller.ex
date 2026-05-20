@@ -152,13 +152,6 @@ defmodule EzagentWeb.SessionController do
       <p class="brand">ezagent</p>
       <h1>Sign in</h1>
       {{ERROR}}
-      <%!-- Phase 8c follow-up (Allen 2026-05-20): form posts to
-            /login/credentials, NOT /login (which is the email magic-link
-            endpoint and would silently re-render the email page).
-            Field accepts bare handle ("admin") OR full URI
-            ("entity://user/admin") — server normalizes via
-            normalize_principal/1. Display name is intentionally
-            not accepted: not unique. --%>
       <form method="post" action="/login/credentials">
         <input type="hidden" name="_csrf_token" value="{{CSRF}}">
         <label for="entity_uri">Username or Entity URI</label>
