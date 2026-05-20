@@ -108,7 +108,7 @@ defmodule EzagentDomainUi.IdeShell do
         :for={item <- @items}
         href={item.path}
         class={[
-          "w-10 h-10 flex items-center justify-center rounded-md transition-colors",
+          "relative w-10 h-10 flex items-center justify-center rounded-md transition-colors",
           item.key == @active_key
             && "bg-white shadow-sm text-zinc-900"
             || "text-zinc-500 hover:bg-zinc-200 hover:text-zinc-700"
@@ -116,6 +116,15 @@ defmodule EzagentDomainUi.IdeShell do
         title={item.label}
         aria-label={item.label}
       >
+        <%!-- Phase 8c PR-C: signature accent — burnt orange left rail on
+              the active Activity. Sharp accent vs the otherwise neutral
+              palette (per skill: "Dominant colors with sharp accents
+              outperform timid, evenly-distributed palettes"). --%>
+        <span
+          :if={item.key == @active_key}
+          class="absolute left-0 top-1.5 bottom-1.5 w-0.5 rounded-r bg-orange-600"
+          aria-hidden="true"
+        />
         <.icon name={item.icon} size="md" />
       </a>
     </nav>
@@ -228,7 +237,13 @@ defmodule EzagentDomainUi.IdeShell do
     <div class="relative">
       <button
         type="button"
-        phx-click={JS.toggle(to: "##{@menu_id}")}
+        phx-click={
+          JS.toggle(
+            to: "##{@menu_id}",
+            in: {"ease-out duration-150", "opacity-0 -translate-y-1", "opacity-100 translate-y-0"},
+            out: {"ease-in duration-100", "opacity-100 translate-y-0", "opacity-0 -translate-y-1"}
+          )
+        }
         title="Your profile"
         aria-label="Your profile"
         class="flex items-center"
@@ -238,7 +253,7 @@ defmodule EzagentDomainUi.IdeShell do
 
       <div
         id={@menu_id}
-        class="hidden absolute right-0 top-full mt-1 w-64 bg-white border border-zinc-200 rounded-md shadow-lg z-40"
+        class="hidden absolute right-0 top-full mt-1 w-64 bg-white border border-zinc-200 rounded-md shadow-lg z-40 transition transform"
       >
         <div class="px-3 py-3 border-b border-zinc-200 flex items-center gap-2">
           <.avatar uri={@current_entity_uri} size="md" />
@@ -259,6 +274,36 @@ defmodule EzagentDomainUi.IdeShell do
             href="/settings"
             class="block px-3 py-1.5 text-xs text-zinc-700 hover:bg-zinc-100"
           >Settings</a>
+        </div>
+        <%!-- Phase 8c PR-C: dark mode toggle. daisyUI infrastructure
+              already exists in root.html.heex (data-theme + localStorage +
+              a window listener for `phx:set-theme`). Each button
+              dispatches that event with its `data-phx-theme` payload. --%>
+        <div class="border-t border-zinc-200 py-1">
+          <button
+            type="button"
+            data-phx-theme="light"
+            phx-click={JS.dispatch("phx:set-theme")}
+            class="w-full text-left px-3 py-1.5 text-xs text-zinc-700 hover:bg-zinc-100 flex items-center gap-2"
+          >
+            <.icon name="sun" size="xs" /> Light theme
+          </button>
+          <button
+            type="button"
+            data-phx-theme="dark"
+            phx-click={JS.dispatch("phx:set-theme")}
+            class="w-full text-left px-3 py-1.5 text-xs text-zinc-700 hover:bg-zinc-100 flex items-center gap-2"
+          >
+            <.icon name="moon" size="xs" /> Dark theme
+          </button>
+          <button
+            type="button"
+            data-phx-theme="system"
+            phx-click={JS.dispatch("phx:set-theme")}
+            class="w-full text-left px-3 py-1.5 text-xs text-zinc-700 hover:bg-zinc-100 flex items-center gap-2"
+          >
+            <.icon name="settings" size="xs" /> System
+          </button>
         </div>
         <div class="border-t border-zinc-200 py-1">
           <form action="/logout" method="post" class="block">

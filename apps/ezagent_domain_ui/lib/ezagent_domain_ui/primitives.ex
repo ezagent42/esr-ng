@@ -64,17 +64,28 @@ defmodule EzagentDomainUi.Primitives do
   attr :class, :string, default: ""
 
   def avatar(assigns) do
-    {label, bg} = avatar_label_and_color(assigns.uri)
-    assigns = assign(assigns, :label, label) |> assign(:bg, bg)
+    # Phase 8c PR-C — procedural avatar (Allen 2026-05-20). Each entity
+    # gets a unique 2-color conic gradient derived from a hash of its
+    # URI seed, with a single-letter monogram on top. No two entities
+    # look alike, but the palette stays in a curated zone (saturated
+    # mid-tones, no purple-on-white "AI slop").
+    {label, hue1, hue2} = avatar_label_and_hues(assigns.uri)
+
+    assigns =
+      assigns
+      |> assign(:label, label)
+      |> assign(:bg_style,
+        "background: conic-gradient(from 220deg at 30% 30%, hsl(#{hue1} 70% 52%) 0%, hsl(#{hue2} 65% 45%) 100%);"
+      )
 
     ~H"""
     <span
+      style={@bg_style}
       class={[
         "inline-flex items-center justify-center rounded-full font-medium text-white shrink-0",
         @size == "xs" && "w-4 h-4 text-[8px]",
         @size == "sm" && "w-6 h-6 text-[10px]",
         @size == "md" && "w-8 h-8 text-xs",
-        @bg,
         @class
       ]}
     >
@@ -83,10 +94,10 @@ defmodule EzagentDomainUi.Primitives do
     """
   end
 
-  defp avatar_label_and_color(uri) do
+  defp avatar_label_and_hues(uri) do
     str = uri_to_string(uri)
 
-    {label, color_seed} =
+    {label, hue_seed} =
       case URI.new(str) do
         {:ok, %URI{scheme: "entity", host: "user", path: "/" <> name}} ->
           {String.upcase(String.first(name) || "?"), name}
@@ -102,21 +113,11 @@ defmodule EzagentDomainUi.Primitives do
           {"?", "fallback"}
       end
 
-    {label, avatar_bg(color_seed)}
+    hue1 = :erlang.phash2({hue_seed, :h1}, 360)
+    # Offset 2nd hue 80-160° away for visible contrast
+    hue2 = rem(hue1 + 80 + :erlang.phash2({hue_seed, :h2}, 80), 360)
+    {label, hue1, hue2}
   end
-
-  defp avatar_bg(seed) when is_binary(seed) do
-    case :erlang.phash2(seed, 6) do
-      0 -> "bg-blue-500"
-      1 -> "bg-emerald-500"
-      2 -> "bg-amber-500"
-      3 -> "bg-rose-500"
-      4 -> "bg-violet-500"
-      _ -> "bg-zinc-500"
-    end
-  end
-
-  defp avatar_bg(_), do: "bg-zinc-500"
 
   defp uri_to_string(%URI{} = uri), do: URI.to_string(uri)
   defp uri_to_string(s) when is_binary(s), do: s
@@ -499,6 +500,8 @@ defmodule EzagentDomainUi.Primitives do
   defp heroicon_for("plus"), do: "plus"
   defp heroicon_for("bug"), do: "bug-ant"
   defp heroicon_for("dashboard"), do: "rectangle-group"
+  defp heroicon_for("sun"), do: "sun"
+  defp heroicon_for("moon"), do: "moon"
   defp heroicon_for(_), do: nil
 
   defp text_fallback("dot"), do: "•"
