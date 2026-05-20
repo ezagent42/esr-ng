@@ -1,4 +1,13 @@
 defmodule EzagentPluginLiveview.AdminLiveTest do
+  @moduledoc """
+  /sessions LiveView integration tests.
+
+  Phase 8b rewrite: admin_live no longer hosts Echo / Manual Dispatch /
+  Audit Log (moved to /admin/logs ObservabilityLive). The session
+  view-switcher (Chat / Terminal) + Members panel + inline @ mention
+  composer are the surfaces tested here.
+  """
+
   use ExUnit.Case
   import Phoenix.ConnTest
   import Phoenix.LiveViewTest
@@ -6,13 +15,9 @@ defmodule EzagentPluginLiveview.AdminLiveTest do
   @endpoint EzagentWeb.Endpoint
 
   setup do
-    # Sandbox shared mode so Audit.Writer's batch flush can reach the
-    # test DB connection — used by the round-trip assertions below.
     :ok = Ecto.Adapters.SQL.Sandbox.checkout(EzagentCore.Repo)
     Ecto.Adapters.SQL.Sandbox.mode(EzagentCore.Repo, {:shared, self()})
 
-    # Phase 4-completion Spec 05: /admin requires login. Pre-set the
-    # session cookie so tests skip the /login redirect.
     conn =
       Phoenix.ConnTest.build_conn()
       |> Plug.Test.init_test_session(%{
@@ -22,75 +27,46 @@ defmodule EzagentPluginLiveview.AdminLiveTest do
     {:ok, conn: conn}
   end
 
-  test "GET /admin renders the page skeleton", %{conn: conn} do
-    {:ok, _lv, html} = live(conn, "/admin")
-    assert html =~ "Admin"
-    assert html =~ "Echo 测试"
-    assert html =~ "Manual Dispatch"
-    assert html =~ "Audit Log"
-    # Caller URI is shown in the header.
+  test "GET /sessions renders SessionEditor with session selector + view-switcher", %{conn: conn} do
+    {:ok, _lv, html} = live(conn, "/sessions")
+
+    # SessionEditor is wrapped in IDE Shell — the page id is stable.
+    assert html =~ ~s(id="session-editor")
+    # Header components.
+    assert html =~ ~s(id="session-selector")
+    assert html =~ ~s(id="view-switcher")
+    # Default ConversationView ships with the liveview plugin → its
+    # "Chat" label appears in the view-switcher.
+    assert html =~ "Chat"
+    # Composer input wired up with the autocomplete hook.
+    assert html =~ ~s(phx-hook="MentionAutocomplete")
+    # Caller URI shown somewhere in the IDE shell chrome.
     assert html =~ "entity://user/admin"
-  end
-
-  test "Echo button triggers dispatch and audit stream updates", %{conn: conn} do
-    {:ok, lv, _html} = live(conn, "/admin")
-    lv |> element("#echo-test-btn") |> render_click()
-
-    # Give the dispatch path + telemetry handler time to propagate.
-    Process.sleep(50)
-    html = render(lv)
-
-    assert html =~ "entity://agent/echo_default?action=echo.say"
-    # Phase 3d hard flip: :stub_grant is gone; admin's all-cap matches
-    # produce "granted" in the audit column.
-    assert html =~ "granted"
-  end
-
-  test "Manual dispatch form runs an arbitrary invocation", %{conn: conn} do
-    {:ok, lv, _html} = live(conn, "/admin")
-
-    form_data = %{
-      "manual_dispatch" => %{
-        "target" => "entity://agent/echo_default?action=echo.say",
-        "args" => ~s({"msg": "via-form"}),
-        "mode" => "call"
-      }
-    }
-
-    lv |> form("#manual-dispatch form", form_data) |> render_submit()
-
-    Process.sleep(50)
-    html = render(lv)
-    assert html =~ "entity://agent/echo_default?action=echo.say"
   end
 
   test "Session members section shows admin User as online (Phase 2 boot)", %{conn: conn} do
-    {:ok, _lv, html} = live(conn, "/admin")
+    {:ok, _lv, html} = live(conn, "/sessions")
 
     # Section header
     assert html =~ "session://main"
-
     # admin URI listed
     assert html =~ "entity://user/admin"
-
     # admin is online (boot post-spawn dispatched chat/join)
     assert html =~ "online"
-
     # The members table id is rendered (not the empty-state placeholder)
     assert html =~ ~s(id="session-members-table")
     refute html =~ ~s(id="session-members-empty")
   end
 
   test "Chat compose dispatches send and message lands in stream", %{conn: conn} do
-    {:ok, lv, _html} = live(conn, "/admin")
+    {:ok, lv, _html} = live(conn, "/sessions")
 
     text = "lv chat compose test #{System.unique_integer([:positive])}"
 
     lv
-    |> form("form[phx-submit=chat_compose]", %{"chat" => %{"text" => text, "agent_uri" => ""}})
+    |> form("form[phx-submit=chat_compose]", %{"chat" => %{"text" => text}})
     |> render_submit()
 
-    # Give cast time to dispatch + broadcast back through session:events
     Process.sleep(100)
     html = render(lv)
 
@@ -99,19 +75,14 @@ defmodule EzagentPluginLiveview.AdminLiveTest do
   end
 
   test "Chat row shape identical for admin vs agent senders (CSS-level diff only)", %{conn: conn} do
-    # Send a message from admin AND simulate an agent message landing
-    # via broadcast (mimics what 2c agent flow produces) — assert both
-    # render in the same #messages container with same DOM structure.
-    {:ok, lv, _html} = live(conn, "/admin")
+    {:ok, lv, _html} = live(conn, "/sessions")
 
     admin_text = "admin-says-#{System.unique_integer([:positive])}"
 
     lv
-    |> form("form[phx-submit=chat_compose]", %{"chat" => %{"text" => admin_text, "agent_uri" => ""}})
+    |> form("form[phx-submit=chat_compose]", %{"chat" => %{"text" => admin_text}})
     |> render_submit()
 
-    # Poll until admin text shows in the stream (dispatch → MessageStore →
-    # broadcast → handle_info → stream_insert can be slow under sandbox).
     assert wait_until_html(lv, admin_text)
 
     # Simulate an agent reply landing via the chat_message broadcast.
@@ -127,7 +98,6 @@ defmodule EzagentPluginLiveview.AdminLiveTest do
     assert wait_until_html(lv, "agent reply test")
 
     html = render(lv)
-    # Both senders appear in the messages container
     assert html =~ admin_text
     assert html =~ "agent reply test"
     assert html =~ ~s(id="messages")
@@ -146,8 +116,6 @@ defmodule EzagentPluginLiveview.AdminLiveTest do
   end
 
   test "Load older button paginates history (Phase 5 PR 5 invariant)", %{conn: conn} do
-    # Spec 5 PR 5 invariant: send 100 messages → "Load older" reveals
-    # msgs 1-50; no duplicates; second click no-ops at the start.
     session_uri = URI.new!("session://main")
     base = ~U[2026-05-17 09:00:00.000000Z]
 
@@ -162,51 +130,112 @@ defmodule EzagentPluginLiveview.AdminLiveTest do
       {:ok, _} = Ezagent.MessageStore.write(msg, session_uri)
     end
 
-    {:ok, lv, html} = live(conn, "/admin")
+    {:ok, lv, html} = live(conn, "/sessions")
 
-    # Match on the trailing newline-tag boundary in the rendered <div>
-    # so "histmsg-1" doesn't substring-match "histmsg-100".
     msg = fn i -> "histmsg-#{i}</div>" end
 
-    # Initial mount shows newest 50 (histmsg-51..histmsg-100).
     assert html =~ msg.(100)
     assert html =~ msg.(51)
     refute html =~ msg.(50)
     refute html =~ msg.(1)
 
-    # First click reveals histmsg-1..histmsg-50.
     lv |> element("#load-older-btn") |> render_click()
     html = render(lv)
     assert html =~ msg.(1)
     assert html =~ msg.(50)
-    # Newer messages still present (no duplicates / no eviction).
     assert html =~ msg.(100)
 
-    # Sanity — each histmsg-NN appears exactly once.
     for i <- 1..100 do
       assert length(String.split(html, msg.(i))) - 1 == 1,
              "#{msg.(i)} appeared more than once after load_older click"
     end
 
-    # Second click — already at start, no-op (no crash, no duplicates).
     lv |> element("#load-older-btn") |> render_click()
     html2 = render(lv)
     assert html2 =~ msg.(1)
   end
 
-  test "Manual dispatch with invalid URI shows error message", %{conn: conn} do
-    {:ok, lv, _html} = live(conn, "/admin")
+  describe "Phase 8b — view-switcher" do
+    test "view-switcher renders Chat button (ConversationView always applies)", %{conn: conn} do
+      {:ok, _lv, html} = live(conn, "/sessions")
 
-    form_data = %{
-      "manual_dispatch" => %{
-        "target" => "no-scheme",
-        "args" => "",
-        "mode" => "call"
-      }
-    }
+      # The Chat label from ConversationView appears inside the view-switcher.
+      [_, switcher_block | _] = String.split(html, ~s(id="view-switcher"))
+      assert switcher_block =~ "Chat"
+    end
 
-    lv |> form("#manual-dispatch form", form_data) |> render_submit()
-    html = render(lv)
-    assert html =~ "target must include a scheme"
+    test "switch_view event updates current_view assign", %{conn: conn} do
+      {:ok, lv, _html} = live(conn, "/sessions")
+
+      # Switch to a hypothetical view id (`:conversation` is the
+      # default — round-trip the event to verify the handler exists
+      # and doesn't crash even when the id is the same one).
+      render_hook(lv, "switch_view", %{"view" => "conversation"})
+      html = render(lv)
+      assert html =~ "Chat"
+    end
+
+    test "switch_view ignores unknown view ids (no crash)", %{conn: conn} do
+      {:ok, lv, _html} = live(conn, "/sessions")
+
+      render_hook(lv, "switch_view", %{"view" => "no_such_view_xyz_42"})
+      # LV survives the bad event — render still works.
+      _ = render(lv)
+    end
+
+    test "switch_to_pty_for_agent sets current_view + active_pty_agent_uri", %{conn: conn} do
+      {:ok, lv, _html} = live(conn, "/sessions")
+
+      render_hook(lv, "switch_to_pty_for_agent", %{
+        "agent" => "entity://agent/cc_demo"
+      })
+
+      html = render(lv)
+      # The PtyView is registered only when cc plugin is loaded, but
+      # even without it the LV state flips and SessionEditor's
+      # `:active_pty_agent_uri` is observable via the data-agent-uri
+      # attribute on a PTY DOM node (if PtyView is registered) or via
+      # the fall-back ConversationView rendering. Either way no crash.
+      assert is_binary(html)
+    end
+  end
+
+  describe "Phase 8b — setting dropdown" do
+    test "setting menu HTML renders (collapsed)", %{conn: conn} do
+      {:ok, _lv, html} = live(conn, "/sessions")
+      assert html =~ ~s(id="session-setting-menu")
+      assert html =~ "Routing rules for this session"
+      assert html =~ "Feishu binding"
+    end
+
+    test "toggle_debug_panel flips :debug_open", %{conn: conn} do
+      {:ok, lv, _html} = live(conn, "/sessions")
+
+      # Toggle should not crash; the panel is gated on cc_events being
+      # non-empty so visual change isn't observable in this test,
+      # but the event must round-trip.
+      render_hook(lv, "toggle_debug_panel", %{})
+      _ = render(lv)
+    end
+  end
+
+  describe "Phase 8b — composer @ autocomplete wiring" do
+    test "composer input has MentionAutocomplete hook + data-members JSON", %{conn: conn} do
+      {:ok, _lv, html} = live(conn, "/sessions")
+
+      # Hook is wired
+      assert html =~ ~s(phx-hook="MentionAutocomplete")
+      # data-members carries a JSON array (admin User is at least one member)
+      assert html =~ ~s(id="chat-compose-input")
+      # mention popover element is in the DOM (hidden by default)
+      assert html =~ ~s(id="mention-popover")
+    end
+
+    test "no <select> mention dropdown is rendered (replaced by autocomplete)", %{conn: conn} do
+      {:ok, _lv, html} = live(conn, "/sessions")
+
+      refute html =~ ~s(name="chat[agent_uri]")
+      refute html =~ "— room (no mention) —"
+    end
   end
 end

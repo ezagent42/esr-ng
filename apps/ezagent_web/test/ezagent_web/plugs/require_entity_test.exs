@@ -56,5 +56,23 @@ defmodule EzagentWeb.Plugs.RequireEntityTest do
       assert conn.halted
       assert ["/login"] = get_resp_header(conn, "location")
     end
+
+    # Layer 2 of the 2026-05-20 defense-in-depth: bare-string session
+    # values bounce. This is what made Allen's symptom visible — the
+    # principal slot held literally "admin" (raw user input) and on
+    # every subsequent request RequireEntity rejected it. The fix is
+    # at the write site (SessionPrincipal), but this test guards the
+    # READ side so a regression on either side fails closed.
+    test "rejects bare-string (non-URI) session value — closes the bare-handle hole" do
+      for raw <- ["admin", "ADMIN", "user-123", "", "   "] do
+        conn =
+          conn(:get, "/admin")
+          |> init_test_session(%{"current_entity_uri" => raw})
+          |> RequireEntity.call([])
+
+        assert conn.halted, "raw #{inspect(raw)} should have halted"
+        assert ["/login"] = get_resp_header(conn, "location")
+      end
+    end
   end
 end

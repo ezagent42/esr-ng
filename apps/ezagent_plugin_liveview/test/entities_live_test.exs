@@ -1,10 +1,11 @@
 defmodule EzagentPluginLiveview.EntitiesLiveTest do
   @moduledoc """
-  PR #149 (S-5) invariant — `/admin/entities` is the unified live
+  PR #149 (S-5) invariant — `/admin/registry` is the unified live
   registry surface; lists every URI in `Ezagent.KindRegistry`
   regardless of scheme. Replaces the agent-only `/admin/agents`
-  list page (per-PTY detail + terminal routes stay at
-  `/admin/agents/:uri` / `/admin/agents/:uri/terminal`).
+  list page. The agent detail page stays at `/identities/agents/:uri`;
+  PTY now lives inside SessionView (Phase 8b retired the standalone
+  `/identities/agents/:uri/terminal` route).
   """
   use ExUnit.Case
   import Phoenix.ConnTest
@@ -25,8 +26,8 @@ defmodule EzagentPluginLiveview.EntitiesLiveTest do
     {:ok, conn: conn}
   end
 
-  test "GET /admin/entities renders header + filter chips", %{conn: conn} do
-    {:ok, _lv, html} = live(conn, "/admin/entities")
+  test "GET /admin/registry renders header + filter chips", %{conn: conn} do
+    {:ok, _lv, html} = live(conn, "/admin/registry")
     assert html =~ "Entities (live registry)"
     assert html =~ "entity://user"
     assert html =~ "entity://agent"
@@ -35,18 +36,18 @@ defmodule EzagentPluginLiveview.EntitiesLiveTest do
   end
 
   test "filter=user narrows to entity://user/* rows", %{conn: conn} do
-    {:ok, _lv, html} = live(conn, "/admin/entities?filter=user")
+    {:ok, _lv, html} = live(conn, "/admin/registry?filter=user")
     # Admin user spawned at boot — should appear under filter=user
     assert html =~ "entity"
   end
 
   test "filter=session narrows to session://* rows", %{conn: conn} do
-    {:ok, _lv, html} = live(conn, "/admin/entities?filter=session")
+    {:ok, _lv, html} = live(conn, "/admin/registry?filter=session")
     # Default session spawned at boot
     assert html =~ "session"
   end
 
-  test "PTY agent detail route still works at /admin/agents/:uri", %{conn: conn} do
+  test "PTY agent detail route still works at /identities/agents/:uri", %{conn: conn} do
     agent_uri =
       URI.parse("entity://agent/test_pty-status-test-#{System.unique_integer([:positive])}")
 
@@ -59,7 +60,7 @@ defmodule EzagentPluginLiveview.EntitiesLiveTest do
     Process.sleep(50)
 
     encoded = URI.encode_www_form(URI.to_string(agent_uri))
-    {:ok, _lv, html} = live(conn, "/admin/agents/#{encoded}")
+    {:ok, _lv, html} = live(conn, "/identities/agents/#{encoded}")
     assert html =~ URI.to_string(agent_uri)
 
     # cleanup

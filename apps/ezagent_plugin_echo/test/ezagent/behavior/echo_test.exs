@@ -9,8 +9,15 @@ defmodule Ezagent.Behavior.EchoTest do
     assert :cast in modes
   end
 
-  test "actions/0 returns [:say]" do
-    assert Echo.actions() == [:say]
+  test "actions/0 returns [:say, :receive]" do
+    # PR-J — `:receive` added so Echo agents reply to chat fan-out.
+    assert Echo.actions() == [:say, :receive]
+  end
+
+  test "interface declares :receive (chat-fanout reply action)" do
+    iface = Echo.interface()
+    assert %{receive: %{args: %{message: :map}, modes: modes}} = iface
+    assert :cast in modes
   end
 
   test "state_slice/0 is :echo" do

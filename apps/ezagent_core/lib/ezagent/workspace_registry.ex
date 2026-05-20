@@ -44,6 +44,19 @@ defmodule Ezagent.WorkspaceRegistry do
   def table, do: @table
 
   @doc """
+  Phase 8c PR-E (Allen 2026-05-20) — canonical default workspace URI.
+
+  Returns `{:ok, URI.t()}` always (current impl is constant; future
+  override could read app config). The default workspace is the
+  implicit owner for sessions that aren't created via a SessionTemplate
+  with its own `default_workspace_uri` field (e.g. session://main).
+  """
+  @spec default_workspace_uri() :: {:ok, URI.t()}
+  def default_workspace_uri do
+    {:ok, URI.new!("workspace://default")}
+  end
+
+  @doc """
   Record that `session_uri` belongs to `workspace_uri`. Idempotent —
   re-binding the same session to the same workspace is a no-op;
   re-binding to a different workspace silently overwrites (the most

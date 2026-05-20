@@ -4,9 +4,15 @@
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="csrf-token" content={get_csrf_token()} />
-    <.live_title default="EzagentCore" suffix=" · Phoenix Framework">
+    <.live_title default="ezagent" suffix=" · ezagent">
       {assigns[:page_title]}
     </.live_title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap"
+    />
     <link phx-track-static rel="stylesheet" href={~p"/assets/css/app.css"} />
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/xterm@5.3.0/css/xterm.css" />
     <script src="https://cdn.jsdelivr.net/npm/xterm@5.3.0/lib/xterm.min.js">
@@ -17,20 +23,35 @@
     </script>
     <script>
       (() => {
+        // Phase 8c (Allen 2026-05-20): "System" was a no-op when picked
+        // because we just removed the data-theme attribute, which left
+        // the page on whatever default the daisyUI light theme registers
+        // — no actual respect for the OS preference. Now System actively
+        // reads `prefers-color-scheme` AND installs a media listener so
+        // OS-level changes propagate without reload.
+        const mql = window.matchMedia("(prefers-color-scheme: dark)");
+        const applyResolved = (theme) => {
+          const resolved = theme === "system" ? (mql.matches ? "dark" : "light") : theme;
+          document.documentElement.setAttribute("data-theme", resolved);
+        };
         const setTheme = (theme) => {
           if (theme === "system") {
             localStorage.removeItem("phx:theme");
-            document.documentElement.removeAttribute("data-theme");
           } else {
             localStorage.setItem("phx:theme", theme);
-            document.documentElement.setAttribute("data-theme", theme);
           }
+          applyResolved(theme);
         };
+        const currentMode = () => localStorage.getItem("phx:theme") || "system";
+
         if (!document.documentElement.hasAttribute("data-theme")) {
-          setTheme(localStorage.getItem("phx:theme") || "system");
+          setTheme(currentMode());
         }
+        // OS theme change → if user picked System, re-resolve
+        mql.addEventListener("change", () => {
+          if (currentMode() === "system") applyResolved("system");
+        });
         window.addEventListener("storage", (e) => e.key === "phx:theme" && setTheme(e.newValue || "system"));
-        
         window.addEventListener("phx:set-theme", (e) => setTheme(e.target.dataset.phxTheme));
       })();
     </script>

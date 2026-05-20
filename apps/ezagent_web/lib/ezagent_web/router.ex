@@ -36,7 +36,7 @@ defmodule EzagentWeb.Router do
   # path that bypasses the HTTP Plug pipeline).
   # PR-B: file download route for chat compose uploads. Mounted in the
   # EzagentWeb scope (so the controller resolves correctly), under the
-  # same RequireEntity plug as /admin/*.
+  # same RequireEntity plug as the LV scope below.
   scope "/", EzagentWeb do
     pipe_through [:browser, EzagentWeb.Plugs.RequireEntity]
 
@@ -47,42 +47,59 @@ defmodule EzagentWeb.Router do
     pipe_through [:browser, EzagentWeb.Plugs.RequireEntity]
 
     live_session :require_entity, on_mount: {EzagentWeb.LiveAuth, :require_entity} do
-      live "/admin", AdminLive
+      # Phase 8 polish — IA refactor (Allen 2026-05-20). Business-feature
+      # routes live at top level. `/admin/*` is reserved for the admin
+      # dashboard (KPIs + sysadmin sub-pages: logs, registry, snapshots).
 
-      # Phase 4d: Workspace management surfaces. Separate LV (not a tab
-      # inside admin_live) per Phase 4 D2 — cluster-shape config is a
-      # different surface than per-session chat.
-      live "/admin/workspaces", WorkspacesLive
-      live "/admin/workspaces/:name", WorkspaceDetailLive
+      # Sessions Activity (was /admin in Phase 8).
+      live "/sessions", AdminLive
 
-      # Phase 4-completion PR 7: global RoutingRegistry rule editor.
-      live "/admin/routing", RoutingLive
-
-      # Phase 5 PR 2: Users LV.
-      live "/admin/users", UsersLive
-      # Phase 6 PR 6: per-user cap-grant UI.
-      live "/admin/users/:uri/caps", UserCapsLive
-      # PR #126: per-user API key management UI (for curl-agent etc.).
-      live "/admin/users/:uri/api-keys", UserApiKeysLive
-
-      # Phase 5 PR 3: Snapshots observability.
+      # Admin dashboard + sysadmin sub-pages.
+      live "/admin", AdminDashboardLive
+      live "/admin/logs", ObservabilityLive
+      live "/admin/registry", EntitiesLive
       live "/admin/snapshots", SnapshotsLive
 
-      # PR #149 (S-5 entity-agnostic): unified live registry replaces
-      # the agent-only list page. Detail + terminal routes stay at
-      # `/admin/agents/:uri/...` because they're PTY-specific.
-      live "/admin/entities", EntitiesLive
-      live "/admin/agents/:uri", AgentDetailLive
+      # Workspaces Activity.
+      live "/workspaces", WorkspacesLive
+      live "/workspaces/:name", WorkspaceDetailLive
 
-      # Real Phase 5 PR 4: Pty-Web (xterm.js in browser).
-      live "/admin/agents/:uri/terminal", PtyTerminalLive
+      # Routing Activity.
+      live "/routing", RoutingLive
 
-      # Phase 6 PR 10: auto-derived list/detail for any Kind.
-      live "/admin/auto/:kind", AutoDeriveLive
-      live "/admin/auto/:kind/:uri", AutoDeriveLive
+      # Identities Activity (address book: users + agents are entity sub-types).
+      live "/identities", IdentitiesLive
+      live "/identities/users", UsersLive
+      # Phase 8c follow-up (Allen 2026-05-20) — parallel to /identities/users.
+      # /identities/agents was a dead link from agent_detail_live's "Back
+      # to agents" anchors. Reuses IdentitiesLive; the LV defaults the
+      # filter to "agents" when the URI path matches.
+      live "/identities/agents", IdentitiesLive
+      # PR-G (Phase 8c): EntityCapsLive serves both user + agent caps
+      # (generalized from the former UserCapsLive). Backend
+      # `Ezagent.Behavior.Identity` always accepted any entity URI;
+      # this exposes the agent surface in the UI.
+      live "/identities/users/:uri/caps", EntityCapsLive
+      live "/identities/agents/:uri/caps", EntityCapsLive
+      live "/identities/users/:uri/api-keys", UserApiKeysLive
+      # Phase 8c PR-N: "/new" MUST appear before ":uri" — Phoenix
+      # matches routes top-down and would otherwise bind "new" as the
+      # `:uri` param for AgentDetailLive.
+      live "/identities/agents/new", AgentNewLive
+      live "/identities/agents/:uri", AgentDetailLive
+      # Phase 8b — `/identities/agents/:uri/terminal` retired. PTY is
+      # now accessed via the SessionEditor view-switcher on /sessions
+      # (terminal view registers via Ezagent.UI.SessionViewRegistry).
 
-      # Phase 6 PR 15: Feishu open_id ↔ local user bindings admin UI.
-      live "/admin/feishu/bindings", FeishuBindingsLive
+      # Plugins Activity.
+      live "/plugins", PluginsLive
+      live "/plugins/feishu/bindings", FeishuBindingsLive
+      live "/plugins/auto/:kind", AutoDeriveLive
+      live "/plugins/auto/:kind/:uri", AutoDeriveLive
+
+      # Top-level Profile + Settings (reached via avatar dropdown).
+      live "/profile", ProfileLive
+      live "/settings", SettingsLive
     end
   end
 
@@ -93,10 +110,6 @@ defmodule EzagentWeb.Router do
     get "/_health", HealthController, :index
   end
 
-  # Phase 7 PR 32c (rebrand-4): v1 prototype CC bridge HTTP routes
-  # deleted alongside their controller. Production CC bridges connect
-  # via the v2 `/cc_socket` Phoenix.Channel (token-authenticated by
-  # EzagentPluginCc.TokenStore), defined in EzagentWeb.Endpoint.
   scope "/api", EzagentWeb do
     pipe_through :api
 
@@ -105,11 +118,6 @@ defmodule EzagentWeb.Router do
     # rationale (the agent the hook reports about may be down).
     post "/cc-events", CcEventsController, :report
   end
-
-  # (Post-Phase-5 cleanup, Allen 2026-05-17: the `/api/cli/exec` HTTP
-  # endpoint and CliController are gone. CLI now reaches the runtime via
-  # distributed Erlang RPC — see Ezagent.Runtime + Mix.Tasks.Ezagent. LV ↔
-  # runtime was never HTTP either — LV runs in the same BEAM.)
 
   # Phase 5 PR 6: Feishu webhook receiver. The ONLY touch
   # ezagent_plugin_feishu makes to ezagent_web — explicit exception per SPEC v2
@@ -127,18 +135,8 @@ defmodule EzagentWeb.Router do
     post "/:kind/:action", ApiV1Controller, :invoke
   end
 
-  # Other scopes may use custom stacks.
-  # scope "/api", EzagentWeb do
-  #   pipe_through :api
-  # end
-
   # Enable LiveDashboard in development
   if Application.compile_env(:ezagent_web, :dev_routes) do
-    # If you want to use the LiveDashboard in production, you should put
-    # it behind authentication and allow only admins to access it.
-    # If your application does not have an admins-only section yet,
-    # you can use Plug.BasicAuth to set up some basic authentication
-    # as long as you are also using SSL (which you should anyway).
     import Phoenix.LiveDashboard.Router
 
     scope "/dev" do
@@ -146,5 +144,19 @@ defmodule EzagentWeb.Router do
 
       live_dashboard "/dashboard", metrics: EzagentWeb.Telemetry
     end
+  end
+
+  # Catch-all browser GET — renders the ezagent-branded 404 page for any
+  # path that didn't match above. Without this, Phoenix's dev `debug_errors`
+  # serves the stacktrace exception page instead, which mis-represents
+  # what a real user would see. Production behavior was already correct
+  # via ErrorHTML; this just unifies dev with prod.
+  #
+  # Allen 2026-05-20: see memory feedback_ui_no_misleading_buttons —
+  # 404s should be rare (every real link points somewhere) AND graceful.
+  scope "/", EzagentWeb do
+    pipe_through :browser
+
+    get "/*path", FallbackController, :not_found
   end
 end

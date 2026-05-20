@@ -64,6 +64,55 @@ defmodule Ezagent.Identity do
     ])
   end
 
+  @doc """
+  Phase 8c PR-F (Allen 2026-05-20) — does `entity_uri` belong to the
+  admin principal?
+
+  Used by the avatar dropdown to gate visibility of the "Admin" link
+  (which opens the AdminSettingsShell drawer at `/admin`). Returns
+  `false` for `nil`, malformed URIs, or any non-admin entity.
+
+  ## Current implementation
+
+  Matches the seeded admin URI (`entity://user/admin`) exactly. This is
+  honest: the route gate (`EzagentWeb.Plugs.RequireEntity`) currently
+  only requires a logged-in entity, not admin caps — so /admin is open
+  to anyone authenticated. The dropdown gate hides the link for
+  non-admins purely for UX clarity, NOT as a security boundary.
+
+  ## TODO Phase 8d
+
+  Replace with a proper `cap:admin` check once the admin sub-pages
+  enforce admin caps at the on_mount hook (see `EzagentWeb.LiveAuth`).
+  At that point this helper becomes:
+
+      caps = list_caps_for(entity_uri)
+      Enum.any?(caps, &Ezagent.Capability.matches?(&1, {:admin, :any, :any}))
+  """
+  @spec admin?(URI.t() | String.t() | nil) :: boolean()
+  def admin?(nil), do: false
+
+  def admin?(entity_uri) do
+    case parse_uri_safe(entity_uri) do
+      %URI{} = uri ->
+        URI.to_string(uri) == URI.to_string(Ezagent.Entity.User.admin_uri())
+
+      :error ->
+        false
+    end
+  end
+
+  defp parse_uri_safe(%URI{} = u), do: u
+
+  defp parse_uri_safe(s) when is_binary(s) do
+    case URI.new(s) do
+      {:ok, uri} -> uri
+      _ -> :error
+    end
+  end
+
+  defp parse_uri_safe(_), do: :error
+
   defp parse_uri(%URI{} = u), do: u
   defp parse_uri(s) when is_binary(s), do: URI.parse(s)
 end

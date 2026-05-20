@@ -1,68 +1,88 @@
 defmodule EzagentPluginLiveview.AdminLive do
   @moduledoc """
-  /admin LiveView — coordinator shell.
+  /sessions LiveView — Session Activity coordinator.
 
-  Phase 4a split (per Phase 4 D2): render fragments live in stateless
-  Phoenix.Component modules under `EzagentPluginLiveview.Admin.*`. This module
-  keeps:
+  ## Phase 8b — Session view-mode (replaces v1 three-column inline layout)
 
-  - mount + state assigns + stream setup
-  - all handle_info subscriptions (audit / bridge / member / chat_message)
-  - all handle_event handlers (echo / chat_compose / switch_session /
-    create_session / add_agent_to_session / manual_dispatch)
-  - a thin render/1 that composes the 4 components
+  Per `docs/superpowers/specs/2026-05-20-phase-8b-session-lv-redesign.zh_cn.md`:
 
-  Sub-components (see `apps/ezagent_plugin_liveview/lib/ezagent_plugin_liveview/admin/`):
+  - Main Window hosts `EzagentPluginLiveview.Admin.SessionEditor`, a
+    header (session selector + view-switcher + setting dropdown) /
+    `:main_view` slot (the active `Ezagent.UI.SessionView` render) /
+    composer (inline `@` autocomplete + file upload + send).
+  - View-switcher options come from
+    `Ezagent.UI.SessionViewRegistry.applicable_views(@current_session_uri)`.
+    Plugins register views (conversation, pty, ...) in their own
+    `Application.start/2`.
+  - IDE Shell Right Sidebar still hosts `MemberPanel`. cc-agent rows
+    get a 🖥️ button — click fires `switch_to_pty_for_agent`, the
+    handler sets `current_view = :pty` + `active_pty_agent_uri`.
+  - The Phase 4a `debug_panel` (Echo / Manual Dispatch / Audit) has
+    moved to `/admin/logs` (ObservabilityLive). admin_live no longer
+    renders it; the related handlers (`echo_test`, `manual_dispatch`)
+    are gone from this module.
 
-  - `EzagentPluginLiveview.Admin.SessionsSidebar` — left: sessions + new + floating
-  - `EzagentPluginLiveview.Admin.ChatWindow` — center: header + stream + compose
-  - `EzagentPluginLiveview.Admin.MemberPanel` — right: members table
-  - `EzagentPluginLiveview.Admin.DebugPanel` — below: cc-bridges + debug area
+  ## Owned state (assigns)
 
-  Phase 4 D2 originally specced LiveComponent-per-surface. We landed on
-  Phoenix.Component (stateless) because admin_live's state is tightly
-  coupled (sessions choice drives chat + members + sidebar). Stateless
-  components give the file-boundary split (the goal — let 4b/c/d add
-  features in their own files, not as new sections in admin_live)
-  without the `send_update` ceremony LiveComponent would force.
-  Promote individual components to LiveComponent later if/when they
-  earn their own state (likely candidate: Workspace member-picker in 4d).
+  - `:current_session_uri` — which session is in view
+  - `:current_view` — `:conversation` | `:pty` (default `:conversation`)
+  - `:active_pty_agent_uri` — string, set when `current_view = :pty`
+  - `:applicable_views` — derived from SessionViewRegistry on session change
+  - `:session_members`, `:member_options`, `:floating_agents` — Members panel + composer
+  - `:feishu_chat_ids` — for setting dropdown
+  - `:debug_open` — Debug events panel toggle (setting dropdown)
+  - `:compose_form`, `:new_session_form` — input + create
   """
 
   use Phoenix.LiveView
   import Phoenix.Component
 
-  import EzagentPluginLiveview.Admin.SessionsSidebar
-  import EzagentPluginLiveview.Admin.ChatWindow
-  import EzagentPluginLiveview.Admin.MemberPanel
-  import EzagentPluginLiveview.Admin.DebugPanel
+  alias EzagentPluginLiveview.Admin.{SessionEditor, MemberPanel}
+  alias EzagentPluginLiveview.Views.ConversationView
+  alias EzagentDomainUi.IdeShell
+  alias Ezagent.UI.SessionViewRegistry
 
-  @echo_target URI.parse("entity://agent/echo_default?action=echo.say")
   @main_session_uri URI.new!("session://main")
   @message_limit 50
 
   @impl true
-  def mount(_params, session, socket) do
-    connected_bridges = list_bridges_safely()
-    current_session_uri = @main_session_uri
+  def mount(_params, _session, socket) do
+    # Phase 8b — register the default ConversationView lazily here. The
+    # liveview plugin is library-only (no Application module — adding
+    # one in the umbrella triggered a DB-sandbox boot regression for the
+    # rest of the LV test suite). Registration is idempotent so every
+    # mount safely no-ops if another LV already registered.
+    :ok = SessionViewRegistry.init()
+    :ok = SessionViewRegistry.register(ConversationView)
+
+    # Phase 8c follow-up (Allen 2026-05-20) — auto-spawn session://main
+    # if missing. Without this the LV mounts with a hardcoded
+    # `current_session_uri` for a session that doesn't exist; the right
+    # panel shows "No members — Chat plugin failed to start?" which is
+    # misleading copy AND blames the wrong subsystem.
+    #
+    # Root cause: PR-J removed session://main from the boot static
+    # children (workspace://default seeds it via Workspace.Loader). On
+    # cold start before any session-creating action, KindRegistry has
+    # no session://main. The wizard at `/` creates one, but the
+    # post-login redirect lands on /sessions directly (Phase 8c PR-L:
+    # /sessions IS the default landing). So most logins skip the
+    # wizard and walk straight into the broken state.
+    #
+    # Idempotent: ensure_main_session/2 is a no-op when the kind is
+    # already alive; only spawns on the cold-start path.
+    current_session_uri = ensure_main_session(@main_session_uri, socket)
 
     if connected?(socket) do
       Phoenix.PubSub.subscribe(EzagentCore.PubSub, Ezagent.Audit.stream_topic())
       Phoenix.PubSub.subscribe(EzagentCore.PubSub, bridge_topic_safely())
-      # Phase 4-plus follow-up: CC hook errors push here (no agent dep).
       Phoenix.PubSub.subscribe(EzagentCore.PubSub, Ezagent.CCEvents.topic())
-      # Phase 3b: subscribe to ALL known sessions so floating/member updates
-      # land for any session (not just current). Per-session message filtering
-      # is done in handle_info for {:chat_message, session_uri, msg}.
+
       for session_uri <- EzagentDomainChat.list_sessions() do
         Phoenix.PubSub.subscribe(EzagentCore.PubSub, session_events_topic(session_uri))
       end
     end
 
-    # PR #123 hardening: live_session :require_user on_mount hook
-    # (EzagentWeb.LiveAuth) guarantees socket.assigns.current_entity_uri
-    # is set by the time mount/3 runs. The previous nil → admin_uri
-    # fallback was the public-exposure attack surface — gone.
     caller_uri = socket.assigns.current_entity_uri
 
     caller_caps =
@@ -74,34 +94,27 @@ defmodule EzagentPluginLiveview.AdminLive do
 
     initial_messages = load_session_messages(current_session_uri)
 
-    # Phase 5 PR 5: drop the per-stream `limit:` on :messages so
-    # "Load older" prepends aren't immediately evicted from the front.
-    # DOM size is bounded by how many times the operator clicks the
-    # button (worst case ~few hundred rows in an admin debug view).
     socket =
       socket
-      |> stream(:invocations, load_recent_invocations(50), limit: 50)
       |> stream(:messages, initial_messages)
       |> assign(:oldest_cursor, oldest_cursor(initial_messages))
+      # Phase 8c PR-B — empty-state flag for ConversationView. Tracks
+      # whether any message has been rendered yet so the view can show a
+      # dot-grid placeholder instead of a blank white panel.
+      |> assign(:messages_empty?, initial_messages == [])
       |> assign(:caller_uri, caller_uri)
       |> assign(:caller_caps, caller_caps)
       |> assign(:caller_uri_str, URI.to_string(caller_uri))
       |> assign(:flash_error, nil)
-      |> assign(:connected_bridges, connected_bridges)
       |> assign(:current_session_uri, current_session_uri)
       |> assign(:sessions, EzagentDomainChat.list_sessions())
-      |> assign(:session_members, read_session_members(current_session_uri))
-      |> assign(:member_options, list_session_member_uris(current_session_uri))
-      |> assign(:floating_agents, list_floating_agents())
-      |> assign(:form,
-        to_form(%{"target" => "", "args" => "", "mode" => "call"}, as: "manual_dispatch")
-      )
-      |> assign(:compose_form, to_form(%{"text" => "", "agent_uri" => ""}, as: "chat"))
-      |> assign(:new_session_form, to_form(%{"short_name" => ""}, as: "new_session"))
+      |> assign_session_context(current_session_uri)
+      |> assign(:current_view, :conversation)
+      |> assign(:active_pty_agent_uri, nil)
       |> assign(:cc_events, [])
-      # PR-B: file uploads. 5 files * 10 MB cap; matches Feishu's outbound
-      # send_file limit (so what we accept here can be forwarded without
-      # post-hoc rejection). :any extension — admin trusts the operator.
+      |> assign(:debug_open, false)
+      |> assign(:compose_form, to_form(%{"text" => ""}, as: "chat"))
+      |> assign(:new_session_form, to_form(%{"short_name" => ""}, as: "new_session"))
       |> allow_upload(:attachments,
         accept: :any,
         max_entries: 5,
@@ -114,110 +127,64 @@ defmodule EzagentPluginLiveview.AdminLive do
   # --- Stream / membership / audit handlers -----------------------------
 
   @impl true
-  def handle_info({:audit_event, event}, socket) do
-    row = event_to_row(event)
-    {:noreply, stream_insert(socket, :invocations, row, at: 0)}
+  def handle_info({:audit_event, _event}, socket) do
+    # Audit stream moved to /admin/logs (ObservabilityLive). Drop here
+    # so the subscription on Audit.stream_topic doesn't leak.
+    {:noreply, socket}
   end
 
-  # Phase 4-plus follow-up: CC hook errors. Maintain a small in-memory
-  # ring (last 20) — full history is in the audit table via telemetry.
   def handle_info({:cc_event, event}, socket) do
     {:noreply, assign(socket, :cc_events, [event | socket.assigns.cc_events] |> Enum.take(20))}
   end
 
   def handle_info({:cc_connected, _bridge_id, _entry}, socket) do
-    {:noreply,
-     socket
-     |> assign(:connected_bridges, list_bridges_safely())
-     |> assign(:member_options, list_session_member_uris(socket.assigns.current_session_uri))
-     |> assign(:floating_agents, list_floating_agents())}
+    {:noreply, refresh_views_and_members(socket)}
   end
 
   def handle_info({:cc_disconnected, _bridge_id}, socket) do
-    {:noreply,
-     socket
-     |> assign(:connected_bridges, list_bridges_safely())
-     |> assign(:member_options, list_session_member_uris(socket.assigns.current_session_uri))
-     |> assign(:floating_agents, list_floating_agents())}
+    {:noreply, refresh_views_and_members(socket)}
   end
 
   def handle_info({:member_joined, _uri}, socket),
-    do:
-      {:noreply,
-       socket
-       |> assign(:session_members, read_session_members(socket.assigns.current_session_uri))
-       |> assign(:member_options, list_session_member_uris(socket.assigns.current_session_uri))
-       |> assign(:floating_agents, list_floating_agents())}
+    do: {:noreply, refresh_views_and_members(socket)}
 
   def handle_info({:member_left, _uri}, socket),
-    do:
-      {:noreply,
-       socket
-       |> assign(:session_members, read_session_members(socket.assigns.current_session_uri))
-       |> assign(:member_options, list_session_member_uris(socket.assigns.current_session_uri))
-       |> assign(:floating_agents, list_floating_agents())}
+    do: {:noreply, refresh_views_and_members(socket)}
 
   def handle_info({:member_offline, _uri, _at}, socket),
-    do:
-      {:noreply,
-       assign(socket, :session_members, read_session_members(socket.assigns.current_session_uri))}
+    do: {:noreply, assign_session_context(socket, socket.assigns.current_session_uri)}
 
-  # Phase 3: chat_message carries the source session_uri; filter to
-  # current_session_uri before inserting to the stream.
   def handle_info({:chat_message, source_session_uri, %Ezagent.Message{} = msg}, socket) do
     if URI.to_string(source_session_uri) == URI.to_string(socket.assigns.current_session_uri) do
-      {:noreply, stream_insert(socket, :messages, message_to_row(msg), at: -1)}
+      {:noreply,
+       socket
+       |> assign(:messages_empty?, false)
+       |> stream_insert(:messages, message_to_row(msg), at: -1)}
     else
       {:noreply, socket}
     end
   end
 
-  # Phase 2 backward-compat (in case any code still emits the old shape)
   def handle_info({:chat_message, %Ezagent.Message{} = msg}, socket) do
-    {:noreply, stream_insert(socket, :messages, message_to_row(msg), at: -1)}
+    {:noreply,
+     socket
+     |> assign(:messages_empty?, false)
+     |> stream_insert(:messages, message_to_row(msg), at: -1)}
   end
 
   # --- User actions -----------------------------------------------------
 
   @impl true
-  def handle_event("echo_test", _params, socket) do
-    inv = %Ezagent.Invocation{
-      target: @echo_target,
-      mode: :call,
-      args: %{msg: "hello"},
-      ctx: ctx(socket)
-    }
-
-    case Ezagent.Invocation.dispatch(inv) do
-      {:ok, _result} ->
-        {:noreply, assign(socket, :flash_error, nil)}
-
-      {:error, reason} ->
-        {:noreply, assign(socket, :flash_error, "Echo failed: #{inspect(reason)}")}
-    end
-  end
-
-  # PR-B: phx-change for the compose form — needed for live_file_input to
-  # report upload progress + errors back to the LV.
-  def handle_event("validate_compose", _params, socket) do
-    {:noreply, socket}
-  end
+  def handle_event("validate_compose", _params, socket), do: {:noreply, socket}
 
   def handle_event("cancel_upload", %{"ref" => ref}, socket) do
     {:noreply, cancel_upload(socket, :attachments, ref)}
   end
 
-  def handle_event("chat_compose", %{"chat" => %{"text" => text} = params}, socket)
+  def handle_event("chat_compose", %{"chat" => %{"text" => text}}, socket)
       when is_binary(text) do
-    mentions =
-      case Map.get(params, "agent_uri", "") do
-        "" -> []
-        uri_str -> [URI.new!(uri_str)]
-      end
+    mentions = parse_mentions(text)
 
-    # PR-B: consume any uploaded files. Move each to $EZAGENT_HOME/uploads/
-    # under a uuid-prefixed name; record the resource:// URI for later
-    # display + (future) plugin forwarding.
     File.mkdir_p!(Ezagent.Home.path("uploads"))
 
     attachments =
@@ -230,7 +197,7 @@ defmodule EzagentPluginLiveview.AdminLive do
         {:ok, URI.parse("resource://uploads/#{stored_name}")}
       end)
 
-    if text == "" and attachments == [] do
+    if String.trim(text) == "" and attachments == [] do
       {:noreply,
        assign(socket, :flash_error, "Message text or at least one attachment is required.")}
     else
@@ -239,61 +206,38 @@ defmodule EzagentPluginLiveview.AdminLive do
   end
 
   def handle_event("chat_compose", _params, socket) do
-    {:noreply, assign(socket, :flash_error, "Message text or at least one attachment is required.")}
+    {:noreply,
+     assign(socket, :flash_error, "Message text or at least one attachment is required.")}
   end
-
-  defp send_chat_message(socket, text, attachments, mentions) do
-    msg =
-      Ezagent.Message.new(socket.assigns.caller_uri,
-        %{text: text, attachments: attachments},
-        mentions: mentions
-      )
-
-    target = URI.new!("#{URI.to_string(socket.assigns.current_session_uri)}?action=chat.send")
-
-    inv = %Ezagent.Invocation{
-      target: target,
-      mode: :cast,
-      args: %{message: msg},
-      ctx: ctx(socket)
-    }
-
-    case Ezagent.Invocation.dispatch(inv) do
-      :ok ->
-        {:noreply,
-         socket
-         |> assign(:flash_error, nil)
-         |> assign(:compose_form, to_form(%{"text" => "", "agent_uri" => ""}, as: "chat"))}
-
-      {:ok, _} ->
-        {:noreply,
-         socket
-         |> assign(:flash_error, nil)
-         |> assign(:compose_form, to_form(%{"text" => "", "agent_uri" => ""}, as: "chat"))}
-
-      {:error, reason} ->
-        {:noreply, assign(socket, :flash_error, friendly_error("Send", reason))}
-    end
-  end
-
-  # Phase 4-completion Spec 05 §A.2.4 — friendly flash for cap-deny.
-  defp friendly_error(_action, :unauthorized) do
-    "You don't have permission for this action. Contact admin for cap grant."
-  end
-
-  defp friendly_error(action, reason), do: "#{action} failed: #{inspect(reason)}"
 
   def handle_event("switch_session", %{"session_uri" => session_uri_str}, socket) do
     case URI.new(session_uri_str) do
       {:ok, new_uri} ->
         new_messages = load_session_messages(new_uri)
+        applicable = SessionViewRegistry.applicable_views(new_uri)
+
+        new_view =
+          cond do
+            Enum.any?(applicable, &(&1.id == socket.assigns.current_view)) ->
+              socket.assigns.current_view
+
+            applicable != [] ->
+              hd(applicable).id
+
+            true ->
+              :conversation
+          end
 
         {:noreply,
          socket
          |> assign(:current_session_uri, new_uri)
-         |> assign(:session_members, read_session_members(new_uri))
-         |> assign(:member_options, list_session_member_uris(new_uri))
+         |> assign_session_context(new_uri)
+         |> assign(:current_view, new_view)
+         # Reset PTY agent binding — the new session may not have that
+         # agent as a member.
+         |> assign(:active_pty_agent_uri, nil)
          |> assign(:oldest_cursor, oldest_cursor(new_messages))
+         |> assign(:messages_empty?, new_messages == [])
          |> stream(:messages, new_messages, reset: true)}
 
       _ ->
@@ -324,39 +268,118 @@ defmodule EzagentPluginLiveview.AdminLive do
     {:noreply, assign(socket, :flash_error, "Session name is required.")}
   end
 
-  def handle_event(
-        "add_agent_to_session",
-        %{"agent_uri" => agent_uri_str, "session_uri" => session_uri_str},
-        socket
-      )
-      when session_uri_str != "" do
-    with {:ok, agent_uri} <- URI.new(agent_uri_str),
-         {:ok, session_uri} <- URI.new(session_uri_str) do
-      target = URI.new!("#{URI.to_string(session_uri)}?action=chat.join")
+  # Phase 8b §3 stage c — view switcher (Chat / Terminal buttons in
+  # SessionEditor header). `view` is the SessionView id atom encoded
+  # as a string in the phx-value attribute; convert via
+  # String.to_existing_atom to keep the atom table bounded.
+  def handle_event("switch_view", %{"view" => view_str}, socket) do
+    case safe_view_id(view_str) do
+      {:ok, id} -> {:noreply, assign(socket, :current_view, id)}
+      :error -> {:noreply, socket}
+    end
+  end
 
+  # Phase 8b §3 stage g — clicking the 🖥️ button in MemberPanel
+  # switches the main view to :pty and binds xterm to the chosen agent.
+  def handle_event("switch_to_pty_for_agent", %{"agent" => agent_uri_str}, socket) do
+    {:noreply,
+     socket
+     |> assign(:current_view, :pty)
+     |> assign(:active_pty_agent_uri, agent_uri_str)}
+  end
+
+  # Phase 8c PR-E (Allen 2026-05-20) — restored Floating agents picker.
+  # Dispatches `chat.join` with the picked agent as the member to add
+  # to the current session. Re-asserts session context to refresh
+  # member list + floating list.
+  def handle_event("add_floating_agent", %{"agent_uri" => ""}, socket), do: {:noreply, socket}
+
+  def handle_event("add_floating_agent", %{"agent_uri" => agent_uri_str}, socket) do
+    with {:ok, agent_uri} <- URI.new(agent_uri_str),
+         session_uri = socket.assigns.current_session_uri,
+         target = URI.new!("#{URI.to_string(session_uri)}?action=chat.join") do
       _ =
         Ezagent.Invocation.dispatch(%Ezagent.Invocation{
           target: target,
           mode: :cast,
           args: %{member: agent_uri},
-          ctx: ctx(socket)
+          ctx: %{
+            caller: socket.assigns.caller_uri,
+            caps: socket.assigns.caller_caps,
+            reply: :ignore
+          }
         })
 
-      # member_joined broadcast will refresh assigns
-      {:noreply, assign(socket, :flash_error, nil)}
+      {:noreply,
+       socket
+       |> assign_session_context(session_uri)
+       |> assign(:floating_agents, list_floating_agents())}
     else
-      _ -> {:noreply, assign(socket, :flash_error, "Bad URI for add-to-session")}
+      _ -> {:noreply, assign(socket, :flash_error, "Bad agent URI: #{agent_uri_str}")}
     end
   end
 
-  # phx-change fires for every form update; ignore empty selection.
-  def handle_event("add_agent_to_session", _params, socket), do: {:noreply, socket}
+  # Phase 8b §1.6 — Debug events toggle in setting dropdown.
+  def handle_event("toggle_debug_panel", _params, socket) do
+    {:noreply, assign(socket, :debug_open, not socket.assigns.debug_open)}
+  end
 
-  # Phase 5 PR 5: paginate history backwards. Reads oldest visible
-  # `inserted_at` cursor from assigns, queries MessageStore.older_than/3,
-  # prepends results to the stream (ascending). Cursor advances to the
-  # new oldest row; when the query returns empty, cursor stays so the
-  # button no-ops on subsequent clicks.
+  # Phase 8b §1.6 — Feishu binding unbind action.
+  def handle_event("unbind_feishu_chat", %{"chat_id" => chat_id}, socket) do
+    _ =
+      if Code.ensure_loaded?(EzagentPluginFeishu.SessionBinding) do
+        EzagentPluginFeishu.SessionBinding.unbind(chat_id)
+      end
+
+    {:noreply, assign_session_context(socket, socket.assigns.current_session_uri)}
+  end
+
+  # PTY input dispatch — when PtyView is active, xterm pushes pty_input.
+  def handle_event("pty_input", %{"bytes" => bytes}, socket) when is_binary(bytes) do
+    case socket.assigns.active_pty_agent_uri do
+      nil ->
+        {:noreply, socket}
+
+      agent_uri_str ->
+        case URI.new(agent_uri_str) do
+          {:ok, agent_uri} ->
+            target = URI.parse(URI.to_string(agent_uri) <> "?action=pty.write")
+
+            inv = %Ezagent.Invocation{
+              target: target,
+              mode: :cast,
+              args: %{bytes: bytes},
+              ctx: ctx(socket)
+            }
+
+            case Ezagent.Invocation.dispatch(inv) do
+              :ok ->
+                {:noreply, socket}
+
+              {:ok, _} ->
+                {:noreply, socket}
+
+              {:error, :unauthorized} ->
+                {:noreply,
+                 assign(
+                   socket,
+                   :flash_error,
+                   "Unauthorized — need agent.pty.write cap on this agent."
+                 )}
+
+              {:error, reason} ->
+                {:noreply, assign(socket, :flash_error, "PTY input failed: #{inspect(reason)}")}
+            end
+
+          _ ->
+            {:noreply, socket}
+        end
+    end
+  end
+
+  def handle_event("pty_resize", _params, socket), do: {:noreply, socket}
+
+  # Phase 5 PR 5 — paginate history backwards.
   def handle_event("load_older_messages", _params, socket) do
     case socket.assigns.oldest_cursor do
       nil ->
@@ -367,7 +390,7 @@ defmodule EzagentPluginLiveview.AdminLive do
           socket.assigns.current_session_uri
           |> Ezagent.MessageStore.older_than(cursor, @message_limit)
           |> Enum.reverse()
-          |> Enum.map(&message_to_row/1)
+          |> messages_to_rows()
 
         socket =
           Enum.reduce(older, socket, fn row, acc ->
@@ -378,100 +401,335 @@ defmodule EzagentPluginLiveview.AdminLive do
     end
   end
 
-  def handle_event(
-        "manual_dispatch",
-        %{"manual_dispatch" => %{"target" => target, "args" => args_json, "mode" => mode}},
-        socket
-      ) do
-    with {:ok, target_uri} <- safe_uri(target),
-         {:ok, args_map} <- safe_args(args_json),
-         {:ok, mode_atom} <- safe_mode(mode) do
-      inv = %Ezagent.Invocation{
-        target: target_uri,
-        mode: mode_atom,
-        args: args_map,
-        ctx: ctx(socket)
-      }
-
-      case Ezagent.Invocation.dispatch(inv) do
-        {:ok, _} -> {:noreply, assign(socket, :flash_error, nil)}
-        :ok -> {:noreply, assign(socket, :flash_error, nil)}
-        {:error, reason} -> {:noreply, assign(socket, :flash_error, "Dispatch failed: #{inspect(reason)}")}
-      end
-    else
-      {:error, reason} ->
-        {:noreply, assign(socket, :flash_error, reason)}
-    end
-  end
-
   # --- Render -----------------------------------------------------------
 
   @impl true
   def render(assigns) do
+    assigns =
+      assigns
+      |> assign_new(:status, fn ->
+        %{
+          session_uri: assigns.current_session_uri,
+          agents_alive: count_alive_agents(),
+          bridges: count_connected_bridges(),
+          debug_events: length(assigns.cc_events),
+          version: ezagent_version()
+        }
+      end)
+      |> assign_new(:view_render_fn, fn -> resolve_view_render(assigns) end)
+      # Phase 8c PR-F: top-left `ezagent / <workspace>` label +
+      # avatar dropdown "Admin" link gate. workspace_name reads the
+      # current session's bound workspace (PR-E #2 binds session://main
+      # to workspace://default, so this typically resolves to "default").
+      |> assign_new(:workspace_name, fn ->
+        workspace_name_for(assigns.current_session_uri)
+      end)
+      # PR-M (Allen 2026-05-20): `workspaces` + `is_admin?` are now
+      # set centrally by `EzagentWeb.LiveAuth.on_mount(:require_entity)`,
+      # which fires before this render. `assign_new` is kept as belt-
+      # and-suspenders for any test path that mounts this LV outside
+      # the `:require_entity` live_session.
+      |> assign_new(:is_admin?, fn ->
+        Ezagent.Identity.admin?(assigns.caller_uri_str)
+      end)
+
     ~H"""
-    <div style="max-width: 1200px; margin: 0 auto; padding: 24px; font-family: -apple-system, sans-serif;">
-      <header>
-        <h1 style="font-size: 22px; font-weight: 600;">Admin</h1>
-        <p style="font-size: 13px; color: #666;">
-          Caller: <code>{@caller_uri_str}</code>
-          <a href="/admin/workspaces" style="margin-left: 16px; color: #0969da;">Workspaces →</a>
-          <a href="/admin/routing" style="margin-left: 16px; color: #0969da;">Routing →</a>
-          <a href="/admin/users" style="margin-left: 16px; color: #0969da;">Users →</a>
-          <a href="/admin/snapshots" style="margin-left: 16px; color: #0969da;">Snapshots →</a>
-          <a href="/admin/entities" style="margin-left: 16px; color: #0969da;">Entities →</a>
-        </p>
-      </header>
-
-      <section id="layout" style="margin-top: 24px; display: grid; grid-template-columns: 200px 1fr 240px; gap: 16px;">
-        <.sessions_sidebar
+    <IdeShell.ide_shell
+      current_entity_uri={@caller_uri_str}
+      current_path="/sessions"
+      status={@status}
+      workspace_name={@workspace_name}
+      workspaces={@workspaces}
+      is_admin?={@is_admin?}
+    >
+      <:main_window>
+        <SessionEditor.session_editor
+          current_session_uri={@current_session_uri}
           sessions={@sessions}
-          current_session_uri={@current_session_uri}
-          floating_agents={@floating_agents}
+          applicable_views={@applicable_views}
+          current_view={@current_view}
           new_session_form={@new_session_form}
-        />
-
-        <.chat_window
-          current_session_uri={@current_session_uri}
-          messages_stream={@streams.messages}
-          member_options={@member_options}
           compose_form={@compose_form}
-          flash_error={@flash_error}
-          oldest_cursor={@oldest_cursor}
+          member_options={@member_options}
+          session_info={@session_info}
+          feishu_chat_ids={@feishu_chat_ids}
+          debug_open={@debug_open}
           uploads={@uploads}
+          flash_error={@flash_error}
+        >
+          <:main_view>
+            <.render_active_view
+              view_module={@view_module}
+              messages_stream={@streams.messages}
+              oldest_cursor={@oldest_cursor}
+              active_pty_agent_uri={@active_pty_agent_uri}
+              empty_state?={@messages_empty?}
+            />
+          </:main_view>
+        </SessionEditor.session_editor>
+
+        <section
+          :if={@debug_open and @cc_events != []}
+          class="border-t border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 max-h-48 overflow-y-auto p-3"
+        >
+          <h3 class="text-[10px] uppercase tracking-wide text-zinc-500 mb-1">
+            Debug events (last 20)
+          </h3>
+          <ul class="space-y-1 text-[11px]">
+            <li :for={ev <- @cc_events} class="flex gap-2">
+              <span class={[
+                "px-1 rounded font-semibold",
+                ev.level == "error" && "bg-rose-100 dark:bg-rose-900 text-rose-700 dark:text-rose-300",
+                ev.level == "warning" &&
+                  "bg-amber-100 dark:bg-amber-900 text-amber-700 dark:text-amber-300",
+                ev.level not in ["error", "warning"] &&
+                  "bg-zinc-200 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300"
+              ]}>
+                {ev.level}
+              </span>
+              <span class="font-mono text-[10px] text-zinc-500">{ev.bridge_id}</span>
+              <span class="flex-1">{ev.text}</span>
+            </li>
+          </ul>
+        </section>
+      </:main_window>
+
+      <:right_sidebar>
+        <MemberPanel.member_panel
+          members={@session_members}
+          floating_agents={@floating_agents}
+          display_map={@display_map}
         />
-
-        <.member_panel members={@session_members} />
-      </section>
-
-      <.debug_panel
-        connected_bridges={@connected_bridges}
-        form={@form}
-        invocations_stream={@streams.invocations}
-        cc_events={@cc_events}
-      />
-    </div>
+      </:right_sidebar>
+    </IdeShell.ide_shell>
     """
   end
 
+  # Helper component: render whichever SessionView is active. We pull
+  # the module out of assigns and call its `render/1` with the assigns
+  # the view declares it needs.
+  attr(:view_module, :atom, required: true)
+  attr(:messages_stream, :any, required: true)
+  attr(:oldest_cursor, :any, default: nil)
+  attr(:active_pty_agent_uri, :any, default: nil)
+  attr(:empty_state?, :boolean, default: false)
+
+  defp render_active_view(assigns) do
+    case assigns.view_module do
+      mod when is_atom(mod) and not is_nil(mod) ->
+        mod.render(assigns)
+
+      _ ->
+        # Fallback — should not happen because mount/3 always seeds
+        # :current_view = :conversation and ConversationView is
+        # registered by EzagentPluginLiveview.Application.start/2.
+        ConversationView.render(assigns)
+    end
+  end
+
+  # Compute the active view module from assigns. The render fn returns
+  # the module so `render/1` can avoid recomputing per-render.
+  defp resolve_view_render(%{current_view: view_id}) do
+    case SessionViewRegistry.lookup(view_id) do
+      {:ok, mod} -> mod
+      :error -> ConversationView
+    end
+  end
+
+  defp resolve_view_render(_), do: ConversationView
+
   # --- Helpers ----------------------------------------------------------
 
-  defp session_events_topic(%URI{} = uri) do
-    Ezagent.Behavior.Chat.session_events_topic(uri)
+  # Bundle the per-session reads needed by SessionEditor + MemberPanel.
+  #
+  # Username & Auth UI Task 1 (Phase 8c PR-O) — resolve display names
+  # for every URI that will be rendered to a human in one batch query
+  # (`Ezagent.EntityPresenter.display_many/1`). The same map covers
+  # the Members panel rows, the @mention picker JSON (so users can
+  # filter by name), and conversation message senders. Falls back to
+  # the URI path segment when no profile exists.
+  defp assign_session_context(socket, session_uri) do
+    members = read_session_members(session_uri)
+    member_uris = Enum.map(members, & &1.uri)
+    floating = list_floating_agents()
+    applicable = SessionViewRegistry.applicable_views(session_uri)
+
+    display_map = Ezagent.EntityPresenter.display_many(member_uris ++ floating)
+
+    member_options =
+      member_uris
+      |> Enum.sort()
+      |> Enum.map(fn uri ->
+        %{"uri" => uri, "display_name" => Map.get(display_map, uri, uri)}
+      end)
+
+    socket
+    |> assign(:session_members, members)
+    |> assign(:member_options, member_options)
+    |> assign(:floating_agents, floating)
+    |> assign(:display_map, display_map)
+    |> assign(:applicable_views, applicable)
+    |> assign(:view_module, view_module_for(applicable, current_view_or_default(socket)))
+    |> assign(:session_info, build_session_info(session_uri, members))
+    |> assign(:feishu_chat_ids, feishu_chat_ids_for(session_uri))
   end
+
+  defp current_view_or_default(socket) do
+    case Map.get(socket.assigns, :current_view) do
+      nil -> :conversation
+      v -> v
+    end
+  end
+
+  defp view_module_for(applicable, current_view_id) do
+    case Enum.find(applicable, &(&1.id == current_view_id)) do
+      %{module: mod} ->
+        mod
+
+      nil ->
+        case SessionViewRegistry.lookup(:conversation) do
+          {:ok, mod} -> mod
+          :error -> ConversationView
+        end
+    end
+  end
+
+  defp refresh_views_and_members(socket) do
+    assign_session_context(socket, socket.assigns.current_session_uri)
+  end
+
+  defp build_session_info(%URI{} = session_uri, members) do
+    workspace_str =
+      case Ezagent.WorkspaceRegistry.lookup(session_uri) do
+        {:ok, ws_uri} -> URI.to_string(ws_uri)
+        :error -> nil
+      end
+
+    created_at =
+      case Ezagent.MessageStore.recent_in_session(session_uri, 1) do
+        [%Ezagent.Message{inserted_at: at}] -> at
+        _ -> nil
+      end
+
+    %{
+      member_count: length(members),
+      workspace_uri: workspace_str,
+      created_at: created_at
+    }
+  end
+
+  defp feishu_chat_ids_for(%URI{} = session_uri) do
+    if Code.ensure_loaded?(EzagentPluginFeishu.SessionBinding) do
+      EzagentPluginFeishu.SessionBinding.chat_ids_for(session_uri)
+    else
+      []
+    end
+  end
+
+  # `@<entity://...>` extraction. The autocomplete inserts a trailing
+  # space, so `@uri ` is the canonical shape; permissive on EOL.
+  defp parse_mentions(text) when is_binary(text) do
+    ~r/@(entity:\/\/[^\s]+)/
+    |> Regex.scan(text, capture: :all_but_first)
+    |> List.flatten()
+    |> Enum.uniq()
+    |> Enum.flat_map(fn uri_str ->
+      case URI.new(uri_str) do
+        {:ok, uri} -> [uri]
+        _ -> []
+      end
+    end)
+  end
+
+  defp parse_mentions(_), do: []
+
+  defp safe_view_id(s) when is_binary(s) do
+    {:ok, String.to_existing_atom(s)}
+  rescue
+    ArgumentError -> :error
+  end
+
+  defp safe_view_id(_), do: :error
+
+  defp count_alive_agents do
+    Ezagent.KindRegistry.list_all()
+    |> Enum.count(fn {uri_str, _pid} -> String.starts_with?(uri_str, "entity://agent/") end)
+  end
+
+  defp count_connected_bridges do
+    if Code.ensure_loaded?(EzagentPluginCc.BridgeRegistry) do
+      length(EzagentPluginCc.BridgeRegistry.list_connected())
+    else
+      0
+    end
+  end
+
+  defp ezagent_version do
+    case Application.spec(:ezagent_core, :vsn) do
+      nil -> "dev"
+      vsn -> to_string(vsn)
+    end
+  end
+
+  defp session_events_topic(%URI{} = uri),
+    do: Ezagent.Behavior.Chat.session_events_topic(uri)
 
   defp load_session_messages(%URI{} = session_uri) do
     session_uri
     |> Ezagent.MessageStore.recent_in_session(@message_limit)
     |> Enum.reverse()
-    |> Enum.map(&message_to_row/1)
+    |> messages_to_rows()
   end
 
-  # Phase 5 PR 5: derive oldest cursor (inserted_at of earliest visible row)
-  # for the "Load older" button. Returns nil if no messages.
   defp oldest_cursor(rows) do
     case rows do
       [%{at: %DateTime{} = at} | _] -> at
       _ -> nil
+    end
+  end
+
+  # Phase 8c follow-up (Allen 2026-05-20) — see mount/3 comment.
+  #
+  # Q: "if main already exists and is persisted but isn't loaded for
+  #     some reason, won't create_session overwrite it?"
+  # A: No. `create_session/2` → `DynamicSupervisor.start_child(spec)`
+  #    → `Kind.Server.init` → `Snapshot.load_or_init/3` which is
+  #    rehydrate-aware:
+  #      - Session.persistence() == :ephemeral today → fresh
+  #        init_slice (no DB touch, nothing to overwrite)
+  #      - If/when Session flips to {:snapshot, :on_change}
+  #        (Phase 7 PR 46 TODO), load_or_init loads from DB and
+  #        merges with fresh init (Snapshot.load_with_fallback, Q5
+  #        for newly-added behaviors). Members / monitors /
+  #        last_seen come back from the snapshot.
+  #    Chat history is independent — it lives in MessageStore (its
+  #    own table), unaffected by Session Kind lifecycle.
+  #
+  # The {:already_started, _pid} branch inside create_session handles
+  # the race where the kind is alive in supervisor; it returns :ok
+  # without re-initializing state.
+  #
+  # Returns the URI on success (rehydrate-or-fresh-spawn). Returns
+  # the URI even on spawn failure — better to render an obviously-
+  # empty state than crash the LV; the spawn failure logs separately.
+  defp ensure_main_session(%URI{} = uri, socket) do
+    case Ezagent.KindRegistry.lookup(uri) do
+      {:ok, _pid} ->
+        uri
+
+      :error ->
+        creator =
+          Map.get(socket.assigns, :current_entity_uri) || Ezagent.Entity.User.admin_uri()
+
+        case EzagentDomainChat.create_session("main", creator) do
+          {:ok, _spawned_uri} ->
+            uri
+
+          {:error, reason} ->
+            require Logger
+            Logger.warning("AdminLive.ensure_main_session failed: #{inspect(reason)}")
+            uri
+        end
     end
   end
 
@@ -505,88 +763,58 @@ defmodule EzagentPluginLiveview.AdminLive do
     |> Enum.sort()
   end
 
-  # @-mention dropdown lists every member of the current session that
-  # could receive a routed message — users + agents both.
-  #
-  # Showing all KindRegistry agents (including floating) confused operators
-  # because @-mentioning a floating agent silently drops (Phase 3 P3-D9).
-  #
-  # PR #149 (S-4, entity-agnostic reflection §4): previously this fn
-  # filtered to `agent://`-prefixed URIs only, leaving humans-mentioning-
-  # other-humans unreachable via the UI even though the routing layer
-  # supported it. Now any session member (entity://user/* or
-  # entity://agent/*) is offered.
-  defp list_session_member_uris(%URI{} = session_uri) do
-    read_session_members(session_uri)
-    |> Enum.map(& &1.uri)
-    |> Enum.sort()
-  end
-
-  # Floating = agent in KindRegistry but not in any Session.chat.members.
   defp list_floating_agents do
     all_agents = list_agent_uris() |> MapSet.new()
 
     joined =
       EzagentDomainChat.list_sessions()
       |> Enum.flat_map(fn session_uri ->
-        read_session_members(session_uri)
-        |> Enum.map(& &1.uri)
+        read_session_members(session_uri) |> Enum.map(& &1.uri)
       end)
       |> MapSet.new()
 
-    MapSet.difference(all_agents, joined)
-    |> Enum.sort()
+    MapSet.difference(all_agents, joined) |> Enum.sort()
   end
 
-  defp bridge_topic_safely do
-    # Phase 7 PR 32c: v1 prototype deleted; v2 BridgeRegistry is the
-    # only source of connect/disconnect events.
-    EzagentPluginCc.BridgeRegistry.topic()
-  end
+  defp bridge_topic_safely, do: EzagentPluginCc.BridgeRegistry.topic()
 
-  defp list_bridges_safely do
-    # v2 returns [{agent_uri :: URI.t(), %{pid, connected_at, info}}].
-    # The debug panel's table renderer adapts to the shape — see
-    # ezagent_plugin_liveview/admin/debug_panel.ex.
-    EzagentPluginCc.BridgeRegistry.list_connected()
-  end
-
-  defp load_recent_invocations(n) do
-    %{rows: rows} =
-      EzagentCore.Repo.query!(
-        "SELECT target, action, authz, duration_us, inserted_at " <>
-          "FROM invocations ORDER BY id DESC LIMIT ?",
-        [n]
-      )
-
-    Enum.map(rows, fn [target, action, authz, duration_us, inserted_at] ->
-      %{
-        id: "hist-#{:erlang.unique_integer([:positive, :monotonic])}",
-        target: target,
-        action: action || "—",
-        authz: authz,
-        result: "ok",
-        duration_us: duration_us,
-        at: format_inserted_at(inserted_at)
-      }
-    end)
-  end
-
-  defp format_inserted_at(%NaiveDateTime{} = ndt), do: NaiveDateTime.to_iso8601(ndt)
-  defp format_inserted_at(s) when is_binary(s), do: s
-  defp format_inserted_at(other), do: inspect(other)
-
+  # Single-message variant — used by handle_info live deliveries
+  # where batching is not possible (one message at a time). Pays one
+  # DB hit for the sender's display name. Acceptable because chat
+  # delivery is human-paced (< 10/s).
   defp message_to_row(%Ezagent.Message{} = msg) do
     sender_str = URI.to_string(msg.sender)
 
     %{
       id: msg.id,
       sender: sender_str,
+      sender_display: Ezagent.EntityPresenter.display(sender_str),
       sender_kind: sender_kind(sender_str),
       text: body_text(msg.body),
       attachments: body_attachments(msg.body),
       at: msg.inserted_at
     }
+  end
+
+  # Batch variant — used for initial load + load-older. One
+  # display_many/1 query for the whole page, then per-row map lookup.
+  defp messages_to_rows(messages) when is_list(messages) do
+    sender_uris = Enum.map(messages, fn %Ezagent.Message{sender: s} -> URI.to_string(s) end)
+    display_map = Ezagent.EntityPresenter.display_many(sender_uris)
+
+    Enum.map(messages, fn %Ezagent.Message{} = msg ->
+      sender_str = URI.to_string(msg.sender)
+
+      %{
+        id: msg.id,
+        sender: sender_str,
+        sender_display: Map.get(display_map, sender_str, sender_str),
+        sender_kind: sender_kind(sender_str),
+        text: body_text(msg.body),
+        attachments: body_attachments(msg.body),
+        at: msg.inserted_at
+      }
+    end)
   end
 
   defp sender_kind(uri_str) do
@@ -601,16 +829,14 @@ defmodule EzagentPluginLiveview.AdminLive do
   defp body_text(%{"text" => t}) when is_binary(t), do: t
   defp body_text(_), do: ""
 
-  # PR-B: render-side attachment representation. Each entry becomes
-  # `{display_name, download_path}` where the path resolves to a
-  # GET /admin/uploads/:filename route (UploadsController).
-  defp body_attachments(%{attachments: list}) when is_list(list), do: Enum.map(list, &att_to_link/1)
+  defp body_attachments(%{attachments: list}) when is_list(list),
+    do: Enum.map(list, &att_to_link/1)
+
   defp body_attachments(%{"attachments" => list}) when is_list(list),
     do: Enum.map(list, &att_to_link/1)
 
   defp body_attachments(_), do: []
 
-  # `resource://uploads/<filename>` → host="uploads", path="/<filename>"
   defp att_to_link(%URI{scheme: "resource", host: "uploads", path: "/" <> filename}),
     do: {display_name(filename), "/admin/uploads/#{filename}"}
 
@@ -624,7 +850,6 @@ defmodule EzagentPluginLiveview.AdminLive do
     end
   end
 
-  # Stored as `<uuid>-<original>`. Drop the uuid prefix for display.
   defp display_name(<<_uuid::binary-size(36), "-", rest::binary>>), do: rest
   defp display_name(other), do: other
 
@@ -636,69 +861,6 @@ defmodule EzagentPluginLiveview.AdminLive do
     }
   end
 
-  defp event_to_row(%{event: event, measurements: m, metadata: meta, at: at}) do
-    %{
-      id: "ev-#{:erlang.unique_integer([:positive, :monotonic])}",
-      target: Map.get(meta, :target, "—"),
-      action: stringify(Map.get(meta, :action)),
-      authz: authz_label(event),
-      result: result_label(event, meta),
-      duration_us: Map.get(m, :duration_us, 0),
-      at: DateTime.to_iso8601(at)
-    }
-  end
-
-  # Phase 3d: :stub_grant gone. Real cap path emits :granted / :denied.
-  defp authz_label([:ezagent, :authz, :granted]), do: "granted"
-  defp authz_label([:ezagent, :authz, :denied]), do: "denied"
-  defp authz_label([:ezagent, :invoke, :stop]), do: "granted"
-  defp authz_label([:ezagent, :invoke, :error]), do: "—"
-  defp authz_label(_), do: "—"
-
-  defp result_label([:ezagent, :authz, :granted], _meta), do: "granted"
-  defp result_label([:ezagent, :authz, :denied], %{caller: c}), do: "denied (caller=#{c})"
-  defp result_label([:ezagent, :authz, :denied], _meta), do: "denied"
-  defp result_label([:ezagent, :invoke, :stop], _meta), do: "ok"
-
-  defp result_label([:ezagent, :invoke, :error], %{reason: :unauthorized}),
-    do: "denied"
-
-  defp result_label([:ezagent, :invoke, :error], %{reason: r}), do: "err: #{inspect(r)}"
-  defp result_label(_, _), do: "—"
-
-  defp stringify(nil), do: "—"
-  defp stringify(a) when is_atom(a), do: Atom.to_string(a)
-  defp stringify(s) when is_binary(s), do: s
-
-  defp safe_uri(s) when is_binary(s) do
-    case URI.new(s) do
-      {:ok, %URI{scheme: nil}} -> {:error, "target must include a scheme (e.g. entity://agent/...)"}
-      {:ok, uri} -> {:ok, uri}
-      {:error, _} -> {:error, "malformed URI"}
-    end
-  end
-
-  defp safe_uri(_), do: {:error, "target missing"}
-
-  defp safe_args(""), do: {:ok, %{}}
-
-  defp safe_args(json) when is_binary(json) do
-    case Jason.decode(json, keys: :atoms) do
-      {:ok, m} when is_map(m) -> {:ok, m}
-      {:ok, _} -> {:error, "args must be a JSON object"}
-      {:error, _} -> {:error, "invalid JSON in args"}
-    end
-  end
-
-  defp safe_args(_), do: {:ok, %{}}
-
-  defp safe_mode("call"), do: {:ok, :call}
-  defp safe_mode("cast"), do: {:ok, :cast}
-  defp safe_mode(other), do: {:error, "unsupported mode: #{inspect(other)}"}
-
-  # PR-B: strip path separators + any chars that misbehave in URLs/filesystems.
-  # We prepend a uuid anyway so collisions aren't a concern; this is purely
-  # about keeping the stored filename printable + safe for HTTP serving.
   defp sanitize_filename(name) when is_binary(name) do
     name
     |> Path.basename()
@@ -711,4 +873,69 @@ defmodule EzagentPluginLiveview.AdminLive do
   end
 
   defp sanitize_filename(_), do: "file"
+
+  defp send_chat_message(socket, text, attachments, mentions) do
+    msg =
+      Ezagent.Message.new(
+        socket.assigns.caller_uri,
+        %{text: text, attachments: attachments},
+        mentions: mentions
+      )
+
+    target = URI.new!("#{URI.to_string(socket.assigns.current_session_uri)}?action=chat.send")
+
+    inv = %Ezagent.Invocation{
+      target: target,
+      mode: :cast,
+      args: %{message: msg},
+      ctx: ctx(socket)
+    }
+
+    case Ezagent.Invocation.dispatch(inv) do
+      :ok ->
+        clear_compose(socket)
+
+      {:ok, _} ->
+        clear_compose(socket)
+
+      {:error, reason} ->
+        {:noreply, assign(socket, :flash_error, friendly_error("Send", reason))}
+    end
+  end
+
+  defp clear_compose(socket) do
+    # Phase 8c follow-up (Allen 2026-05-20) — Phoenix's DOM patcher
+    # leaves phx-hook-owned inputs alone, so the form-state reset
+    # below doesn't clear the browser DOM. Push an LV event the
+    # MentionAutocomplete hook listens for to do the actual clear.
+    {:noreply,
+     socket
+     |> assign(:flash_error, nil)
+     |> assign(:compose_form, to_form(%{"text" => ""}, as: "chat"))
+     |> Phoenix.LiveView.push_event("clear_compose", %{})}
+  end
+
+  defp friendly_error(_action, :unauthorized) do
+    "You don't have permission for this action. Contact admin for cap grant."
+  end
+
+  defp friendly_error(action, reason), do: "#{action} failed: #{inspect(reason)}"
+
+  # Phase 8c PR-F: look up the workspace name bound to the current
+  # session. Returns the URI host (e.g. "default" for workspace://default)
+  # or nil if the session isn't bound to any workspace. Used for the
+  # top-left `ezagent / <name>` label.
+  defp workspace_name_for(nil), do: nil
+
+  defp workspace_name_for(session_uri) do
+    case Ezagent.WorkspaceRegistry.lookup(session_uri) do
+      {:ok, %URI{host: name}} when is_binary(name) and name != "" -> name
+      _ -> nil
+    end
+  end
+
+  # Phase 8c PR-L → PR-M (Allen 2026-05-20): the private
+  # `list_known_workspaces/0` helper that used to live here is now
+  # `EzagentWeb.LiveAuth.list_known_workspaces/0` (centralized so
+  # every LV in `:require_entity` sees `@workspaces`, not just admin_live).
 end
