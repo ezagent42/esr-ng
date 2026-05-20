@@ -474,6 +474,7 @@ The UI obeys a **3-layer architecture** so changing one atom propagates to every
 - DON'T hard-code hex colors (`#1f883d`, `#cf222e`) — use Tailwind tokens (`bg-emerald-600`, `text-rose-600`).
 - DON'T introduce new fonts. Geist + JetBrains Mono are the only two; both loaded via Google Fonts in `root.html.heex`.
 - DON'T write inline `<style>` blocks in `.heex` files **except** in the controller-rendered auth boundary pages (login, custom 404) — they don't load `app.css` so they need self-contained `<style>` to brand themselves.
+- DON'T write `<%!-- ... --%>` inside a raw HTML heredoc string (e.g. `@login_html """..."""` in `session_controller.ex`). EEx comment syntax only works inside `.heex` templates; in a raw heredoc the literal text renders verbatim into the browser. **In raw heredocs use `<!-- ... -->` (HTML comments — the browser strips them).** Lesson Allen 2026-05-20 after Phase 8c login-form edit shipped the EEx-style comment as visible page text.
 - DON'T link to a route that doesn't exist. If a feature was deleted, REMOVE the link rather than leaving a dead button. Memory `feedback_ui_no_misleading_buttons`.
 
 ### Style-replacement safety checklist
