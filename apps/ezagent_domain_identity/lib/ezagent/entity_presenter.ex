@@ -1,0 +1,58 @@
+defmodule Ezagent.EntityPresenter do
+  @moduledoc """
+  Username & Auth M1 — read-only display helper for Entity URIs.
+
+  `display/1` for a single URI; `display_many/1` for batch resolution
+  (one query). Renderers that show many entities at once — chat member
+  lists, message history — MUST use `display_many/1` so display-name
+  lookup stays O(1) queries, never O(rows). (Design铁律 #2.)
+
+  Falls back to the URI path segment (`entity://user/admin` → `admin`)
+  when no `entity_profiles` row exists, so unprofiled entities (e.g.
+  the bootstrap admin, freshly-spawned agents) still render sanely.
+  """
+
+  import Ecto.Query
+  alias EzagentCore.Repo
+  alias Ezagent.Entity.Profile
+
+  @doc "Friendly name for one URI. Profile name, else URI path segment."
+  @spec display(URI.t() | String.t()) :: String.t()
+  def display(uri) do
+    uri_str = to_str(uri)
+
+    case Repo.get(Profile, uri_str) do
+      %Profile{display_name: name} when is_binary(name) and name != "" -> name
+      _ -> fallback(uri_str)
+    end
+  end
+
+  @doc """
+  Batch-resolve a list of URIs. Returns a `%{uri_string => name}` map
+  (keys are always strings, regardless of input shape).
+  """
+  @spec display_many([URI.t() | String.t()]) :: %{String.t() => String.t()}
+  def display_many(uris) when is_list(uris) do
+    uri_strs = Enum.map(uris, &to_str/1)
+
+    found =
+      from(p in Profile,
+        where: p.entity_uri in ^uri_strs,
+        select: {p.entity_uri, p.display_name}
+      )
+      |> Repo.all()
+      |> Map.new()
+
+    Map.new(uri_strs, fn u -> {u, Map.get(found, u) || fallback(u)} end)
+  end
+
+  defp fallback(uri_str) do
+    case URI.new(uri_str) do
+      {:ok, %URI{path: "/" <> name}} when name != "" -> name
+      _ -> uri_str
+    end
+  end
+
+  defp to_str(%URI{} = u), do: URI.to_string(u)
+  defp to_str(s) when is_binary(s), do: s
+end
