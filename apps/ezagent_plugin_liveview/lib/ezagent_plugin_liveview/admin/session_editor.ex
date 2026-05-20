@@ -316,10 +316,20 @@ defmodule EzagentPluginLiveview.Admin.SessionEditor do
       ></div>
 
       <div class="flex gap-2 items-center">
+        <%!-- Phase 8c follow-up (Allen 2026-05-20): the input was missing
+              `value=` binding so after phx-submit + assign back to
+              empty form, the browser kept its own DOM value (stale
+              text after send). Binding to @compose_form[:text].value
+              + phx-update="ignore" interplay would conflict with
+              MentionAutocomplete hook — so we explicitly bind value
+              and trust phx-change="validate_compose" to keep server
+              and client in sync (no-op handler is fine; the binding
+              alone is enough for clears to propagate). --%>
         <input
           type="text"
           name="chat[text]"
           id="chat-compose-input"
+          value={Phoenix.HTML.Form.input_value(@compose_form, :text) || ""}
           phx-hook="MentionAutocomplete"
           data-members={@members_json}
           data-popover="#mention-popover"
