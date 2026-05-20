@@ -98,7 +98,12 @@ export const MentionAutocomplete = {
       this.renderPopover(this._matches)
     } else if (e.key === "Enter") {
       e.preventDefault()
-      this.selectMention(this._matches[this._activeIndex])
+      // Phase 8c follow-up (Allen 2026-05-20) — selectMention takes a
+      // URI string; mouse-click path passes `dataset.uri`. Enter used
+      // to pass the whole match OBJECT, which template-literal'd as
+      // "[object Object]" into the input — broken mention, message
+      // never routed to the named agent.
+      this.selectMention(this._matches[this._activeIndex].uri)
     } else if (e.key === "Escape") {
       e.preventDefault()
       this.hidePopover()
@@ -150,6 +155,14 @@ export const MentionAutocomplete = {
     if (!uri) {
       this.hidePopover()
       return
+    }
+    // Defensive: a non-string arg means a caller mistake — silently
+    // coercing produces "[object Object]" in the input (the
+    // 2026-05-20 bug). Crash loudly instead.
+    if (typeof uri !== "string") {
+      throw new Error(
+        `MentionAutocomplete.selectMention expected URI string, got ${typeof uri}: ${JSON.stringify(uri)}`
+      )
     }
     const text = this.el.value
     const caret = this.el.selectionStart || text.length
