@@ -27,7 +27,8 @@ defmodule EzagentPluginLiveview.AgentDetailLive do
          |> assign(:not_found, false)
          |> assign(:agent_uri, agent_uri)
          |> assign(:flash_error, nil)
-         |> assign(:status, load_status(agent_uri))}
+         |> assign(:status, load_status(agent_uri))
+         |> assign(:bridge_entry, load_bridge_entry(agent_uri))}
 
       _ ->
         {:ok, assign(socket, :not_found, true) |> assign(:bad_uri, encoded_uri)}
@@ -55,9 +56,32 @@ defmodule EzagentPluginLiveview.AgentDetailLive do
     end
   end
 
+  # Phase 8b §1.10 — CC Bridges (v2) panel moved here from admin_live.
+  # Per-agent so the operator can see "is this agent's WS bridge live?"
+  # while looking at the agent's other status data. Returns `nil` if
+  # the BridgeRegistry has no entry for this agent (most likely cause:
+  # local-pty agent that doesn't open a WS bridge).
+  defp load_bridge_entry(agent_uri) do
+    if Code.ensure_loaded?(EzagentPluginCc.BridgeRegistry) do
+      EzagentPluginCc.BridgeRegistry.list_connected()
+      |> Enum.find(fn {uri, _entry} ->
+        URI.to_string(uri) == URI.to_string(agent_uri)
+      end)
+      |> case do
+        {_uri, entry} -> entry
+        nil -> nil
+      end
+    else
+      nil
+    end
+  end
+
   @impl true
   def handle_info(:refresh, socket) do
-    {:noreply, assign(socket, :status, load_status(socket.assigns.agent_uri))}
+    {:noreply,
+     socket
+     |> assign(:status, load_status(socket.assigns.agent_uri))
+     |> assign(:bridge_entry, load_bridge_entry(socket.assigns.agent_uri))}
   end
 
   @impl true
@@ -168,9 +192,9 @@ defmodule EzagentPluginLiveview.AgentDetailLive do
 
             <div style="margin-top: 12px; display: flex; gap: 8px;">
               <a
-                href={"/identities/agents/#{URI.encode_www_form(URI.to_string(@agent_uri))}/terminal"}
+                href="/sessions"
                 style="padding: 6px 14px; background: #1f883d; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; text-decoration: none;"
-              >📺 Open terminal (xterm)</a>
+              >📺 Open terminal (in Sessions)</a>
               <button
                 type="button"
                 phx-click="restart"
@@ -179,6 +203,34 @@ defmodule EzagentPluginLiveview.AgentDetailLive do
                 data-confirm="Restart PtyServer for this agent? (supervisor will respawn)"
               >Restart</button>
             </div>
+          </section>
+
+          <%!-- Phase 8b §1.10 — CC Bridges (v2) panel relocated from admin_live --%>
+          <section
+            id="cc-bridge-panel"
+            style="margin-top: 24px; padding: 16px; border: 1px solid #d1d5da; border-radius: 6px;"
+          >
+            <h2 style="font-size: 14px; font-weight: 500; margin: 0 0 12px 0;">CC Bridge (v2)</h2>
+            <p :if={is_nil(@bridge_entry)} style="font-size: 13px; color: #57606a;">
+              No WS bridge connected for this agent. Local-pty agents only need a bridge if
+              the Python sidecar is configured to mount <code>/cc_socket</code>.
+            </p>
+            <table :if={@bridge_entry} style="width: 100%; font-size: 13px;">
+              <tbody>
+                <tr>
+                  <td style="padding: 3px 0; width: 200px; color: #57606a;">status</td>
+                  <td style="color: #1f883d; font-weight: 600;">connected</td>
+                </tr>
+                <tr>
+                  <td style="padding: 3px 0; color: #57606a;">connected_at</td>
+                  <td style="color: #57606a;">{DateTime.to_iso8601(@bridge_entry.connected_at)}</td>
+                </tr>
+                <tr>
+                  <td style="padding: 3px 0; color: #57606a;">client</td>
+                  <td style="font-family: monospace; font-size: 11px;">{client_label(@bridge_entry)}</td>
+                </tr>
+              </tbody>
+            </table>
           </section>
 
           <section :if={s.recent_output != []} style="margin-top: 24px; padding: 16px; border: 1px solid #d1d5da; border-radius: 6px; background: #1e1e1e; color: #d4d4d4;">
@@ -192,4 +244,12 @@ defmodule EzagentPluginLiveview.AgentDetailLive do
     </IdeShell.ide_shell>
     """
   end
+
+  # Phase 8b §1.10 — CC Bridges client_label helper. Mirrors the shape
+  # the admin_live debug_panel used before relocation.
+  defp client_label(%{info: %{claude_info: %{"name" => name, "version" => v}}}),
+    do: "#{name} #{v}"
+
+  defp client_label(%{info: %{claude_info: %{"name" => name}}}), do: name
+  defp client_label(_), do: "—"
 end

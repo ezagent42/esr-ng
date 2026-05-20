@@ -73,7 +73,9 @@ defmodule EzagentWeb.Router do
       live "/identities/users/:uri/caps", UserCapsLive
       live "/identities/users/:uri/api-keys", UserApiKeysLive
       live "/identities/agents/:uri", AgentDetailLive
-      live "/identities/agents/:uri/terminal", PtyTerminalLive
+      # Phase 8b — `/identities/agents/:uri/terminal` retired. PTY is
+      # now accessed via the SessionEditor view-switcher on /sessions
+      # (terminal view registers via Ezagent.UI.SessionViewRegistry).
 
       # Plugins Activity.
       live "/plugins", PluginsLive

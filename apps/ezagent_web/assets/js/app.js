@@ -24,6 +24,7 @@ import {Socket} from "phoenix"
 import {LiveSocket} from "phoenix_live_view"
 import {hooks as colocatedHooks} from "phoenix-colocated/ezagent_web"
 import topbar from "../vendor/topbar"
+import {MentionAutocomplete} from "./hooks/mention_autocomplete"
 
 // Auto-scroll messages stream on new inserts AND preserve visual
 // position on history prepend.
@@ -126,7 +127,7 @@ const csrfToken = document.querySelector("meta[name='csrf-token']").getAttribute
 const liveSocket = new LiveSocket("/live", Socket, {
   longPollFallbackMs: 2500,
   params: {_csrf_token: csrfToken},
-  hooks: {...colocatedHooks, ScrollOnUpdate, PtyTerminal},
+  hooks: {...colocatedHooks, ScrollOnUpdate, PtyTerminal, MentionAutocomplete},
 })
 
 // Show progress bar on live navigation and form submits
