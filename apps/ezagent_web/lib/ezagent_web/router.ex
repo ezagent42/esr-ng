@@ -41,6 +41,13 @@ defmodule EzagentWeb.Router do
     pipe_through [:browser, EzagentWeb.Plugs.RequireEntity]
 
     get "/admin/uploads/:filename", UploadsController, :show
+
+    # Phase 9 PR-5 (SPEC v3 §6.4 amended): workspace switcher endpoint.
+    # Logged-in users POST here from the top-left workspace dropdown;
+    # controller clears session + redirects to /login?workspace=<target>.
+    # Must be inside `:require_entity` so anonymous traffic can't spam
+    # session-clearing POSTs.
+    post "/workspaces/switch", WorkspaceSwitchController, :switch
   end
 
   scope "/", EzagentPluginLiveview do

@@ -146,9 +146,14 @@ defmodule EzagentDomainUi.IdeShellTest do
       assert html =~ "demo"
       # Current marker on the active workspace
       assert html =~ "current"
-      # Non-current workspace links to /workspaces/<name>
-      assert html =~ ~s(href="/workspaces/demo")
-      # Manage link points to /workspaces
+      # Phase 9 PR-5 (SPEC v3 §6.4 amended): non-current workspace
+      # POSTs to /workspaces/switch (logout + re-auth flow), not a
+      # bare link to /workspaces/<name>. The hidden `workspace` field
+      # carries the target so the controller can route the user.
+      assert html =~ ~s(action="/workspaces/switch")
+      assert html =~ ~s(name="workspace" value="demo")
+      # Manage link still points to /workspaces (separate "Manage
+      # workspaces..." entry at the bottom of the dropdown).
       assert html =~ ~s(href="/workspaces")
       assert html =~ "Manage workspaces..."
     end

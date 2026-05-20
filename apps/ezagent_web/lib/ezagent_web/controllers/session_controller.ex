@@ -219,12 +219,15 @@ defmodule EzagentWeb.SessionController do
       <p class="brand">ezagent</p>
       <h1>Sign in</h1>
 
+      {{WORKSPACE_BANNER}}
+
       {{NOTICE}}
 
       <p class="section-label">With password</p>
       {{CRED_ERROR}}
       <form method="post" action="/login/credentials">
         <input type="hidden" name="_csrf_token" value="{{CSRF}}">
+        {{WORKSPACE_HIDDEN}}
         <label for="entity_uri">Username or entity URI</label>
         <input type="text" id="entity_uri" name="entity_uri" placeholder="admin   or   entity://user/default/admin" required autofocus>
         <label for="secret">Password or token</label>
@@ -262,8 +265,12 @@ defmodule EzagentWeb.SessionController do
   """
 
   # GET /login — unified login page with both credential and email forms.
-  def new(conn, _params) do
-    render_login_page(conn, [])
+  # Phase 9 PR-5 (SPEC v3 §6.4 amended): accepts `?workspace=<name>` query
+  # param. When present, the bare-handle path canonicalizes into that
+  # workspace instead of `default`, and the page surfaces "Signing into
+  # <name>" so the user understands the context they're about to enter.
+  def new(conn, params) do
+    render_login_page(conn, workspace: Map.get(params, "workspace"))
   end
 
   # POST /login — email magic-link submit. Renders the unified page with
@@ -282,8 +289,8 @@ defmodule EzagentWeb.SessionController do
   # GET /login/credentials — back-compat alias for /login. Renders the
   # same unified page; kept so any cached bookmark / external link still
   # works rather than 404-ing.
-  def credentials_new(conn, _params) do
-    render_login_page(conn, [])
+  def credentials_new(conn, params) do
+    render_login_page(conn, workspace: Map.get(params, "workspace"))
   end
 
   # POST /login/credentials — password submit. On success: canonical
@@ -291,17 +298,24 @@ defmodule EzagentWeb.SessionController do
   # render unified page with inline error above the credentials form
   # (no separate page-bounce — that was the bug Allen reported
   # 2026-05-20).
-  def credentials_create(conn, %{"entity_uri" => uri_str, "secret" => secret}) do
-    case SessionPrincipal.canonicalize(uri_str) do
+  #
+  # Phase 9 PR-5 (SPEC v3 §6.4 amended): `workspace` form param (or
+  # query param) overrides the default workspace for bare-handle
+  # canonicalization. Full `entity://` URIs ignore it (the URI already
+  # carries its workspace segment).
+  def credentials_create(conn, %{"entity_uri" => uri_str, "secret" => secret} = params) do
+    workspace = workspace_param(conn, params)
+
+    case SessionPrincipal.canonicalize(uri_str, workspace: workspace) do
       canonical ->
         case authenticate(canonical, secret) do
           :ok ->
             conn
-            |> SessionPrincipal.put(canonical)
+            |> SessionPrincipal.put(canonical, workspace: workspace)
             |> redirect(to: "/sessions")
 
           :error ->
-            render_login_page(conn, cred_error: "Invalid URI or credentials.")
+            render_login_page(conn, cred_error: "Invalid URI or credentials.", workspace: workspace)
         end
     end
   rescue
@@ -309,16 +323,22 @@ defmodule EzagentWeb.SessionController do
     # (e.g. "foo@bar.com" or whitespace) — same UX as bad credentials,
     # no enumeration leak.
     ArgumentError ->
-      render_login_page(conn, cred_error: "Invalid URI or credentials.")
+      render_login_page(conn,
+        cred_error: "Invalid URI or credentials.",
+        workspace: workspace_param(conn, params)
+      )
   end
 
-  def credentials_create(conn, _params) do
-    render_login_page(conn, cred_error: "Username/URI and password/token are required.")
+  def credentials_create(conn, params) do
+    render_login_page(conn,
+      cred_error: "Username/URI and password/token are required.",
+      workspace: workspace_param(conn, params)
+    )
   end
 
   def delete(conn, _params) do
     conn
-    |> clear_session()
+    |> SessionPrincipal.clear()
     |> redirect(to: "/login")
   end
 
@@ -327,15 +347,24 @@ defmodule EzagentWeb.SessionController do
   defp render_login_page(conn, opts) do
     notice = Keyword.get(opts, :notice, "")
     cred_error = Keyword.get(opts, :cred_error)
+    workspace = Keyword.get(opts, :workspace)
 
     cred_error_html =
       if cred_error,
         do: ~s(<div class="error">) <> Plug.HTML.html_escape(cred_error) <> "</div>",
         else: ""
 
+    # Phase 9 PR-5 (SPEC v3 §6.4): show "Signing into <workspace>" banner
+    # when the login form was reached via the workspace switcher
+    # (logout-and-redirect with ?workspace=<name>). Bare-handle inputs
+    # will canonicalize into this workspace instead of `default`.
+    {workspace_banner, workspace_hidden} = workspace_form_bits(workspace)
+
     email_section =
       if Ezagent.AppSettings.smtp_configured?() do
-        String.replace(@email_form, "{{CSRF}}", Plug.CSRFProtection.get_csrf_token())
+        @email_form
+        |> String.replace("{{CSRF}}", Plug.CSRFProtection.get_csrf_token())
+        |> String.replace("{{WORKSPACE_HIDDEN}}", workspace_hidden)
       else
         @email_disabled_notice
       end
@@ -344,12 +373,44 @@ defmodule EzagentWeb.SessionController do
       @login_html
       |> String.replace("{{NOTICE}}", notice)
       |> String.replace("{{CRED_ERROR}}", cred_error_html)
+      |> String.replace("{{WORKSPACE_BANNER}}", workspace_banner)
+      |> String.replace("{{WORKSPACE_HIDDEN}}", workspace_hidden)
       |> String.replace("{{EMAIL_SECTION}}", email_section)
       |> String.replace("{{CSRF}}", Plug.CSRFProtection.get_csrf_token())
 
     conn
     |> put_resp_content_type("text/html")
     |> send_resp(200, html)
+  end
+
+  # Reads the workspace context from form params (POST) or query string
+  # (GET). Returns the requested workspace name as a string, or "default"
+  # as the safe fallback. The fallback matches `SessionPrincipal`'s
+  # built-in default so behavior is identical when the param is absent.
+  defp workspace_param(conn, params) do
+    Map.get(params, "workspace") ||
+      Map.get(conn.query_params, "workspace") ||
+      "default"
+  end
+
+  # Renders the workspace banner + hidden form field when a non-default
+  # workspace is requested. Returns empty strings for `nil` / "default"
+  # so the form is unchanged on the happy path (direct /login visit).
+  defp workspace_form_bits(nil), do: {"", ""}
+  defp workspace_form_bits("default"), do: {"", ""}
+
+  defp workspace_form_bits(workspace) when is_binary(workspace) do
+    escaped = Plug.HTML.html_escape(workspace)
+
+    banner =
+      ~s(<div class="info">Signing into workspace <code>) <>
+        escaped <>
+        ~s(</code>.</div>)
+
+    hidden =
+      ~s(<input type="hidden" name="workspace" value=") <> escaped <> ~s(">)
+
+    {banner, hidden}
   end
 
   # Returns :ok always (caller ignores it — anti-enumeration). Internally
