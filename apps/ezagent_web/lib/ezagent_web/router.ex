@@ -20,6 +20,8 @@ defmodule EzagentWeb.Router do
     live "/", HomeLive
 
     # Phase 4-completion Spec 05 §A.2.3 — controller-rendered login.
+    get "/login", SessionController, :new
+    post "/login", SessionController, :create
     get "/login/credentials", SessionController, :credentials_new
     post "/login/credentials", SessionController, :credentials_create
     delete "/logout", SessionController, :delete
