@@ -548,11 +548,16 @@ defmodule EzagentDomainUi.IdeShell do
           >
             Profile
           </a>
+          <%!-- Phase 8c follow-up (Allen 2026-05-20) — renamed
+                "Settings" to "Preferences" to disambiguate from
+                "Admin Settings" below. Preferences = personal
+                config (theme, keyboard, account); Admin =
+                system-level sysadmin pages. --%>
           <a
             href="/settings"
             class="block px-3 py-1.5 text-xs text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800"
           >
-            Settings
+            Preferences
           </a>
           <%!-- Phase 8c PR-F (Allen 2026-05-20) — Admin link opens the
                 AdminSettingsShell drawer (system layer of the 3-layer

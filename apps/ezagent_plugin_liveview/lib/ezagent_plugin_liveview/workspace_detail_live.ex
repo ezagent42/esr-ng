@@ -282,6 +282,7 @@ defmodule EzagentPluginLiveview.WorkspaceDetailLive do
       current_entity_uri={@current_entity_uri_str}
       current_path={"/workspaces/" <> @workspace.name}
       status={%{agents_alive: 0, bridges: 0, debug_events: 0, version: "dev"}}
+      is_admin?={@is_admin?}
     >
       <:resource_panel>
         <div class="p-3">

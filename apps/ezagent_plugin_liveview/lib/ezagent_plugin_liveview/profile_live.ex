@@ -45,6 +45,7 @@ defmodule EzagentPluginLiveview.ProfileLive do
       current_entity_uri={@current_entity_uri_str}
       current_path="/profile"
       status={%{agents_alive: 0, bridges: 0, debug_events: 0, version: "dev"}}
+      is_admin?={@is_admin?}
     >
       <:main_window>
         <div class="flex-1 overflow-auto px-6 py-6 max-w-3xl">

@@ -56,12 +56,32 @@ defmodule EzagentWeb.LiveAuth do
       uri_str when is_binary(uri_str) ->
         case parse_entity_uri(uri_str) do
           {:ok, uri} ->
-            {:cont, assign(socket, :current_entity_uri, uri)}
+            {:cont,
+             socket
+             |> assign(:current_entity_uri, uri)
+             |> assign(:is_admin?, admin?(uri))}
 
           :error ->
             # Malformed / non-entity URI → treat as unauthenticated.
             {:halt, redirect(socket, to: "/login")}
         end
+    end
+  end
+
+  # Phase 8c follow-up (Allen 2026-05-20) — `is_admin?` was set in
+  # admin_live's mount but not propagated to the other 12 LVs that
+  # wrap IdeShell. Result: Admin link in avatar dropdown disappeared
+  # when navigating to /profile or /settings even for admin users.
+  # Setting it here on every LV in the `:require_entity` live_session
+  # means avatar_menu reads it uniformly. assign_new in admin_live
+  # still works (this fires first, admin_live's assign_new sees a
+  # value and is a no-op).
+  defp admin?(uri) do
+    if Code.ensure_loaded?(Ezagent.Identity) and
+         function_exported?(Ezagent.Identity, :admin?, 1) do
+      Ezagent.Identity.admin?(uri)
+    else
+      false
     end
   end
 
