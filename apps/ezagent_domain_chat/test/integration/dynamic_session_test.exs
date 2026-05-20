@@ -37,8 +37,11 @@ defmodule EzagentDomainChat.Integration.DynamicSessionTest do
     assert uri1 == uri2
   end
 
-  test "main short-name is rejected (static child only)" do
-    assert {:error, :main_is_static} = EzagentDomainChat.create_session("main")
+  test "empty short-name is rejected" do
+    # PR-J — the legacy `:main_is_static` rejection was dropped (main is
+    # now created via this same facade by the first-login wizard).
+    # An empty string still doesn't make sense as a session name.
+    assert {:error, :short_name_required} = EzagentDomainChat.create_session("")
   end
 
   test "list_sessions includes main + any dynamic sessions" do

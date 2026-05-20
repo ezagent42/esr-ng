@@ -66,7 +66,14 @@ defmodule EzagentPluginEcho.Application do
   end
 
   defp register_behaviors do
+    # `:say` is the historical programmatic-invoke action (Phase 1
+    # contract). `:receive` is the fan-out hook — Session's chat.send
+    # dispatches `chat.receive` to every Echo agent in members; without
+    # this registration, that dispatch returns `:not_registered` and
+    # the echo agent silently drops every chat msg (the regression
+    # Allen flagged 2026-05-20).
     :ok = Ezagent.BehaviorRegistry.register(Ezagent.Entity.Echo, :say, Ezagent.Behavior.Echo)
+    :ok = Ezagent.BehaviorRegistry.register(Ezagent.Entity.Echo, :receive, Ezagent.Behavior.Echo)
   end
 
   defp spawn_default_instance do

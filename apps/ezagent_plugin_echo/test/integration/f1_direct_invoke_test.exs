@@ -106,6 +106,82 @@ defmodule EzagentPluginEcho.Integration.F1DirectInvokeTest do
     assert_receive {:audit_event, %{event: [:ezagent, :invoke, :stop]}}, 500
   end
 
+  test "PR-J regression: echo :receive replies via chat.send back to originating session" do
+    # The bug Allen flagged 2026-05-20: Echo agent in session://main
+    # never replied. Root cause: `:receive` was not registered in
+    # BehaviorRegistry — `chat.send` fan-out dispatched `chat.receive`
+    # to the Echo Kind and got `:not_registered`.
+    #
+    # This test joins the default Echo agent into session://main,
+    # subscribes to the session's chat-stream PubSub topic, dispatches
+    # `chat.send` from admin, and asserts an "echo: <text>" reply
+    # message lands within 500ms.
+    session_uri = URI.new!("session://main")
+    echo_agent_uri = EchoApp.default_uri()
+    admin_uri = Ezagent.Entity.User.admin_uri()
+
+    # Ensure echo agent is in the session.
+    join_target = URI.new!("#{URI.to_string(session_uri)}?action=chat.join")
+
+    {:ok, _} =
+      Invocation.dispatch(%Invocation{
+        target: join_target,
+        mode: :call,
+        args: %{member: echo_agent_uri},
+        ctx: %{
+          caller: admin_uri,
+          caps: Ezagent.Entity.User.admin_caps(),
+          reply: {:caller_inbox, self()}
+        }
+      })
+
+    # Subscribe BEFORE sending so we don't miss the broadcast.
+    session_topic = Ezagent.Behavior.Chat.session_events_topic(session_uri)
+    :ok = Phoenix.PubSub.subscribe(EzagentCore.PubSub, session_topic)
+
+    text = "ping-#{System.unique_integer([:positive])}"
+
+    msg =
+      Ezagent.Message.new(admin_uri, %{text: text, attachments: []},
+        mentions: [echo_agent_uri]
+      )
+
+    send_target = URI.new!("#{URI.to_string(session_uri)}?action=chat.send")
+
+    :ok =
+      Invocation.dispatch(%Invocation{
+        target: send_target,
+        mode: :cast,
+        args: %{message: msg},
+        ctx: %{
+          caller: admin_uri,
+          caps: Ezagent.Entity.User.admin_caps(),
+          reply: :ignore
+        }
+      })
+
+    # First broadcast: the original message.
+    assert_receive {:chat_message, ^session_uri, %Ezagent.Message{} = first}, 1000
+    assert get_in(first.body, [Access.key!(:text)]) == text or
+             get_in(first.body, ["text"]) == text
+
+    # Second broadcast: echo's reply ("echo: ping-XXX") from the echo
+    # agent's URI. Match on text prefix to avoid coupling to id.
+    assert_receive {:chat_message, ^session_uri, %Ezagent.Message{} = reply}, 1000
+
+    reply_text =
+      case reply.body do
+        %{text: t} -> t
+        %{"text" => t} -> t
+      end
+
+    assert reply_text == "echo: #{text}",
+           "expected echo reply 'echo: #{text}', got #{inspect(reply_text)}"
+
+    assert reply.sender == echo_agent_uri,
+           "expected reply.sender == echo agent URI, got #{inspect(reply.sender)}"
+  end
+
   test "F1 invalid args fail-stop at validator (does not reach Echo slice)" do
     target = URI.parse("#{URI.to_string(EchoApp.default_uri())}?action=echo.say")
 
