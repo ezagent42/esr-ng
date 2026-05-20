@@ -32,17 +32,17 @@ defmodule EzagentWeb.SessionController do
   <body>
     <h1>Ezagent Login</h1>
     {{ERROR}}
-    <form method="post" action="/login">
+    <form method="post" action="/login/credentials">
       <input type="hidden" name="_csrf_token" value="{{CSRF}}">
-      <label for="entity_uri">Entity URI</label>
-      <input type="text" id="entity_uri" name="entity_uri" placeholder="entity://user/allen" required autofocus>
+      <label for="entity_uri">Username or Entity URI</label>
+      <input type="text" id="entity_uri" name="entity_uri" placeholder="admin   or   entity://user/admin" required autofocus>
       <label for="secret">Password / Token</label>
       <input type="password" id="secret" name="secret" required>
       <button type="submit">Sign in</button>
     </form>
     <p class="hint">
-      First time? Admin runs <code>mix ezagent.user.set_password entity://user/admin --password X</code>,
-      then sign in as <code>entity://user/admin</code>. Agent URIs
+      Bare usernames (<code>admin</code>) are accepted as a shortcut for
+      <code>entity://user/admin</code>. Agent URIs
       (<code>entity://agent/&lt;flavor&gt;_&lt;name&gt;</code>) sign in with a bearer token
       minted via the entity_tokens admin.
     </p>
@@ -152,11 +152,13 @@ defmodule EzagentWeb.SessionController do
   end
 
   def credentials_create(conn, %{"entity_uri" => uri_str, "secret" => secret}) do
-    case authenticate(uri_str, secret) do
+    canonical = normalize_principal(uri_str)
+
+    case authenticate(canonical, secret) do
       :ok ->
         conn
         |> configure_session(renew: true)
-        |> put_session(:current_entity_uri, uri_str)
+        |> put_session(:current_entity_uri, canonical)
         |> redirect(to: "/admin")
 
       :error ->
@@ -190,6 +192,25 @@ defmodule EzagentWeb.SessionController do
         :error
     end
   end
+
+  # Bare handle "admin" → "entity://user/admin". Accepts entity://… as-is.
+  # Anything else returns trimmed input and lets authenticate/2 reject it.
+  defp normalize_principal(input) when is_binary(input) do
+    trimmed = String.trim(input)
+
+    cond do
+      String.starts_with?(trimmed, "entity://") ->
+        trimmed
+
+      String.match?(trimmed, ~r/^[a-zA-Z0-9_-]+$/) ->
+        "entity://user/" <> String.downcase(trimmed)
+
+      true ->
+        trimmed
+    end
+  end
+
+  defp normalize_principal(other), do: other
 
   defp flash_error(conn) do
     case conn.assigns[:flash] do
