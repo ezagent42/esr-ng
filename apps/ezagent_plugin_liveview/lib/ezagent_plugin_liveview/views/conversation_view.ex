@@ -60,8 +60,7 @@ defmodule EzagentPluginLiveview.Views.ConversationView do
             surface IS. Disappears the moment a real message lands. --%>
       <div
         :if={@empty_state?}
-        class="flex-1 flex items-center justify-center"
-        style="background-image: radial-gradient(circle, #e4e4e7 1px, transparent 1px); background-size: 16px 16px;"
+        class="flex-1 flex items-center justify-center ez-dot-grid"
       >
         <div class="text-center">
           <div class="font-mono text-xs uppercase tracking-widest text-zinc-400 dark:text-zinc-600">

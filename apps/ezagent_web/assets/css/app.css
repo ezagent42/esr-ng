@@ -133,6 +133,20 @@ code, kbd, pre, samp, .font-mono {
   font-feature-settings: "calt", "ss02";
 }
 
+/* Phase 8c follow-up (Allen 2026-05-20) — dot-grid empty state used
+   zinc-200 (#e4e4e7) which is ALMOST WHITE against dark backgrounds;
+   it read as "huge field of bright noise" not "subtle texture" in
+   dark mode. Theme-aware via CSS attribute selectors (inline `style=`
+   can't pick up Tailwind's `dark:` variant). */
+.ez-dot-grid {
+  background-image: radial-gradient(circle, #e4e4e7 1px, transparent 1px);
+  background-size: 16px 16px;
+}
+
+[data-theme="dark"] .ez-dot-grid {
+  background-image: radial-gradient(circle, #27272a 1px, transparent 1px);
+}
+
 /* Phase 8c PR-D — typing-animation placeholder for the Top Command Bar
    "fake search" button (apps/ezagent_domain_ui/lib/.../ide_shell.ex
    top_command_bar/1).
