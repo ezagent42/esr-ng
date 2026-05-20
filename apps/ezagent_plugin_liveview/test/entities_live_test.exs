@@ -1,10 +1,11 @@
 defmodule EzagentPluginLiveview.EntitiesLiveTest do
   @moduledoc """
-  PR #149 (S-5) invariant — `/admin/entities` is the unified live
+  PR #149 (S-5) invariant — `/admin/registry` is the unified live
   registry surface; lists every URI in `Ezagent.KindRegistry`
   regardless of scheme. Replaces the agent-only `/admin/agents`
-  list page (per-PTY detail + terminal routes stay at
-  `/identities/agents/:uri` / `/identities/agents/:uri/terminal`).
+  list page. The agent detail page stays at `/identities/agents/:uri`;
+  PTY now lives inside SessionView (Phase 8b retired the standalone
+  `/identities/agents/:uri/terminal` route).
   """
   use ExUnit.Case
   import Phoenix.ConnTest

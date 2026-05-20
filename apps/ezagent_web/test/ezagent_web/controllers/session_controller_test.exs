@@ -13,7 +13,7 @@ defmodule EzagentWeb.SessionControllerTest do
   end
 
   describe "POST /login" do
-    test "happy path: valid creds → session set + redirect to /admin" do
+    test "happy path: valid creds → session set + redirect to /sessions" do
       uri = "entity://user/login-happy-#{System.unique_integer([:positive])}"
       {:ok, _} = Ezagent.Users.create(uri, "right-pw", [])
 
@@ -22,7 +22,9 @@ defmodule EzagentWeb.SessionControllerTest do
         |> Plug.Test.init_test_session(%{})
         |> post("/login/credentials", %{"entity_uri" => uri, "secret" => "right-pw"})
 
-      assert redirected_to(conn) == "/admin"
+      # Phase 8 polish (Allen 2026-05-20) — landing page promoted from
+      # /admin (now Dashboard) to /sessions (now default Activity).
+      assert redirected_to(conn) == "/sessions"
       assert Plug.Conn.get_session(conn, :current_entity_uri) == uri
     end
 

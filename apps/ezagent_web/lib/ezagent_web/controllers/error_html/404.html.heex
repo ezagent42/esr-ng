@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <title>404 · ezagent</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+    />
+    <style>
+      :root {
+        --font-sans: 'Geist', ui-sans-serif, system-ui, -apple-system, sans-serif;
+        --font-mono: 'JetBrains Mono', ui-monospace, Menlo, monospace;
+        --ink: #0a0a0a;
+        --ink-dim: #525252;
+        --ink-faint: #a3a3a3;
+        --line: #e5e5e5;
+        --accent: #1f883d;
+      }
+      * { box-sizing: border-box; }
+      html, body { height: 100%; margin: 0; }
+      body {
+        font-family: var(--font-sans);
+        color: var(--ink);
+        background:
+          linear-gradient(180deg, #fafafa 0%, #fff 100%);
+        display: grid;
+        place-items: center;
+        padding: 24px;
+      }
+      .wrap { max-width: 520px; width: 100%; text-align: center; }
+      .code {
+        font-family: var(--font-mono);
+        font-size: 11px;
+        letter-spacing: 0.18em;
+        color: var(--ink-faint);
+        text-transform: uppercase;
+        margin: 0 0 32px;
+      }
+      .pattern {
+        font-family: var(--font-mono);
+        font-size: 14px;
+        line-height: 1.5;
+        color: var(--ink-faint);
+        white-space: pre;
+        margin: 0 0 32px;
+        user-select: none;
+      }
+      h1 {
+        font-size: 28px;
+        font-weight: 600;
+        letter-spacing: -0.02em;
+        margin: 0 0 8px;
+      }
+      .subtitle {
+        font-size: 15px;
+        color: var(--ink-dim);
+        margin: 0 0 32px;
+        line-height: 1.5;
+      }
+      .actions { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
+      .btn {
+        font-family: var(--font-sans);
+        font-size: 13px;
+        font-weight: 500;
+        padding: 8px 16px;
+        border-radius: 8px;
+        border: 1px solid var(--line);
+        background: #fff;
+        color: var(--ink);
+        text-decoration: none;
+        transition: all 120ms ease;
+      }
+      .btn:hover { border-color: var(--ink); }
+      .btn-primary { background: var(--ink); color: #fff; border-color: var(--ink); }
+      .btn-primary:hover { opacity: 0.85; }
+      .brand {
+        position: fixed;
+        top: 20px;
+        left: 20px;
+        font-family: var(--font-mono);
+        font-size: 11px;
+        letter-spacing: 0.18em;
+        color: var(--ink-dim);
+        text-transform: uppercase;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="brand">ezagent</div>
+    <div class="wrap">
+      <p class="code">404 · not found</p>
+      <div class="pattern">∅</div>
+      <h1>This path doesn't lead anywhere.</h1>
+      <p class="subtitle">
+        The URL you opened isn't a route ezagent serves right now. If you
+        followed a link from inside the app and landed here, that's a bug
+        worth reporting.
+      </p>
+      <div class="actions">
+        <a class="btn btn-primary" href="/sessions">Open Sessions</a>
+        <a class="btn" href="/identities">Browse Identities</a>
+        <a class="btn" href="/admin">Admin Dashboard</a>
+      </div>
+    </div>
+  </body>
+</html>

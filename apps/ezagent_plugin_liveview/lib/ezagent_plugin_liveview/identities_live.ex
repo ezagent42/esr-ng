@@ -186,11 +186,6 @@ defmodule EzagentPluginLiveview.IdentitiesLive do
                 href={"/identities/agents/" <> URI.encode_www_form(@entity.uri_str)}
                 class="text-zinc-700 hover:text-zinc-900 underline"
               >Status</a>
-              <a
-                :if={@entity.flavor == "cc"}
-                href={"/identities/agents/" <> URI.encode_www_form(@entity.uri_str) <> "/terminal"}
-                class="text-zinc-700 hover:text-zinc-900 underline"
-              >Terminal</a>
             <% end %>
           </div>
         </div>

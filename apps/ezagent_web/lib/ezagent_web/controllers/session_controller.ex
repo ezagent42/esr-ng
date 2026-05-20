@@ -14,38 +14,114 @@ defmodule EzagentWeb.SessionController do
 
   @login_html """
   <!DOCTYPE html>
-  <html>
+  <html lang="en">
   <head>
-    <title>Ezagent Login</title>
+    <title>ezagent · sign in</title>
     <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
     <style>
-      body { font-family: -apple-system, sans-serif; max-width: 400px; margin: 80px auto; padding: 24px; }
-      h1 { font-size: 24px; }
-      form { display: flex; flex-direction: column; gap: 12px; }
-      label { font-size: 13px; color: #666; }
-      input { padding: 8px 10px; border: 1px solid #d1d5da; border-radius: 4px; font-size: 14px; }
-      button { padding: 10px; background: #1f883d; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; }
-      .error { color: #cf222e; font-size: 13px; padding: 8px; background: #ffebe9; border-radius: 4px; margin-bottom: 8px; }
-      .hint { color: #57606a; font-size: 12px; margin-top: 8px; }
+      :root {
+        --font-sans: 'Geist', ui-sans-serif, system-ui, -apple-system, sans-serif;
+        --font-mono: 'JetBrains Mono', ui-monospace, Menlo, monospace;
+        --ink: #0a0a0a;
+        --ink-dim: #525252;
+        --line: #e5e5e5;
+        --accent: #1f883d;
+        --accent-faint: #e6f4ea;
+      }
+      * { box-sizing: border-box; }
+      html, body { height: 100%; }
+      body {
+        margin: 0;
+        font-family: var(--font-sans);
+        color: var(--ink);
+        background:
+          radial-gradient(circle at 0% 0%, rgba(31,136,61,0.04), transparent 40%),
+          radial-gradient(circle at 100% 100%, rgba(10,10,10,0.03), transparent 40%),
+          #fafafa;
+        display: grid;
+        place-items: center;
+        padding: 24px;
+      }
+      .card {
+        width: 100%;
+        max-width: 380px;
+        background: #fff;
+        border: 1px solid var(--line);
+        border-radius: 12px;
+        padding: 32px 28px;
+        box-shadow: 0 1px 0 rgba(0,0,0,0.02), 0 8px 24px -12px rgba(0,0,0,0.06);
+      }
+      .brand {
+        font-family: var(--font-mono);
+        font-size: 12px;
+        letter-spacing: 0.12em;
+        color: var(--ink-dim);
+        text-transform: uppercase;
+        margin: 0 0 4px;
+      }
+      h1 { font-size: 22px; font-weight: 600; margin: 0 0 24px; letter-spacing: -0.01em; }
+      form { display: flex; flex-direction: column; gap: 14px; }
+      label { font-size: 12px; color: var(--ink-dim); font-weight: 500; }
+      input {
+        padding: 10px 12px;
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        font-size: 14px;
+        font-family: var(--font-mono);
+        background: #fff;
+        transition: border-color 120ms ease;
+      }
+      input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-faint); }
+      button {
+        margin-top: 4px;
+        padding: 10px 14px;
+        background: var(--ink);
+        color: white;
+        border: none;
+        border-radius: 8px;
+        font-size: 14px;
+        font-weight: 500;
+        font-family: var(--font-sans);
+        cursor: pointer;
+        transition: opacity 120ms ease;
+      }
+      button:hover { opacity: 0.85; }
+      .error {
+        color: #b91c1c;
+        font-size: 13px;
+        padding: 10px 12px;
+        background: #fef2f2;
+        border: 1px solid #fecaca;
+        border-radius: 8px;
+        margin-bottom: 8px;
+      }
+      .hint { color: var(--ink-dim); font-size: 12px; margin: 16px 0 0; line-height: 1.55; }
+      code { font-family: var(--font-mono); font-size: 11px; background: #f4f4f5; padding: 1px 5px; border-radius: 3px; }
     </style>
   </head>
   <body>
-    <h1>Ezagent Login</h1>
-    {{ERROR}}
-    <form method="post" action="/login">
-      <input type="hidden" name="_csrf_token" value="{{CSRF}}">
-      <label for="entity_uri">Entity URI</label>
-      <input type="text" id="entity_uri" name="entity_uri" placeholder="entity://user/allen" required autofocus>
-      <label for="secret">Password / Token</label>
-      <input type="password" id="secret" name="secret" required>
-      <button type="submit">Sign in</button>
-    </form>
-    <p class="hint">
-      First time? Admin runs <code>mix ezagent.user.set_password entity://user/admin --password X</code>,
-      then sign in as <code>entity://user/admin</code>. Agent URIs
-      (<code>entity://agent/&lt;flavor&gt;_&lt;name&gt;</code>) sign in with a bearer token
-      minted via the entity_tokens admin.
-    </p>
+    <div class="card">
+      <p class="brand">ezagent</p>
+      <h1>Sign in</h1>
+      {{ERROR}}
+      <form method="post" action="/login">
+        <input type="hidden" name="_csrf_token" value="{{CSRF}}">
+        <label for="entity_uri">Entity URI</label>
+        <input type="text" id="entity_uri" name="entity_uri" placeholder="entity://user/allen" required autofocus>
+        <label for="secret">Password or token</label>
+        <input type="password" id="secret" name="secret" required>
+        <button type="submit">Sign in</button>
+      </form>
+      <p class="hint">
+        First-time admin setup: <code>mix ezagent.user.set_password entity://user/admin --password X</code>.
+        Agent URIs (<code>entity://agent/&lt;flavor&gt;_&lt;name&gt;</code>) sign in with a bearer token
+        minted via the <code>entity_tokens</code> admin.
+      </p>
+    </div>
   </body>
   </html>
   """

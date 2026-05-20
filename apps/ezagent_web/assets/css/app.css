@@ -107,4 +107,30 @@
 /* Make LiveView wrapper divs transparent for layout */
 [data-phx-session], [data-phx-teleported-src] { display: contents }
 
+/* Phase 8c — refined-minimalism typography pass (Allen 2026-05-20).
+   Geist for body/display (calm, slightly geometric, distinctive without
+   being aggressive). JetBrains Mono for everything code-shaped: URIs,
+   entity IDs, bridges, command palette. Both loaded via Google Fonts in
+   root layout with display=swap so the page still paints fast.
+
+   This redefines the Tailwind v4 default font tokens so every utility
+   class that resolves to `font-sans`/`font-mono` picks the new stack
+   without needing to be rewritten. */
+:root {
+  --font-sans: "Geist", ui-sans-serif, system-ui, -apple-system, "Segoe UI",
+    Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, Monaco,
+    "Liberation Mono", "Courier New", monospace;
+}
+
+html, body {
+  font-family: var(--font-sans);
+  font-feature-settings: "ss01", "cv11";
+}
+
+code, kbd, pre, samp, .font-mono {
+  font-family: var(--font-mono);
+  font-feature-settings: "calt", "ss02";
+}
+
 /* This file is for your main application CSS */
