@@ -378,19 +378,49 @@ socket
 
 LV scopes (live_session :require_entity) inherit both.
 
-### 6.4 Workspace context switcher
+### 6.4 Workspace selector = logout + re-auth (Allen correction 2026-05-21)
 
-The avatar-dropdown workspace selector (Phase 8c PR-L) becomes a real
-context switcher:
+**Amended from original SPEC.** Per Allen's structural correction: if
+entity URI is workspace-bound (3-segment), then
+`entity://user/default/admin` and `entity://user/team-alpha/admin`
+are **two different entities**. There is no "stay-as-this-user,
+change-workspace" semantic in this design — switching workspace IS
+switching entity.
+
+The avatar-dropdown workspace selector behaves as:
 
 - Click another workspace → POST `/workspaces/switch` with target ws.
-- Controller checks the caller's caps for cross-workspace authority.
-  Without it, denies + flashes "You don't have access to <ws>".
-- With it, rewrites `:current_workspace_uri` (but NOT
-  `:current_entity_uri` — the user identity is fixed; only the
-  operating workspace changes).
-- LV remounts with new workspace; routing/dispatch picks up the new
-  workspace from socket assigns.
+- Controller clears BOTH `:current_entity_uri` AND
+  `:current_workspace_uri` from the session.
+- Redirect to `/login?workspace=<target_ws>` with the workspace
+  pre-filled in the login form.
+- User authenticates as the entity in that workspace
+  (`<handle>` is interpreted as `entity://user/<target_ws>/<handle>`
+  via the same `SessionPrincipal.canonicalize/1` path but with a
+  workspace-override option).
+
+Why this is the right model:
+
+- **The URI tells you everything (Option A)** — if workspace is in
+  the URI, then "current entity" already pins the workspace. Having
+  a separate "current workspace" assign that can diverge from
+  `entity_workspace_uri(current_entity_uri)` would be a structural
+  inconsistency.
+- **Cross-workspace cap is for DISPATCH, not impersonation** — admin
+  in `default` workspace with the cross-workspace cap can SEND a
+  message TO an agent in `team-alpha`. They cannot BECOME the admin
+  in `team-alpha` — that requires authenticating as that distinct
+  entity.
+- **Auditability** — every action's `ctx.caller` is unambiguously
+  one workspace's entity. No ambient "operating workspace" overlay
+  to forget about.
+
+Note on the redundant assign: `:current_workspace_uri` is still
+written by `SessionPrincipal.put/2` (§6.1) because LV scopes read
+it directly without re-parsing the entity URI on every render — it's
+a derived cache. But it MUST always equal
+`entity_workspace_uri(current_entity_uri)`; an invariant test
+asserts this.
 
 ### 6.5 SessionPrincipal codebase invariant updated
 
@@ -399,7 +429,11 @@ The existing invariant test
 extends to:
 
 - No direct `put_session(:current_workspace_uri, _)` outside
-  `SessionPrincipal.put/2` and the workspace-switch controller.
+  `SessionPrincipal.put/2` and the workspace-switch controller's
+  clear path.
+- New invariant test: `:current_workspace_uri` ==
+  `entity_workspace_uri(:current_entity_uri)` for any session where
+  both are set.
 
 ## 7. Data isolation — per-tenant table columns
 
@@ -577,11 +611,16 @@ framing doc + this SPEC. Allen can override any during PR review.
 
 - **Q1 — Bare-handle login behavior (§6.2)**: A (default workspace
   fallback) or B (workspace-qualified required)? **Recommended A**.
-- **Q2 — Workspace-switch session-slot semantics (§6.4)**: does
-  switching workspace clear `:current_entity_uri`? My read: NO —
-  identity is fixed; workspace is a scope-of-action. Switch can
-  later be combined with "create alt identity in that workspace"
-  flow, but Phase 9 ships fixed-identity only.
+- **Q2 — Workspace-switch session-slot semantics (§6.4)**: ~~My
+  original read: NO — identity is fixed; workspace is a
+  scope-of-action.~~ **Allen corrected 2026-05-21: YES, switching
+  workspace clears BOTH `:current_entity_uri` AND
+  `:current_workspace_uri`.** Reason: entity URI is workspace-bound
+  (3-segment); `entity://user/default/admin` and
+  `entity://user/team-alpha/admin` are distinct entities. There is
+  no "stay-as-this-user, change-workspace" semantic. Switch
+  redirects to `/login?workspace=<target>`. See §6.4 for the
+  amended flow.
 - **Q3 — Granter's workspace default for cross-workspace grants
   (§4.3)**: when admin grants a cap, should the cap default to
   granter's workspace OR grantee's workspace? **Recommended
