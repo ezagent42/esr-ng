@@ -6,7 +6,7 @@ defmodule EzagentWeb.SessionControllerTest do
 
   describe "GET /login" do
     test "renders the login form" do
-      conn = build_conn() |> get("/login")
+      conn = build_conn() |> get("/login/credentials")
       assert html_response(conn, 200) =~ "Ezagent Login"
       assert html_response(conn, 200) =~ "Entity URI"
     end
@@ -20,7 +20,7 @@ defmodule EzagentWeb.SessionControllerTest do
       conn =
         build_conn()
         |> Plug.Test.init_test_session(%{})
-        |> post("/login", %{"entity_uri" => uri, "secret" => "right-pw"})
+        |> post("/login/credentials", %{"entity_uri" => uri, "secret" => "right-pw"})
 
       assert redirected_to(conn) == "/admin"
       assert Plug.Conn.get_session(conn, :current_entity_uri) == uri
@@ -33,9 +33,9 @@ defmodule EzagentWeb.SessionControllerTest do
       conn =
         build_conn()
         |> Plug.Test.init_test_session(%{})
-        |> post("/login", %{"entity_uri" => uri, "secret" => "WRONG"})
+        |> post("/login/credentials", %{"entity_uri" => uri, "secret" => "WRONG"})
 
-      assert redirected_to(conn) == "/login"
+      assert redirected_to(conn) == "/login/credentials"
       refute Plug.Conn.get_session(conn, :current_entity_uri)
     end
 
@@ -43,9 +43,12 @@ defmodule EzagentWeb.SessionControllerTest do
       conn =
         build_conn()
         |> Plug.Test.init_test_session(%{})
-        |> post("/login", %{"entity_uri" => "entity://user/never-existed", "secret" => "x"})
+        |> post("/login/credentials", %{
+          "entity_uri" => "entity://user/never-existed",
+          "secret" => "x"
+        })
 
-      assert redirected_to(conn) == "/login"
+      assert redirected_to(conn) == "/login/credentials"
     end
   end
 

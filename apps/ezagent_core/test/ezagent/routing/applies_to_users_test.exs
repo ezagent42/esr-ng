@@ -34,18 +34,14 @@ defmodule Ezagent.Routing.AppliesToUsersTest do
 
   test "RuleStore.add stores applies_to_users as JSON", %{table: table} do
     {:ok, rule} =
-      RuleStore.add(table, Matcher.always(), [@recv_a], @user_a,
-        applies_to_users: [@user_a]
-      )
+      RuleStore.add(table, Matcher.always(), [@recv_a], @user_a, applies_to_users: [@user_a])
 
     assert RuleStore.applies_to_users(rule) == [URI.to_string(@user_a)]
   end
 
   test "Resolver applies rule only to listed senders", %{table: table} do
     {:ok, _} =
-      RuleStore.add(table, Matcher.always(), [@recv_a], @user_a,
-        applies_to_users: [@user_a]
-      )
+      RuleStore.add(table, Matcher.always(), [@recv_a], @user_a, applies_to_users: [@user_a])
 
     :ok = RuleStore.load_into_registry(table)
 

@@ -72,6 +72,14 @@ defmodule Ezagent.Entity do
 
   def authenticate(%URI{} = uri, _secret), do: {:error, {:unsupported_entity_uri, uri}}
 
+  @doc """
+  Idempotently spawn the Kind for `uri`, hydrating its caps from the
+  DB row when this call is the one that creates it. Safe to call when
+  the Kind is already alive. Used by registration + magic-link login.
+  """
+  @spec spawn_principal(URI.t()) :: :ok
+  def spawn_principal(%URI{} = uri), do: ensure_spawned(uri)
+
   # Login goes through `Ezagent.Identity.list_caps_for/1`, which returns
   # an empty MapSet if the principal's Kind isn't spawned. In production
   # every persisted User is spawned at boot — but a freshly-created

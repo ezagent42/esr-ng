@@ -28,7 +28,9 @@ defmodule Ezagent.Kind.ServerTest do
     assert :ready = Ezagent.ReadyGate.status(uri)
   end
 
-  test "handle_call :ezagent_dispatch invokes behavior, updates slice, returns result", %{uri: uri} do
+  test "handle_call :ezagent_dispatch invokes behavior, updates slice, returns result", %{
+    uri: uri
+  } do
     {:ok, pid} = Ezagent.Kind.Server.start_link({TestKind, %{uri: uri}})
     :ok = wait_until_ready(uri, 500)
 

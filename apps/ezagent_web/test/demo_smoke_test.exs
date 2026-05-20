@@ -42,6 +42,7 @@ defmodule EzagentCore.Invariants.DemoSmokeTest do
   describe "Bug 1: Repo database config" do
     test "EzagentCore.Repo has a non-nil :database setting at runtime" do
       db = Application.get_env(:ezagent_core, EzagentCore.Repo)[:database]
+
       assert is_binary(db) and db != "",
              """
              EzagentCore.Repo[:database] is empty. PR 1 regression — plain

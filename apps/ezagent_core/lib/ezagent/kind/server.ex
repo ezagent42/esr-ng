@@ -113,11 +113,15 @@ defmodule Ezagent.Kind.Server do
   def handle_call({:ezagent_dispatch, %Ezagent.Invocation{} = inv}, _from, state) do
     case Ezagent.Kind.Runtime.handle_dispatch(inv, state.state, state.kind, state.uri) do
       {:ok, new_slice_state, result} ->
-        :ok = Ezagent.Kind.Snapshot.maybe_save(state.uri, state.kind, state.state, new_slice_state)
+        :ok =
+          Ezagent.Kind.Snapshot.maybe_save(state.uri, state.kind, state.state, new_slice_state)
+
         {:reply, {:ok, result}, %{state | state: new_slice_state}}
 
       {:ok, new_slice_state} ->
-        :ok = Ezagent.Kind.Snapshot.maybe_save(state.uri, state.kind, state.state, new_slice_state)
+        :ok =
+          Ezagent.Kind.Snapshot.maybe_save(state.uri, state.kind, state.state, new_slice_state)
+
         {:reply, :ok, %{state | state: new_slice_state}}
 
       {:error, _} = err ->
@@ -129,13 +133,17 @@ defmodule Ezagent.Kind.Server do
   def handle_cast({:ezagent_dispatch, %Ezagent.Invocation{} = inv}, state) do
     case Ezagent.Kind.Runtime.handle_dispatch(inv, state.state, state.kind, state.uri) do
       {:ok, new_slice_state, result} ->
-        :ok = Ezagent.Kind.Snapshot.maybe_save(state.uri, state.kind, state.state, new_slice_state)
+        :ok =
+          Ezagent.Kind.Snapshot.maybe_save(state.uri, state.kind, state.state, new_slice_state)
+
         # cast still replies via ctx.reply if set (e.g. caller_inbox).
         Ezagent.Invocation.reply(inv.ctx, {:ok, result})
         {:noreply, %{state | state: new_slice_state}}
 
       {:ok, new_slice_state} ->
-        :ok = Ezagent.Kind.Snapshot.maybe_save(state.uri, state.kind, state.state, new_slice_state)
+        :ok =
+          Ezagent.Kind.Snapshot.maybe_save(state.uri, state.kind, state.state, new_slice_state)
+
         {:noreply, %{state | state: new_slice_state}}
 
       {:error, reason} ->

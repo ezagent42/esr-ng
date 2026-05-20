@@ -62,6 +62,7 @@ defmodule Ezagent.TemplateCapsTest do
       cap = template_cap(:read, template_uri)
 
       needed = needed_template_action(:write, template_uri)
+
       refute Capability.matches?(cap, needed),
              "template:read MUST NOT match template:write — orchestrator with read-only " <>
                "access must not be able to update_template (Decision #136)"
@@ -83,6 +84,7 @@ defmodule Ezagent.TemplateCapsTest do
       cap = template_cap(:write, cap_uri)
 
       needed = needed_template_action(:write, other_uri)
+
       refute Capability.matches?(cap, needed),
              "template:write on instance X must not match template:write on instance Y " <>
                "— write authority is per-template-instance (per-name actually, but " <>
@@ -104,6 +106,7 @@ defmodule Ezagent.TemplateCapsTest do
       cap = template_cap(:instantiate, template_uri)
 
       needed = needed_template_action(:write, template_uri)
+
       refute Capability.matches?(cap, needed),
              "template:instantiate MUST NOT match template:write — users who can " <>
                "spin up a session from a template must not be able to modify the " <>

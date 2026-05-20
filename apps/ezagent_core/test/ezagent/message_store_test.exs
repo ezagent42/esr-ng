@@ -123,9 +123,7 @@ defmodule Ezagent.MessageStoreTest do
 
       written =
         for i <- 1..100 do
-          insert_msg(@admin, @session_a, "msg-#{i}",
-            inserted_at: DateTime.add(base, i, :second)
-          )
+          insert_msg(@admin, @session_a, "msg-#{i}", inserted_at: DateTime.add(base, i, :second))
         end
 
       # Step 1 — initial recent_in_session(50) reveals msgs 51-100 (descending).

@@ -62,9 +62,7 @@ defmodule EzagentCore.Repo.Migrations.PrD1RewriteLegacyUrisInMatcherData do
   # Build {legacy_uri_string → typed_uri_string} by inspecting workspaces.
   defp build_rewrite_map do
     rows =
-      Repo.query!(
-        "SELECT session_templates FROM workspaces WHERE session_templates IS NOT NULL"
-      ).rows
+      Repo.query!("SELECT session_templates FROM workspaces WHERE session_templates IS NOT NULL").rows
 
     Enum.reduce(rows, %{}, fn [st_json_bin], acc ->
       st = parse_json(st_json_bin)

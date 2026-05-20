@@ -16,10 +16,11 @@ defmodule EzagentCore.Repo.Migrations.Phase4Users do
     # initially — must be set via `mix ezagent.user.set_password entity://user/admin --password X`
     # before /login accepts the admin (per Spec 05 Q-MU-1).
     execute """
-    INSERT INTO users (uri, password_hash, caps_json, inserted_at, updated_at)
-    VALUES ('entity://user/admin', NULL, '[]',
-            strftime('%Y-%m-%d %H:%M:%f', 'now'),
-            strftime('%Y-%m-%d %H:%M:%f', 'now'))
-    """, "DELETE FROM users WHERE uri = 'entity://user/admin'"
+            INSERT INTO users (uri, password_hash, caps_json, inserted_at, updated_at)
+            VALUES ('entity://user/admin', NULL, '[]',
+                    strftime('%Y-%m-%d %H:%M:%f', 'now'),
+                    strftime('%Y-%m-%d %H:%M:%f', 'now'))
+            """,
+            "DELETE FROM users WHERE uri = 'entity://user/admin'"
   end
 end

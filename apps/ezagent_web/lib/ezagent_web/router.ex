@@ -22,8 +22,13 @@ defmodule EzagentWeb.Router do
     # Phase 4-completion Spec 05 §A.2.3 — controller-rendered login.
     get "/login", SessionController, :new
     post "/login", SessionController, :create
+    get "/login/credentials", SessionController, :credentials_new
+    post "/login/credentials", SessionController, :credentials_create
     delete "/logout", SessionController, :delete
     post "/logout", SessionController, :delete
+    get "/auth/magic/:token", MagicLinkController, :consume
+    get "/register/complete", RegistrationController, :complete_new
+    post "/register/complete", RegistrationController, :complete_create
   end
 
   # /admin* requires login (Phase 4-completion Spec 05 §A.2.3 +

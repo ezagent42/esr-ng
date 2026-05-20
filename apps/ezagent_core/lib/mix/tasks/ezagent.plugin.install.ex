@@ -126,12 +126,16 @@ defmodule Mix.Tasks.Ezagent.Plugin.Install do
           |> Path.basename(".app")
           |> String.to_atom()
 
-        Mix.shell().info("Resolved app name from #{Path.basename(app_file)}: #{inspect(app_name)}")
+        Mix.shell().info(
+          "Resolved app name from #{Path.basename(app_file)}: #{inspect(app_name)}"
+        )
+
         install_by_app_name(app_name)
     end
   end
 
   defp ensure_path_added!(true), do: :ok
+
   defp ensure_path_added!({:error, reason}) do
     Mix.shell().error("failed to add plugin ebin to code path: #{inspect(reason)}")
     exit({:shutdown, 1})
@@ -148,7 +152,9 @@ defmodule Mix.Tasks.Ezagent.Plugin.Install do
       end
 
     case load_result do
-      :ok -> :ok
+      :ok ->
+        :ok
+
       {:error, reason} ->
         Mix.shell().error("application.load failed: #{inspect(reason)}")
         exit({:shutdown, 1})

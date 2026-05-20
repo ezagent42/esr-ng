@@ -71,6 +71,7 @@ defmodule Ezagent.TemplateRegistryTest do
 
   defp make_class(name) do
     module_name = String.to_atom("Elixir.TestClass_#{name}")
+
     body =
       quote do
         @behaviour Ezagent.Kind.Template
@@ -88,6 +89,7 @@ defmodule Ezagent.TemplateRegistryTest do
 
   defp make_class_with_name(name, tag) do
     module_name = String.to_atom("Elixir.TestClass_#{name}_#{tag}")
+
     body =
       quote do
         @behaviour Ezagent.Kind.Template

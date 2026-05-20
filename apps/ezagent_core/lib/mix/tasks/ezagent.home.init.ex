@@ -92,7 +92,9 @@ defmodule Mix.Tasks.Ezagent.Home.Init do
   defp refuse_if_inside_repo!(_path, true), do: :ok
 
   defp refuse_if_inside_repo!(path, _) do
-    case System.cmd("git", ["-C", path |> Path.dirname() |> ensure_dir(), "rev-parse", "--show-toplevel"],
+    case System.cmd(
+           "git",
+           ["-C", path |> Path.dirname() |> ensure_dir(), "rev-parse", "--show-toplevel"],
            stderr_to_stdout: true
          ) do
       {_out, 0} ->
@@ -140,7 +142,8 @@ defmodule Mix.Tasks.Ezagent.Home.Init do
       [
         {"credentials/feishu.yaml", "REQUIRED before ezagent_plugin_feishu can start"},
         {"credentials/cc-channels.yaml", "managed by mix ezagent.cc_channel.register"},
-        {"db/", "Phoenix Repo target (dev). One-time: mix ezagent.home.adopt_db moves repo-root ezagent_core_dev.db here"},
+        {"db/",
+         "Phoenix Repo target (dev). One-time: mix ezagent.home.adopt_db moves repo-root ezagent_core_dev.db here"},
         {"snapshots/", "Phase 4 Kind state snapshots"},
         {"logs/", "server logs"},
         {"plugins/", "per-plugin non-secret tunables"}

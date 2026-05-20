@@ -39,6 +39,7 @@ defmodule Ezagent.URI.SchemeRegistryTest do
 
     test "boot-seeded SPEC §5.6 schemes are present" do
       all = SchemeRegistry.list_all()
+
       for s <- ~w(entity workspace session template resource system) do
         assert s in all, "expected SPEC §5.6 scheme #{s} in allowlist; got #{inspect(all)}"
       end

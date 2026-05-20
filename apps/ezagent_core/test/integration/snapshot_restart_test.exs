@@ -28,8 +28,7 @@ defmodule Ezagent.Integration.SnapshotRestartTest do
       {:ok, pid1} =
         DynamicSupervisor.start_child(
           Ezagent.Workspace.Supervisor,
-          {Ezagent.Kind.Server,
-           {Ezagent.Entity.User, %{uri: uri, initial_caps: caps}}}
+          {Ezagent.Kind.Server, {Ezagent.Entity.User, %{uri: uri, initial_caps: caps}}}
         )
 
       # 2. Trigger an :on_change save by dispatching list_caps (no-op
@@ -103,8 +102,7 @@ defmodule Ezagent.Integration.SnapshotRestartTest do
       {:ok, pid} =
         DynamicSupervisor.start_child(
           EzagentDomainChat.AgentSupervisor,
-          {Ezagent.Kind.Server,
-           {Ezagent.Entity.Agent, %{uri: uri, initial_caps: MapSet.new()}}}
+          {Ezagent.Kind.Server, {Ezagent.Entity.Agent, %{uri: uri, initial_caps: MapSet.new()}}}
         )
 
       uri_str = URI.to_string(uri)

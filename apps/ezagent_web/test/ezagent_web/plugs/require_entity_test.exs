@@ -30,7 +30,9 @@ defmodule EzagentWeb.Plugs.RequireEntityTest do
         |> RequireEntity.call([])
 
       refute conn.halted
-      assert %URI{scheme: "entity", host: "user", path: "/admin"} = conn.assigns.current_entity_uri
+
+      assert %URI{scheme: "entity", host: "user", path: "/admin"} =
+               conn.assigns.current_entity_uri
     end
 
     test "passes through + assigns current_entity_uri for entity://agent/*" do
@@ -40,7 +42,9 @@ defmodule EzagentWeb.Plugs.RequireEntityTest do
         |> RequireEntity.call([])
 
       refute conn.halted
-      assert %URI{scheme: "entity", host: "agent", path: "/cc_test"} = conn.assigns.current_entity_uri
+
+      assert %URI{scheme: "entity", host: "agent", path: "/cc_test"} =
+               conn.assigns.current_entity_uri
     end
 
     test "rejects malformed (non-entity scheme) session URI" do

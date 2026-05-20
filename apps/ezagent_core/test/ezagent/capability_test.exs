@@ -215,7 +215,8 @@ defmodule Ezagent.CapabilityTest do
       needed_any_agent = %{
         kind: :agent,
         behavior: :any,
-        instance: URI.parse("entity://agent/test_worker-no-lineage-#{System.unique_integer([:positive])}")
+        instance:
+          URI.parse("entity://agent/test_worker-no-lineage-#{System.unique_integer([:positive])}")
       }
 
       refute Capability.matches?(cap, needed_any_agent),
@@ -224,7 +225,9 @@ defmodule Ezagent.CapabilityTest do
     end
 
     test "{:spawned_by, P} matches when lineage IS recorded (PR 40 real impl)" do
-      orchestrator = URI.new!("entity://agent/test_orchestrator-#{System.unique_integer([:positive])}")
+      orchestrator =
+        URI.new!("entity://agent/test_orchestrator-#{System.unique_integer([:positive])}")
+
       worker = URI.new!("entity://agent/test_worker-#{System.unique_integer([:positive])}")
 
       :ok = Ezagent.AgentLineage.record(worker, orchestrator)
@@ -263,9 +266,14 @@ defmodule Ezagent.CapabilityTest do
     end
 
     test "{:spawned_by, P} does NOT match an unrelated agent (lineage isolation)" do
-      orchestrator_a = URI.new!("entity://agent/test_orch-a-#{System.unique_integer([:positive])}")
-      orchestrator_b = URI.new!("entity://agent/test_orch-b-#{System.unique_integer([:positive])}")
-      worker_of_a = URI.new!("entity://agent/test_worker-of-a-#{System.unique_integer([:positive])}")
+      orchestrator_a =
+        URI.new!("entity://agent/test_orch-a-#{System.unique_integer([:positive])}")
+
+      orchestrator_b =
+        URI.new!("entity://agent/test_orch-b-#{System.unique_integer([:positive])}")
+
+      worker_of_a =
+        URI.new!("entity://agent/test_worker-of-a-#{System.unique_integer([:positive])}")
 
       :ok = Ezagent.AgentLineage.record(worker_of_a, orchestrator_a)
 
