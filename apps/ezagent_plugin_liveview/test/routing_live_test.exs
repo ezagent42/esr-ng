@@ -50,8 +50,13 @@ defmodule EzagentPluginLiveview.RoutingLiveTest do
   test "switch_table changes view", %{conn: conn} do
     {:ok, lv, _html} = live(conn, "/routing")
 
+    # Phase 8 polish added a sidebar tablist; scope to the main body's
+    # tab strip so the click hits a single button (the body table-tabs
+    # section).
     lv
-    |> element("button[phx-value-table='Elixir.EzagentDomainChat.Routing.SessionRouting']")
+    |> element(
+      "#table-tabs button[phx-value-table='Elixir.EzagentDomainChat.Routing.SessionRouting']"
+    )
     |> render_click()
 
     html = render(lv)

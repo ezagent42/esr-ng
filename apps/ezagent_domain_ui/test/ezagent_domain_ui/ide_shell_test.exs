@@ -39,8 +39,12 @@ defmodule EzagentDomainUi.IdeShellTest do
       assert html =~ "Routing"
       assert html =~ "Plugins"
       assert html =~ "Dashboard"
-      refute html =~ ">Settings<"
-      refute html =~ ">Observability<"
+      # Phase 8 polish (Allen 2026-05-20): Settings moved from
+      # Activity Bar into the avatar dropdown, so its label appears
+      # in HTML but NOT as an Activity Bar tile. We assert it's not
+      # in the activity bar specifically.
+      refute html =~ ~s(aria-label="Settings")
+      refute html =~ ~s(aria-label="Observability")
       # Top Command Bar
       assert html =~ "ezagent"
       assert html =~ "⌘K"
@@ -107,10 +111,12 @@ defmodule EzagentDomainUi.IdeShellTest do
   end
 
   describe "status_bar/1" do
-    test "shows entity, workspace, agents, bridges, events, version" do
+    test "shows entity, session, agents, bridges, events, version" do
+      # Phase 8 polish (Allen 2026-05-20) — workspace label removed
+      # from status bar (workspace context is shown in the URL/route,
+      # not the bottom bar).
       assigns = %{
         current_entity_uri: "entity://user/admin",
-        workspace_name: "default",
         status: %{
           session_uri: "session://main",
           agents_alive: 3,
@@ -124,13 +130,11 @@ defmodule EzagentDomainUi.IdeShellTest do
         rendered_to_string(~H"""
         <IdeShell.status_bar
           current_entity_uri={@current_entity_uri}
-          workspace_name={@workspace_name}
           status={@status}
         />
         """)
 
       assert html =~ "entity://user/admin"
-      assert html =~ "default"
       assert html =~ "session://main"
       assert html =~ "3 agents"
       assert html =~ "1 bridges"
