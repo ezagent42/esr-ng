@@ -688,10 +688,30 @@ defmodule EzagentPluginLiveview.AdminLive do
     end
   end
 
-  # Phase 8c follow-up — see mount/3 comment. Returns the URI on success
-  # (lookup hit, OR fresh spawn succeeded). Returns the URI even on
-  # spawn failure — better to render an obviously-empty state than
-  # crash the LV; the spawn failure logs separately.
+  # Phase 8c follow-up (Allen 2026-05-20) — see mount/3 comment.
+  #
+  # Q: "if main already exists and is persisted but isn't loaded for
+  #     some reason, won't create_session overwrite it?"
+  # A: No. `create_session/2` → `DynamicSupervisor.start_child(spec)`
+  #    → `Kind.Server.init` → `Snapshot.load_or_init/3` which is
+  #    rehydrate-aware:
+  #      - Session.persistence() == :ephemeral today → fresh
+  #        init_slice (no DB touch, nothing to overwrite)
+  #      - If/when Session flips to {:snapshot, :on_change}
+  #        (Phase 7 PR 46 TODO), load_or_init loads from DB and
+  #        merges with fresh init (Snapshot.load_with_fallback, Q5
+  #        for newly-added behaviors). Members / monitors /
+  #        last_seen come back from the snapshot.
+  #    Chat history is independent — it lives in MessageStore (its
+  #    own table), unaffected by Session Kind lifecycle.
+  #
+  # The {:already_started, _pid} branch inside create_session handles
+  # the race where the kind is alive in supervisor; it returns :ok
+  # without re-initializing state.
+  #
+  # Returns the URI on success (rehydrate-or-fresh-spawn). Returns
+  # the URI even on spawn failure — better to render an obviously-
+  # empty state than crash the LV; the spawn failure logs separately.
   defp ensure_main_session(%URI{} = uri, socket) do
     case Ezagent.KindRegistry.lookup(uri) do
       {:ok, _pid} ->
