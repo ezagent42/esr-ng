@@ -822,8 +822,25 @@ defmodule EzagentPluginLiveview.AdminLive do
   # management page. Returns `[%{name: ..., uri: ...}]` as
   # IdeShell.top_command_bar/1 expects.
   defp list_known_workspaces do
-    Ezagent.Workspace.list_persisted()
-    |> Enum.map(fn ws -> %{name: ws.name, uri: ws.uri} end)
+    persisted =
+      Ezagent.Workspace.list_persisted()
+      |> Enum.map(fn ws -> %{name: ws.name, uri: ws.uri} end)
+
+    # Phase 8c follow-up (Allen 2026-05-20) — ensure the default
+    # workspace always shows in the dropdown even if it isn't
+    # persisted in the Store yet. session://main binds to
+    # workspace://default via WorkspaceRegistry post-boot but
+    # doesn't auto-create a Workspace row in the Store. Without
+    # this entry the dropdown falls back to plain text and the
+    # "Manage workspaces..." link is unreachable from the session
+    # surface — exactly the surface a user is on most often.
+    default = %{name: "default", uri: URI.parse("workspace://default")}
+
+    if Enum.any?(persisted, &(&1.name == "default")) do
+      persisted
+    else
+      [default | persisted]
+    end
     |> Enum.sort_by(& &1.name)
   end
 end
