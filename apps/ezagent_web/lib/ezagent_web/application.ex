@@ -7,6 +7,8 @@ defmodule EzagentWeb.Application do
 
   @impl true
   def start(_type, _args) do
+    :ok = EzagentWeb.RateLimiter.init_table()
+
     children = [
       EzagentWeb.Telemetry,
       # Start a worker by calling: EzagentWeb.Worker.start_link(arg)
