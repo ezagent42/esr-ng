@@ -1,9 +1,9 @@
 defmodule EzagentWeb.SessionPrincipal do
   @moduledoc """
   The single authorized writer for the session `:current_entity_uri`
-  key. Forces every auth path (password, magic link, registration,
-  and whatever lands next — OAuth, WebAuthn, SAML) through one
-  validating funnel.
+  AND `:current_workspace_uri` slots. Forces every auth path
+  (password, magic link, registration, and whatever lands next —
+  OAuth, WebAuthn, SAML) through one validating funnel.
 
   Allen 2026-05-20: the bare-handle login bug shipped because
   `session_controller.credentials_create` normalized its input for
@@ -13,28 +13,46 @@ defmodule EzagentWeb.SessionPrincipal do
   scheme, and bounced to /login — login appeared to fail.
 
   This module prevents that class of bug architecturally rather than
-  by remembering. `put/2` validates that the input normalizes to a
-  parseable `entity://user/...` or `entity://agent/...` URI and
+  by remembering. `put/2`/`put/3` validates that the input normalizes
+  to a parseable `entity://user/...` or `entity://agent/...` URI and
   RAISES `ArgumentError` if not. There is no `:ok | :error` tuple
   to forget to handle and no fallback that silently writes garbage.
   Per memory `feedback_let_it_crash_no_workarounds`.
 
+  ## Phase 9 PR-5 (SPEC v3 §6.1)
+
+  `put/2` and `put/3` now write BOTH `:current_entity_uri` AND
+  `:current_workspace_uri`. The workspace slot is derived from the
+  entity URI's workspace segment via
+  `Ezagent.URI.entity_workspace_uri/1` — the invariant
+  `current_workspace_uri == entity_workspace_uri(current_entity_uri)`
+  is enforced AT the write site. There is no way to construct an
+  inconsistent pair via this API.
+
+  `clear/1` removes both slots; used by `/logout` AND
+  `/workspaces/switch` (per SPEC v3 §6.4 amended: workspace switch is
+  logout + re-auth, NOT in-place context swap, because entity URIs are
+  workspace-bound — switching workspace IS switching entity).
+
   Convention: NO direct `put_session(conn, :current_entity_uri, _)`
-  call is allowed anywhere else in the codebase. A test asserts this
-  invariant.
+  or `put_session(conn, :current_workspace_uri, _)` call is allowed
+  anywhere else in the codebase. Two invariant tests assert this.
   """
 
-  import Plug.Conn, only: [put_session: 3, configure_session: 2]
+  import Plug.Conn,
+    only: [put_session: 3, delete_session: 2, configure_session: 2]
 
   @valid_hosts ["user", "agent"]
 
   @doc """
-  Stores a canonical `entity://...` URI string in the session's
-  `:current_entity_uri` slot. Accepts:
+  Stores the canonical `entity://...` URI string in
+  `:current_entity_uri` AND its derived `workspace://<name>` URI
+  string in `:current_workspace_uri`. Accepts:
 
   - a full URI string (`"entity://user/default/admin"`) — passes through
   - a bare handle (`"admin"`, `"allen"`) — normalized to
-    `"entity://user/<handle>"` (lowercased)
+    `"entity://user/<workspace>/<handle>"` (lowercased). Workspace
+    defaults to `"default"`; override via `put/3` `:workspace` opt.
 
   Raises `ArgumentError` if the result is not a parseable
   `entity://user/...` or `entity://agent/...` URI. The session is
@@ -42,17 +60,43 @@ defmodule EzagentWeb.SessionPrincipal do
   pre-auth session ID cannot be reused.
   """
   @spec put(Plug.Conn.t(), String.t()) :: Plug.Conn.t()
-  def put(conn, raw) when is_binary(raw) do
-    canonical = canonicalize(raw)
+  def put(conn, raw), do: put(conn, raw, [])
+
+  @doc """
+  Same as `put/2` plus options. Currently:
+
+  - `:workspace` — override default workspace for bare-handle
+    canonicalization (default `"default"`). Ignored when `raw` is
+    already a full `entity://` URI.
+  """
+  @spec put(Plug.Conn.t(), String.t(), keyword()) :: Plug.Conn.t()
+  def put(conn, raw, opts) when is_binary(raw) and is_list(opts) do
+    canonical = canonicalize(raw, opts)
+    entity_uri = URI.parse(canonical)
+    workspace_uri = Ezagent.URI.entity_workspace_uri(entity_uri)
 
     conn
     |> configure_session(renew: true)
     |> put_session(:current_entity_uri, canonical)
+    |> put_session(:current_workspace_uri, URI.to_string(workspace_uri))
   end
 
-  def put(_conn, other) do
+  def put(_conn, other, _opts) do
     raise ArgumentError,
-          "EzagentWeb.SessionPrincipal.put/2 expects a String principal, got: #{inspect(other)}"
+          "EzagentWeb.SessionPrincipal.put/3 expects a String principal, got: #{inspect(other)}"
+  end
+
+  @doc """
+  Clears BOTH session slots and rotates the session ID. Used by
+  `/logout` AND `/workspaces/switch` (per SPEC v3 §6.4 amendment —
+  workspace switch is logout + re-auth, not in-place context swap).
+  """
+  @spec clear(Plug.Conn.t()) :: Plug.Conn.t()
+  def clear(conn) do
+    conn
+    |> configure_session(renew: true)
+    |> delete_session(:current_entity_uri)
+    |> delete_session(:current_workspace_uri)
   end
 
   @doc """
@@ -64,8 +108,18 @@ defmodule EzagentWeb.SessionPrincipal do
   Raises `ArgumentError` on invalid input.
   """
   @spec canonicalize(String.t()) :: String.t()
-  def canonicalize(raw) when is_binary(raw) do
-    candidate = normalize(raw)
+  def canonicalize(raw), do: canonicalize(raw, [])
+
+  @doc """
+  Same as `canonicalize/1` plus options. Currently:
+
+  - `:workspace` — override default workspace for bare-handle
+    canonicalization (default `"default"`).
+  """
+  @spec canonicalize(String.t(), keyword()) :: String.t()
+  def canonicalize(raw, opts) when is_binary(raw) and is_list(opts) do
+    workspace = Keyword.get(opts, :workspace, "default")
+    candidate = normalize(raw, workspace)
 
     case URI.parse(candidate) do
       %URI{scheme: "entity", host: host} when host in @valid_hosts ->
@@ -78,15 +132,18 @@ defmodule EzagentWeb.SessionPrincipal do
     end
   end
 
-  def canonicalize(other) do
+  def canonicalize(other, _opts) do
     raise ArgumentError,
           "EzagentWeb.SessionPrincipal.canonicalize/1 expects a String, got: #{inspect(other)}"
   end
 
   # Phase 9 PR-2 (SPEC v3 §6.2 option A): bare-handle login defaults to
-  # the `default` workspace. Full URIs pass through; tenant-aware login
-  # form will add an explicit workspace field in PR-5.
-  defp normalize(input) do
+  # the `default` workspace.
+  # Phase 9 PR-5 (SPEC v3 §6.4 amended): bare-handle workspace is
+  # overridable via opts[:workspace] so /login?workspace=<name> can
+  # pre-fill the target workspace when the user arrives via the
+  # workspace-switcher logout flow.
+  defp normalize(input, workspace) do
     trimmed = String.trim(input)
 
     cond do
@@ -94,7 +151,7 @@ defmodule EzagentWeb.SessionPrincipal do
         trimmed
 
       String.match?(trimmed, ~r/^[a-zA-Z0-9_-]+$/) ->
-        "entity://user/default/" <> String.downcase(trimmed)
+        "entity://user/" <> workspace <> "/" <> String.downcase(trimmed)
 
       true ->
         trimmed

@@ -493,12 +493,26 @@ defmodule EzagentDomainUi.IdeShell do
                 </span>
               </div>
             <% else %>
-              <a
-                href={"/workspaces/#{ws_name}"}
-                class="block px-3 py-1.5 text-xs text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800"
-              >
-                <span class="font-mono truncate">{ws_name}</span>
-              </a>
+              <%!-- Phase 9 PR-5 (SPEC v3 §6.4 amended) — switching
+                    workspace is logout + re-auth, not in-place context
+                    swap. POST /workspaces/switch clears the session
+                    and redirects to /login?workspace=<name>. The form
+                    wrapper is needed for CSRF + cookie clear. --%>
+              <form action="/workspaces/switch" method="post" class="block">
+                <input
+                  type="hidden"
+                  name="_csrf_token"
+                  value={Plug.CSRFProtection.get_csrf_token()}
+                />
+                <input type="hidden" name="workspace" value={ws_name} />
+                <button
+                  type="submit"
+                  class="w-full text-left px-3 py-1.5 text-xs text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+                  title={"Switch to workspace " <> ws_name <> " (you'll be asked to sign in)"}
+                >
+                  <span class="font-mono truncate">{ws_name}</span>
+                </button>
+              </form>
             <% end %>
           <% end %>
         </div>

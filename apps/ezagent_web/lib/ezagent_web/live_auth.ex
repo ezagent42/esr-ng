@@ -56,9 +56,12 @@ defmodule EzagentWeb.LiveAuth do
       uri_str when is_binary(uri_str) ->
         case parse_entity_uri(uri_str) do
           {:ok, uri} ->
+            workspace_uri = parse_workspace_uri(session["current_workspace_uri"], uri)
+
             {:cont,
              socket
              |> assign(:current_entity_uri, uri)
+             |> assign(:current_workspace_uri, workspace_uri)
              |> assign(:is_admin?, admin?(uri))
              |> assign(:workspaces, list_known_workspaces())}
 
@@ -68,6 +71,17 @@ defmodule EzagentWeb.LiveAuth do
         end
     end
   end
+
+  # Phase 9 PR-5 (SPEC v3 §6.3 + §6.5 invariant): assign
+  # `:current_workspace_uri` from the session slot
+  # `SessionPrincipal.put/2` writes. Defensive fallback derives it
+  # from the entity URI when the session slot is missing (pre-PR-5
+  # sessions on disk during the rollout). The invariant
+  # `current_workspace_uri == entity_workspace_uri(current_entity_uri)`
+  # is preserved either way.
+  defp parse_workspace_uri(nil, entity_uri), do: Ezagent.URI.entity_workspace_uri(entity_uri)
+
+  defp parse_workspace_uri(ws_str, _entity_uri) when is_binary(ws_str), do: URI.parse(ws_str)
 
   # Phase 8c follow-up (Allen 2026-05-20) — `is_admin?` was set in
   # admin_live's mount but not propagated to the other 12 LVs that

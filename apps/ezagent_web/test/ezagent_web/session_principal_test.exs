@@ -91,6 +91,86 @@ defmodule EzagentWeb.SessionPrincipalTest do
     end
   end
 
+  describe "workspace coherence (Phase 9 PR-5)" do
+    # SPEC v3 §6.1 — `put/2` writes BOTH session slots; the workspace
+    # slot is derived from the entity URI so there is no way to
+    # construct an inconsistent pair via this API.
+    test "put/2 writes both :current_entity_uri AND :current_workspace_uri" do
+      conn =
+        Plug.Test.conn(:get, "/")
+        |> Plug.Test.init_test_session(%{})
+        |> SessionPrincipal.put("admin")
+
+      assert Plug.Conn.get_session(conn, :current_entity_uri) ==
+               "entity://user/default/admin"
+
+      assert Plug.Conn.get_session(conn, :current_workspace_uri) ==
+               "workspace://default"
+    end
+
+    # SPEC v3 §6.5 invariant.
+    test ":current_workspace_uri always equals entity_workspace_uri(:current_entity_uri)" do
+      conn =
+        Plug.Test.conn(:get, "/")
+        |> Plug.Test.init_test_session(%{})
+        |> SessionPrincipal.put("entity://user/team-alpha/allen")
+
+      entity_str = Plug.Conn.get_session(conn, :current_entity_uri)
+      workspace_str = Plug.Conn.get_session(conn, :current_workspace_uri)
+
+      derived =
+        entity_str
+        |> URI.parse()
+        |> Ezagent.URI.entity_workspace_uri()
+        |> URI.to_string()
+
+      assert workspace_str == derived
+      assert workspace_str == "workspace://team-alpha"
+    end
+
+    # SPEC v3 §6.4 amended — workspace override path.
+    test "put/3 with workspace opt routes bare handles into the target workspace" do
+      conn =
+        Plug.Test.conn(:get, "/")
+        |> Plug.Test.init_test_session(%{})
+        |> SessionPrincipal.put("allen", workspace: "team-alpha")
+
+      assert Plug.Conn.get_session(conn, :current_entity_uri) ==
+               "entity://user/team-alpha/allen"
+
+      assert Plug.Conn.get_session(conn, :current_workspace_uri) ==
+               "workspace://team-alpha"
+    end
+
+    test "put/3 with workspace opt is ignored for full entity:// URIs" do
+      # Full URI already carries its workspace — opts[:workspace] does
+      # not get to override the explicit segment.
+      conn =
+        Plug.Test.conn(:get, "/")
+        |> Plug.Test.init_test_session(%{})
+        |> SessionPrincipal.put("entity://user/default/admin", workspace: "team-alpha")
+
+      assert Plug.Conn.get_session(conn, :current_entity_uri) ==
+               "entity://user/default/admin"
+
+      assert Plug.Conn.get_session(conn, :current_workspace_uri) ==
+               "workspace://default"
+    end
+
+    # SPEC v3 §6.4 amended — `clear/1` is shared by /logout AND
+    # /workspaces/switch. Both slots gone.
+    test "clear/1 removes both slots" do
+      conn =
+        Plug.Test.conn(:get, "/")
+        |> Plug.Test.init_test_session(%{})
+        |> SessionPrincipal.put("admin")
+        |> SessionPrincipal.clear()
+
+      refute Plug.Conn.get_session(conn, :current_entity_uri)
+      refute Plug.Conn.get_session(conn, :current_workspace_uri)
+    end
+  end
+
   describe "codebase invariant — single sanctioned writer" do
     # This test is the architectural gate: no controller / plug should
     # call `put_session(_, :current_entity_uri, _)` directly. They
@@ -130,6 +210,44 @@ defmodule EzagentWeb.SessionPrincipalTest do
                "\n\nFunnel all auth paths through EzagentWeb.SessionPrincipal.put/2 — " <>
                "it validates that the principal is a canonical entity:// URI before storage. " <>
                "See module @moduledoc for the bug this prevents."
+    end
+
+    # Phase 9 PR-5 (SPEC v3 §6.5) — extension of the above. The
+    # workspace slot has its own invariant: it MUST equal
+    # `entity_workspace_uri(:current_entity_uri)`, enforced at the
+    # SessionPrincipal write site. Any direct `put_session(_,
+    # :current_workspace_uri, _)` elsewhere bypasses that
+    # derivation and is forbidden.
+    test "no direct put_session(:current_workspace_uri, _) outside SessionPrincipal" do
+      app_dir = Path.expand("../../../../", __DIR__)
+
+      {output, _exit_code} =
+        System.cmd(
+          "grep",
+          [
+            "-rE",
+            "put_session\\([^)]+:current_workspace_uri",
+            Path.join(app_dir, "apps"),
+            "--include=*.ex",
+            "--exclude=session_principal.ex"
+          ],
+          stderr_to_stdout: true
+        )
+
+      violations =
+        output
+        |> String.split("\n", trim: true)
+        |> Enum.reject(fn line ->
+          String.contains?(line, "session_principal") or
+            String.contains?(line, "test/")
+        end)
+
+      assert violations == [],
+             "Direct put_session(_, :current_workspace_uri, _) found outside SessionPrincipal:\n" <>
+               Enum.join(violations, "\n") <>
+               "\n\nFunnel all auth paths through EzagentWeb.SessionPrincipal.put/2 — " <>
+               "it derives :current_workspace_uri from :current_entity_uri so the " <>
+               "two slots can never diverge. SPEC v3 §6.5 invariant."
     end
   end
 end
