@@ -27,12 +27,15 @@ defmodule EzagentPluginLiveview.UsersLiveTest do
 
   test "create_user persists + appears in list", %{conn: conn} do
     {:ok, lv, _html} = live(conn, "/identities/users")
-    uri = "entity://user/lv-create-#{System.unique_integer([:positive])}"
+    handle = "lv-create-#{System.unique_integer([:positive])}"
+    uri = "entity://user/" <> handle
 
+    # Phase 8c PR-O — bare handle accepted; backend normalizes.
     lv
     |> form("#create-user form",
       user: %{
-        uri: uri,
+        handle: handle,
+        display_name: "Test Display",
         password: "pw",
         caps: "workspace.workspace"
       }
@@ -46,12 +49,13 @@ defmodule EzagentPluginLiveview.UsersLiveTest do
 
   test "create_user refuses '*' caps via UI (must use mix --allow-allcaps)", %{conn: conn} do
     {:ok, lv, _html} = live(conn, "/identities/users")
-    uri = "entity://user/lv-allcaps-#{System.unique_integer([:positive])}"
+    handle = "lv-allcaps-#{System.unique_integer([:positive])}"
+    uri = "entity://user/" <> handle
 
     lv
     |> form("#create-user form",
       user: %{
-        uri: uri,
+        handle: handle,
         password: "pw",
         caps: "*"
       }
@@ -61,6 +65,46 @@ defmodule EzagentPluginLiveview.UsersLiveTest do
     html = render(lv)
     assert html =~ "allow-allcaps"
     assert nil == Ezagent.Users.get_by_uri(uri)
+  end
+
+  test "create_user accepts bare handle (Task 3 — Phase 8c PR-O)", %{conn: conn} do
+    {:ok, lv, _html} = live(conn, "/identities/users")
+    handle = "lv-bare-#{System.unique_integer([:positive])}"
+    expected_uri = "entity://user/" <> handle
+
+    lv
+    |> form("#create-user form",
+      user: %{
+        handle: handle,
+        password: "",
+        caps: ""
+      }
+    )
+    |> render_submit()
+
+    html = render(lv)
+    assert html =~ expected_uri
+    assert %{} = Ezagent.Users.get_by_uri(expected_uri)
+  end
+
+  test "create_user persists display_name when supplied (Task 1 — Phase 8c PR-O)", %{conn: conn} do
+    {:ok, lv, _html} = live(conn, "/identities/users")
+    handle = "lv-dn-#{System.unique_integer([:positive])}"
+    uri = "entity://user/" <> handle
+
+    lv
+    |> form("#create-user form",
+      user: %{
+        handle: handle,
+        display_name: "Spelled Out",
+        password: "",
+        caps: ""
+      }
+    )
+    |> render_submit()
+
+    # Display name is what EntityPresenter resolves the URI to now.
+    assert Ezagent.EntityPresenter.display(uri) == "Spelled Out"
   end
 
   test "set_password updates an existing user (PR 4 path)" do

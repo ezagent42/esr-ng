@@ -14,6 +14,12 @@
 // No LV roundtrip — entirely client-side. Selection mutates the
 // input value with a synthetic input event so LV's phx-change picks
 // it up via normal form-state sync.
+//
+// Username & Auth UI Task 1 (Phase 8c PR-O 2026-05-20) — members are
+// now passed as `[{uri, display_name}]` instead of `[uri]` so the
+// popover can show the display name primary + URI mono subtitle and
+// users can filter by either. Both fields participate in the match
+// substring search.
 export const MentionAutocomplete = {
   mounted() {
     this.members = JSON.parse(this.el.dataset.members || "[]")
@@ -63,7 +69,11 @@ export const MentionAutocomplete = {
     if (match) {
       const filter = match[1].toLowerCase()
       const matches = this.members
-        .filter((uri) => uri.toLowerCase().includes(filter))
+        .map((m) => normalize(m))
+        .filter((m) =>
+          m.uri.toLowerCase().includes(filter) ||
+          (m.display_name && m.display_name.toLowerCase().includes(filter))
+        )
         .slice(0, 5)
       this._matches = matches
       this._activeIndex = 0
@@ -111,10 +121,19 @@ export const MentionAutocomplete = {
     this.popover.style.maxWidth = "480px"
 
     this.popover.innerHTML = matches
-      .map(
-        (uri, i) =>
-          `<button type="button" data-uri="${escapeAttr(uri)}" class="block w-full text-left px-2 py-1 text-xs font-mono ${i === this._activeIndex ? "bg-blue-50 text-blue-800" : "hover:bg-zinc-100 text-zinc-700"}">${escapeText(uri)}</button>`
-      )
+      .map((m, i) => {
+        const active = i === this._activeIndex
+          ? "bg-blue-50 dark:bg-blue-950 text-blue-800 dark:text-blue-200"
+          : "hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-700 dark:text-zinc-300"
+        const primary = m.display_name && m.display_name !== m.uri
+          ? `<div class="text-xs font-medium">${escapeText(m.display_name)}</div>` +
+            `<div class="text-[10px] font-mono text-zinc-500">${escapeText(m.uri)}</div>`
+          : `<div class="text-xs font-mono">${escapeText(m.uri)}</div>`
+        return (
+          `<button type="button" data-uri="${escapeAttr(m.uri)}" ` +
+          `class="block w-full text-left px-2 py-1 ${active}">${primary}</button>`
+        )
+      })
       .join("")
 
     Array.from(this.popover.children).forEach((child) => {
@@ -168,4 +187,12 @@ function escapeText(s) {
     .replace(/&/g, "&amp;")
     .replace(/</g, "&lt;")
     .replace(/>/g, "&gt;")
+}
+
+// Username & Auth UI Task 1 — tolerate both new `{uri, display_name}`
+// shape and legacy raw-string shape during rollout. Server always
+// sends objects post-PR but tests may inject either.
+function normalize(m) {
+  if (typeof m === "string") return { uri: m, display_name: null }
+  return { uri: m.uri, display_name: m.display_name || null }
 }

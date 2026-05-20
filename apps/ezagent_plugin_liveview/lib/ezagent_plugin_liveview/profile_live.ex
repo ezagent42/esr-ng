@@ -4,6 +4,10 @@ defmodule EzagentPluginLiveview.ProfileLive do
 
   Reached from the IDE Shell avatar dropdown. Shows the current entity's
   URI, caps count, API key count, and quick links to detail pages.
+
+  Phase 8c PR-O (Username & Auth UI Task 2) — inline display-name
+  editing for the logged-in entity. Pencil icon swaps the name into an
+  input; submit upserts via `Ezagent.Entity.Profile.upsert/1`.
   """
   use Phoenix.LiveView
   alias EzagentDomainUi.IdeShell
@@ -17,9 +21,49 @@ defmodule EzagentPluginLiveview.ProfileLive do
 
     {:ok,
      socket
+     |> assign(:entity_uri, entity_uri)
      |> assign(:entity_uri_str, entity_uri_str)
+     |> assign(:display_name, Ezagent.EntityPresenter.display(entity_uri_str))
+     |> assign(:editing_display_name?, false)
+     |> assign(:flash_error, nil)
+     |> assign(:flash_info, nil)
      |> assign(:caps_count, count_caps(entity_uri))
      |> assign(:api_keys_count, count_api_keys(entity_uri))}
+  end
+
+  @impl true
+  def handle_event("edit_display_name", _params, socket) do
+    {:noreply, assign(socket, :editing_display_name?, true)}
+  end
+
+  def handle_event("cancel_edit_display_name", _params, socket) do
+    {:noreply, assign(socket, :editing_display_name?, false)}
+  end
+
+  def handle_event("save_display_name", %{"display_name" => name}, socket) do
+    name = String.trim(name)
+
+    cond do
+      name == "" ->
+        {:noreply, assign(socket, :flash_error, "Display name cannot be empty")}
+
+      true ->
+        case Ezagent.Entity.Profile.upsert(%{
+               entity_uri: socket.assigns.entity_uri_str,
+               display_name: name
+             }) do
+          {:ok, _profile} ->
+            {:noreply,
+             socket
+             |> assign(:display_name, name)
+             |> assign(:editing_display_name?, false)
+             |> assign(:flash_info, "Display name updated.")
+             |> assign(:flash_error, nil)}
+
+          {:error, changeset} ->
+            {:noreply, assign(socket, :flash_error, "update failed: #{inspect(changeset.errors)}")}
+        end
+    end
   end
 
   defp count_caps(uri) do
@@ -57,9 +101,43 @@ defmodule EzagentPluginLiveview.ProfileLive do
           <.card class="mt-4">
             <div class="flex items-center gap-4">
               <.avatar uri={@entity_uri_str} size="md" />
-              <div>
-                <div class="text-xs text-zinc-500">Entity URI</div>
+              <div class="flex-1">
+                <div class="text-xs text-zinc-500">Display name</div>
+                <%= if @editing_display_name? do %>
+                  <form phx-submit="save_display_name" phx-click-away="cancel_edit_display_name" class="flex gap-1 items-center mt-0.5">
+                    <input
+                      type="text"
+                      name="display_name"
+                      value={@display_name}
+                      autofocus
+                      phx-key="escape"
+                      phx-keydown="cancel_edit_display_name"
+                      class="flex-1 px-2 py-1 text-sm border border-blue-400 dark:border-blue-600 rounded bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100"
+                    />
+                    <button type="submit" class="p-1 text-emerald-600 hover:text-emerald-700 dark:text-emerald-400" aria-label="Save">
+                      <.icon name="check" size="sm" />
+                    </button>
+                    <button type="button" phx-click="cancel_edit_display_name" class="p-1 text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300" aria-label="Cancel">
+                      <.icon name="x" size="sm" />
+                    </button>
+                  </form>
+                <% else %>
+                  <div class="flex items-center gap-1">
+                    <span class="text-sm font-medium text-zinc-900 dark:text-zinc-100">{@display_name}</span>
+                    <button
+                      type="button"
+                      phx-click="edit_display_name"
+                      aria-label="Edit display name"
+                      class="p-1 text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-200 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded"
+                    >
+                      <.icon name="pencil" size="xs" />
+                    </button>
+                  </div>
+                <% end %>
+                <div class="mt-2 text-xs text-zinc-500">Entity URI</div>
                 <.uri_chip uri={@entity_uri_str} />
+                <p :if={@flash_error} class="text-rose-600 dark:text-rose-400 text-xs mt-2">{@flash_error}</p>
+                <p :if={@flash_info} class="text-emerald-600 dark:text-emerald-400 text-xs mt-2">{@flash_info}</p>
               </div>
             </div>
           </.card>

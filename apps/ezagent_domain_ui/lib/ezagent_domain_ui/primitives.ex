@@ -502,6 +502,11 @@ defmodule EzagentDomainUi.Primitives do
   defp heroicon_for("dashboard"), do: "rectangle-group"
   defp heroicon_for("sun"), do: "sun"
   defp heroicon_for("moon"), do: "moon"
+  # Phase 8c PR-O (Username & Auth UI) — pencil/check for inline edit affordances.
+  defp heroicon_for("pencil"), do: "pencil"
+  defp heroicon_for("check"), do: "check"
+  defp heroicon_for("envelope"), do: "envelope"
+  defp heroicon_for("paper-airplane"), do: "paper-airplane"
   defp heroicon_for(_), do: nil
 
   defp text_fallback("dot"), do: "•"

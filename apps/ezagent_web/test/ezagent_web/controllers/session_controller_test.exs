@@ -4,11 +4,17 @@ defmodule EzagentWeb.SessionControllerTest do
 
   @endpoint EzagentWeb.Endpoint
 
-  describe "GET /login" do
-    test "renders the login form" do
+  describe "GET /login/credentials" do
+    test "renders the credentials login form (Phase 8c PR-A branded)" do
       conn = build_conn() |> get("/login/credentials")
-      assert html_response(conn, 200) =~ "Ezagent Login"
-      assert html_response(conn, 200) =~ "Entity URI"
+      body = html_response(conn, 200)
+      # Phase 8c PR-A — branded boundary page (Geist font, "Sign in"
+      # heading, "ezagent" lowercase brand). PR #152 moved this route
+      # from /login to /login/credentials so /login can host the
+      # magic-link form.
+      assert body =~ "ezagent"
+      assert body =~ "Sign in"
+      assert body =~ "Entity URI"
     end
   end
 

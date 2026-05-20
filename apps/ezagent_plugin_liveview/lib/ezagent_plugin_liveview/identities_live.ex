@@ -60,6 +60,11 @@ defmodule EzagentPluginLiveview.IdentitiesLive do
       |> Enum.filter(&matches_filter?(&1, socket.assigns.filter))
       |> Enum.sort_by(& &1.uri_str)
 
+    # Username & Auth UI Task 1 (Phase 8c PR-O) — batch-resolve display
+    # names so each card shows a friendly primary label.
+    display_map = Ezagent.EntityPresenter.display_many(Enum.map(rows, & &1.uri_str))
+    rows = Enum.map(rows, fn r -> Map.put(r, :display_name, Map.get(display_map, r.uri_str, r.name)) end)
+
     flavors =
       rows
       |> Enum.filter(&(&1.host == "agent"))
@@ -172,10 +177,13 @@ defmodule EzagentPluginLiveview.IdentitiesLive do
       <div class="flex items-start gap-3">
         <.avatar uri={@entity.uri_str} size="md" />
         <div class="flex-1 min-w-0">
+          <%!-- Username & Auth UI Task 1 (PR-O) — display name primary,
+                URI mono subtitle. status_dot moves up beside the name. --%>
           <div class="flex items-center gap-2">
-            <span class="font-mono text-xs truncate">{@entity.uri_str}</span>
+            <span class="text-sm font-medium text-zinc-900 dark:text-zinc-100 truncate">{Map.get(@entity, :display_name, @entity.name)}</span>
             <.status_dot color={(@entity.alive && "green") || "gray"} />
           </div>
+          <div class="font-mono text-[10px] text-zinc-500 truncate">{@entity.uri_str}</div>
           <div class="text-[11px] text-zinc-500 mt-1">
             {@entity.host == "user" && "User" || ("Agent (" <> @entity.flavor <> ")")}
           </div>

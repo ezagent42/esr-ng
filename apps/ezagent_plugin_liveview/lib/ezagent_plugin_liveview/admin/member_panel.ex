@@ -16,6 +16,11 @@ defmodule EzagentPluginLiveview.Admin.MemberPanel do
   attr :members, :list, required: true
   attr :floating_agents, :list, default: []
 
+  # Username & Auth UI Task 1 (PR-O) — `%{uri_str => display_name}`
+  # batch-resolved by admin_live via `Ezagent.EntityPresenter.display_many/1`.
+  # Empty map = fall back to URI path segment for each member.
+  attr :display_map, :map, default: %{}
+
   def member_panel(assigns) do
     ~H"""
     <aside id="session-members" class="p-3 text-zinc-800 dark:text-zinc-200">
@@ -27,15 +32,21 @@ defmodule EzagentPluginLiveview.Admin.MemberPanel do
         <tbody>
           <tr :for={member <- @members} class="border-b border-zinc-100 dark:border-zinc-900">
             <td class="py-1.5 align-top">
-              <div class="flex items-center gap-1 justify-between">
-                <div class="font-mono text-[11px] break-all flex-1">{member.uri}</div>
+              <div class="flex items-start gap-1 justify-between">
+                <div class="flex-1 min-w-0">
+                  <%!-- Display name primary, URI mono subtitle. --%>
+                  <div class="text-xs font-medium text-zinc-800 dark:text-zinc-200 truncate">
+                    {display_for(member.uri, @display_map)}
+                  </div>
+                  <div class="font-mono text-[10px] text-zinc-400 dark:text-zinc-600 break-all">{member.uri}</div>
+                </div>
                 <button
                   :if={cc_agent_uri?(member.uri)}
                   type="button"
                   phx-click="switch_to_pty_for_agent"
                   phx-value-agent={member.uri}
-                  title={"Open PTY for #{member.uri}"}
-                  aria-label={"Open PTY for #{member.uri}"}
+                  title={"Open PTY for #{display_for(member.uri, @display_map)}"}
+                  aria-label={"Open PTY for #{display_for(member.uri, @display_map)}"}
                   class="p-1 text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded shrink-0"
                 >
                   <.icon name="terminal" size="xs" />
@@ -62,15 +73,24 @@ defmodule EzagentPluginLiveview.Admin.MemberPanel do
           <select
             name="agent_uri"
             id="floating-agents-picker"
-            class="w-full text-[11px] font-mono px-2 py-1 border border-zinc-300 dark:border-zinc-700 rounded bg-white dark:bg-zinc-900 text-zinc-800 dark:text-zinc-200"
+            class="w-full text-[11px] px-2 py-1 border border-zinc-300 dark:border-zinc-700 rounded bg-white dark:bg-zinc-900 text-zinc-800 dark:text-zinc-200"
           >
             <option value="">— add to session…</option>
-            <option :for={uri <- @floating_agents} value={uri}>{uri}</option>
+            <option :for={uri <- @floating_agents} value={uri}>{display_for(uri, @display_map)}</option>
           </select>
         </form>
       </div>
     </aside>
     """
+  end
+
+  # Username & Auth UI Task 1 — falls back to URI path segment when
+  # the batch map is missing (defensive for pre-PR call sites).
+  defp display_for(uri_str, %{} = display_map) do
+    case Map.get(display_map, uri_str) do
+      name when is_binary(name) and name != "" -> name
+      _ -> Ezagent.EntityPresenter.display(uri_str)
+    end
   end
 
   # Phase 8b — `entity://agent/cc_<name>` is the cc-managed agent

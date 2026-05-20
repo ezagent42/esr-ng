@@ -89,11 +89,14 @@ defmodule EzagentPluginLiveview.Views.ConversationView do
             row.sender_kind == :other && "bg-zinc-100 dark:bg-zinc-900 border-zinc-200 dark:border-zinc-800 mx-auto"
           ]}
         >
-          <div class="flex items-center gap-2 text-[11px] text-zinc-500">
-            <span class="font-mono">{row.sender}</span>
+          <%!-- Username & Auth UI Task 1 (PR-O) — display name primary,
+                URI secondary (mono). Falls back to URI when no profile. --%>
+          <div class="flex items-baseline gap-2 text-[11px] text-zinc-500">
+            <span class="font-medium text-zinc-700 dark:text-zinc-300">{sender_display_for(row)}</span>
             <span>·</span>
             <span>{format_time(row.at)}</span>
           </div>
+          <div class="font-mono text-[10px] text-zinc-400 dark:text-zinc-600 break-all">{row.sender}</div>
           <div :if={row.text != ""} class="mt-1 text-sm whitespace-pre-wrap break-words">{row.text}</div>
           <div :if={attachments_of(row) != []} class="mt-2 flex gap-1 flex-wrap">
             <a
@@ -116,4 +119,9 @@ defmodule EzagentPluginLiveview.Views.ConversationView do
 
   defp attachments_of(%{attachments: list}) when is_list(list), do: list
   defp attachments_of(_), do: []
+
+  # Username & Auth UI Task 1 — pre-PR rows lack sender_display; fall
+  # back to sender URI string so legacy data still renders.
+  defp sender_display_for(%{sender_display: name}) when is_binary(name) and name != "", do: name
+  defp sender_display_for(%{sender: s}), do: s
 end

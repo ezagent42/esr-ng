@@ -374,7 +374,7 @@ defmodule EzagentPluginLiveview.AdminLive do
           socket.assigns.current_session_uri
           |> Ezagent.MessageStore.older_than(cursor, @message_limit)
           |> Enum.reverse()
-          |> Enum.map(&message_to_row/1)
+          |> messages_to_rows()
 
         socket =
           Enum.reduce(older, socket, fn row, acc ->
@@ -479,7 +479,11 @@ defmodule EzagentPluginLiveview.AdminLive do
       </:main_window>
 
       <:right_sidebar>
-        <MemberPanel.member_panel members={@session_members} floating_agents={@floating_agents} />
+        <MemberPanel.member_panel
+          members={@session_members}
+          floating_agents={@floating_agents}
+          display_map={@display_map}
+        />
       </:right_sidebar>
     </IdeShell.ide_shell>
     """
@@ -521,14 +525,33 @@ defmodule EzagentPluginLiveview.AdminLive do
   # --- Helpers ----------------------------------------------------------
 
   # Bundle the per-session reads needed by SessionEditor + MemberPanel.
+  #
+  # Username & Auth UI Task 1 (Phase 8c PR-O) — resolve display names
+  # for every URI that will be rendered to a human in one batch query
+  # (`Ezagent.EntityPresenter.display_many/1`). The same map covers
+  # the Members panel rows, the @mention picker JSON (so users can
+  # filter by name), and conversation message senders. Falls back to
+  # the URI path segment when no profile exists.
   defp assign_session_context(socket, session_uri) do
     members = read_session_members(session_uri)
+    member_uris = Enum.map(members, & &1.uri)
+    floating = list_floating_agents()
     applicable = SessionViewRegistry.applicable_views(session_uri)
+
+    display_map = Ezagent.EntityPresenter.display_many(member_uris ++ floating)
+
+    member_options =
+      member_uris
+      |> Enum.sort()
+      |> Enum.map(fn uri ->
+        %{"uri" => uri, "display_name" => Map.get(display_map, uri, uri)}
+      end)
 
     socket
     |> assign(:session_members, members)
-    |> assign(:member_options, Enum.map(members, & &1.uri) |> Enum.sort())
-    |> assign(:floating_agents, list_floating_agents())
+    |> assign(:member_options, member_options)
+    |> assign(:floating_agents, floating)
+    |> assign(:display_map, display_map)
     |> assign(:applicable_views, applicable)
     |> assign(:view_module, view_module_for(applicable, current_view_or_default(socket)))
     |> assign(:session_info, build_session_info(session_uri, members))
@@ -639,7 +662,7 @@ defmodule EzagentPluginLiveview.AdminLive do
     session_uri
     |> Ezagent.MessageStore.recent_in_session(@message_limit)
     |> Enum.reverse()
-    |> Enum.map(&message_to_row/1)
+    |> messages_to_rows()
   end
 
   defp oldest_cursor(rows) do
@@ -694,17 +717,43 @@ defmodule EzagentPluginLiveview.AdminLive do
 
   defp bridge_topic_safely, do: EzagentPluginCc.BridgeRegistry.topic()
 
+  # Single-message variant — used by handle_info live deliveries
+  # where batching is not possible (one message at a time). Pays one
+  # DB hit for the sender's display name. Acceptable because chat
+  # delivery is human-paced (< 10/s).
   defp message_to_row(%Ezagent.Message{} = msg) do
     sender_str = URI.to_string(msg.sender)
 
     %{
       id: msg.id,
       sender: sender_str,
+      sender_display: Ezagent.EntityPresenter.display(sender_str),
       sender_kind: sender_kind(sender_str),
       text: body_text(msg.body),
       attachments: body_attachments(msg.body),
       at: msg.inserted_at
     }
+  end
+
+  # Batch variant — used for initial load + load-older. One
+  # display_many/1 query for the whole page, then per-row map lookup.
+  defp messages_to_rows(messages) when is_list(messages) do
+    sender_uris = Enum.map(messages, fn %Ezagent.Message{sender: s} -> URI.to_string(s) end)
+    display_map = Ezagent.EntityPresenter.display_many(sender_uris)
+
+    Enum.map(messages, fn %Ezagent.Message{} = msg ->
+      sender_str = URI.to_string(msg.sender)
+
+      %{
+        id: msg.id,
+        sender: sender_str,
+        sender_display: Map.get(display_map, sender_str, sender_str),
+        sender_kind: sender_kind(sender_str),
+        text: body_text(msg.body),
+        attachments: body_attachments(msg.body),
+        at: msg.inserted_at
+      }
+    end)
   end
 
   defp sender_kind(uri_str) do
