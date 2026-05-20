@@ -25,7 +25,7 @@ defmodule Ezagent.Capability.Parser do
   @doc """
   Parse a caps string into a list of Capability structs.
 
-  `granter` is the URI of who is granting (e.g. `entity://user/admin`
+  `granter` is the URI of who is granting (e.g. `entity://user/default/admin`
   when admin runs `mix ezagent.user.create`). `now` defaults to
   current UTC.
   """

@@ -5,7 +5,7 @@ defmodule Mix.Tasks.Ezagent.User.Create do
 
   ## Usage
 
-      mix ezagent.user.create entity://user/allen \\
+      mix ezagent.user.create entity://user/default/allen \\
           --password 'temp-pw-rotate-me' \\
           --caps 'workspace.read,chat.send'
 
@@ -28,10 +28,10 @@ defmodule Mix.Tasks.Ezagent.User.Create do
   ## Examples
 
       # Read-only operator
-      mix ezagent.user.create entity://user/qa --password X --caps 'workspace.read,chat.send'
+      mix ezagent.user.create entity://user/default/qa --password X --caps 'workspace.read,chat.send'
 
       # Make a second admin (require explicit allow flag)
-      mix ezagent.user.create entity://user/allen2 --password X --caps '*' --allow-allcaps
+      mix ezagent.user.create entity://user/default/allen2 --password X --caps '*' --allow-allcaps
   """
   use Mix.Task
 
@@ -59,7 +59,7 @@ defmodule Mix.Tasks.Ezagent.User.Create do
         usage: mix ezagent.user.create <user_uri> [--password X] [--caps 'kind.behavior,...'] [--allow-allcaps]
 
         Example:
-          mix ezagent.user.create entity://user/allen --password 'pw' --caps 'workspace.read,chat.send'
+          mix ezagent.user.create entity://user/default/allen --password 'pw' --caps 'workspace.read,chat.send'
         """)
     end
   end
@@ -84,12 +84,21 @@ defmodule Mix.Tasks.Ezagent.User.Create do
   end
 
   defp parse_uri(s) when is_binary(s) do
-    case URI.new(s) do
-      {:ok, %URI{scheme: "entity", host: "user", path: "/" <> name} = u} when name != "" ->
-        {:ok, u}
+    # Phase 9 PR-2: route through Ezagent.URI.parse!/1 so 2-segment
+    # entity URIs are rejected with the SPEC v3 §3 error message.
+    try do
+      uri = Ezagent.URI.parse!(s)
 
-      _ ->
-        {:error, {:bad_uri, s, "expected entity://user/<name>"}}
+      case uri do
+        %URI{scheme: "entity", host: "user", path: "/" <> _rest} ->
+          {:ok, uri}
+
+        _ ->
+          {:error, {:bad_uri, s, "expected entity://user/<workspace>/<name>"}}
+      end
+    rescue
+      e in ArgumentError ->
+        {:error, {:bad_uri, s, Exception.message(e)}}
     end
   end
 

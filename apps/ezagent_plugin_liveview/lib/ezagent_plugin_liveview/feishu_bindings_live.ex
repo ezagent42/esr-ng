@@ -20,7 +20,7 @@ defmodule EzagentPluginLiveview.FeishuBindingsLive do
   def mount(_params, session, socket) do
     admin_uri =
       case Map.get(session || %{}, "current_entity_uri") do
-        nil -> "entity://user/admin"
+        nil -> "entity://user/default/admin"
         s -> s
       end
 
@@ -78,7 +78,7 @@ defmodule EzagentPluginLiveview.FeishuBindingsLive do
   def render(assigns) do
     assigns =
       assign_new(assigns, :current_entity_uri_str, fn ->
-        URI.to_string(Map.get(assigns, :current_entity_uri) || URI.parse("entity://user/admin"))
+        URI.to_string(Map.get(assigns, :current_entity_uri) || URI.parse("entity://user/default/admin"))
       end)
 
     ~H"""

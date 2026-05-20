@@ -64,11 +64,11 @@ defmodule EzagentPluginLiveview.WorkspacesLiveTest do
     {:ok, lv, _html} = live(conn, "/workspaces/#{name}")
 
     lv
-    |> form("#members form", add_member: %{member_uri: "entity://agent/test_test-add"})
+    |> form("#members form", add_member: %{member_uri: "entity://agent/default/test_test-add"})
     |> render_submit()
 
     html = render(lv)
-    assert html =~ "entity://agent/test_test-add"
+    assert html =~ "entity://agent/default/test_test-add"
     assert html =~ "Members (1)"
   end
 end

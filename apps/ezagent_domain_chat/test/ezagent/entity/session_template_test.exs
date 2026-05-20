@@ -65,14 +65,14 @@ defmodule Ezagent.Entity.SessionTemplateTest do
         name: "stable",
         agent_slots: [],
         created_at: ~U[2026-05-18 10:00:00Z],
-        created_by: URI.parse("entity://user/alice")
+        created_by: URI.parse("entity://user/default/alice")
       }
 
       slice_b = %{
         name: "stable",
         agent_slots: [],
         created_at: ~U[2026-12-31 23:59:59Z],
-        created_by: URI.parse("entity://user/bob")
+        created_by: URI.parse("entity://user/default/bob")
       }
 
       assert SessionTemplate.compute_version_hash(slice_a) ==

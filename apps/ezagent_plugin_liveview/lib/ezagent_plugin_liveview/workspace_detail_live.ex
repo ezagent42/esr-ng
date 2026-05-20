@@ -120,7 +120,7 @@ defmodule EzagentPluginLiveview.WorkspaceDetailLive do
         end
 
       _ ->
-        {:noreply, assign(socket, :flash_error, "URI must include a scheme (e.g. entity://agent/cc_x)")}
+        {:noreply, assign(socket, :flash_error, "URI must include a scheme (e.g. entity://agent/default/cc_x)")}
     end
   end
 
@@ -277,7 +277,7 @@ defmodule EzagentPluginLiveview.WorkspaceDetailLive do
     # config) is a configuration surface, not a workflow surface.
     assigns =
       assign_new(assigns, :current_entity_uri_str, fn ->
-        URI.to_string(assigns.current_entity_uri || URI.parse("entity://user/admin"))
+        URI.to_string(assigns.current_entity_uri || URI.parse("entity://user/default/admin"))
       end)
 
     ~H"""
@@ -347,7 +347,7 @@ defmodule EzagentPluginLiveview.WorkspaceDetailLive do
                 type="text"
                 name="add_member[member_uri]"
                 id="add_member_uri"
-                placeholder="entity://agent/cc_architect"
+                placeholder="entity://agent/default/cc_architect"
                 class="flex-1 px-2.5 py-1.5 border border-zinc-300 dark:border-zinc-700 rounded font-mono text-xs bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100"
               />
               <.button type="submit" variant="primary" size="sm">Add member</.button>

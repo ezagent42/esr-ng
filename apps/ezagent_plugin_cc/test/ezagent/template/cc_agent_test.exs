@@ -18,7 +18,7 @@ defmodule Ezagent.PluginCc.Template.CcAgentTest do
       assert :ok =
                CcAgent.validate(%{
                  "class" => "cc.agent",
-                 "agent_uri" => "entity://agent/cc_cc-architect",
+                 "agent_uri" => "entity://agent/default/cc_cc-architect",
                  "mode" => "local-pty",
                  "cwd" => "/tmp"
                })
@@ -28,7 +28,7 @@ defmodule Ezagent.PluginCc.Template.CcAgentTest do
       assert :ok =
                CcAgent.validate(%{
                  "class" => "cc.agent",
-                 "agent_uri" => "entity://agent/cc_no-mode",
+                 "agent_uri" => "entity://agent/default/cc_no-mode",
                  "cwd" => "/tmp"
                })
     end
@@ -37,21 +37,21 @@ defmodule Ezagent.PluginCc.Template.CcAgentTest do
       assert :ok =
                CcAgent.validate(%{
                  "class" => "cc.agent",
-                 "agent_uri" => "entity://agent/cc_remote",
+                 "agent_uri" => "entity://agent/default/cc_remote",
                  "mode" => "remote-channel"
                })
     end
 
     test "rejects missing class" do
       assert {:error, :missing_class_field} =
-               CcAgent.validate(%{"agent_uri" => "entity://agent/cc_x", "cwd" => "/tmp"})
+               CcAgent.validate(%{"agent_uri" => "entity://agent/default/cc_x", "cwd" => "/tmp"})
     end
 
     test "rejects wrong class" do
       assert {:error, {:wrong_class, "cc.pty"}} =
                CcAgent.validate(%{
                  "class" => "cc.pty",
-                 "agent_uri" => "entity://agent/cc_x",
+                 "agent_uri" => "entity://agent/default/cc_x",
                  "cwd" => "/tmp"
                })
     end
@@ -61,11 +61,11 @@ defmodule Ezagent.PluginCc.Template.CcAgentTest do
                CcAgent.validate(%{"class" => "cc.agent", "cwd" => "/tmp"})
     end
 
-    test "rejects entity://user/X (wrong entity type — must be agent)" do
+    test "rejects entity://user/default/X (wrong entity type — must be agent)" do
       assert {:error, {:invalid_agent_uri, _, _}} =
                CcAgent.validate(%{
                  "class" => "cc.agent",
-                 "agent_uri" => "entity://user/x",
+                 "agent_uri" => "entity://user/default/x",
                  "cwd" => "/tmp"
                })
     end
@@ -83,7 +83,7 @@ defmodule Ezagent.PluginCc.Template.CcAgentTest do
       assert {:error, {:missing_flavor_prefix, _, _}} =
                CcAgent.validate(%{
                  "class" => "cc.agent",
-                 "agent_uri" => "entity://agent/just-a-name",
+                 "agent_uri" => "entity://agent/default/just-a-name",
                  "cwd" => "/tmp"
                })
     end
@@ -92,7 +92,7 @@ defmodule Ezagent.PluginCc.Template.CcAgentTest do
       assert {:error, {:wrong_agent_flavor, "curl", expected: "cc"}} =
                CcAgent.validate(%{
                  "class" => "cc.agent",
-                 "agent_uri" => "entity://agent/curl_my-deepseek",
+                 "agent_uri" => "entity://agent/default/curl_my-deepseek",
                  "cwd" => "/tmp"
                })
     end
@@ -101,7 +101,7 @@ defmodule Ezagent.PluginCc.Template.CcAgentTest do
       assert {:error, :missing_cwd} =
                CcAgent.validate(%{
                  "class" => "cc.agent",
-                 "agent_uri" => "entity://agent/cc_x",
+                 "agent_uri" => "entity://agent/default/cc_x",
                  "mode" => "local-pty"
                })
     end
@@ -110,7 +110,7 @@ defmodule Ezagent.PluginCc.Template.CcAgentTest do
       assert {:error, {:unsupported_mode, "bogus"}} =
                CcAgent.validate(%{
                  "class" => "cc.agent",
-                 "agent_uri" => "entity://agent/cc_x",
+                 "agent_uri" => "entity://agent/default/cc_x",
                  "mode" => "bogus",
                  "cwd" => "/tmp"
                })
@@ -119,7 +119,7 @@ defmodule Ezagent.PluginCc.Template.CcAgentTest do
 
   describe "instantiate/3 — local-pty mode" do
     test "spawns a PtyServer for the declared agent" do
-      agent_uri_str = "entity://agent/cc_test-#{System.unique_integer([:positive])}"
+      agent_uri_str = "entity://agent/default/cc_test-#{System.unique_integer([:positive])}"
 
       tmpl = %{
         "class" => "cc.agent",
@@ -135,7 +135,7 @@ defmodule Ezagent.PluginCc.Template.CcAgentTest do
     end
 
     test "is idempotent — second call returns same URI without spawning a second PtyServer" do
-      agent_uri_str = "entity://agent/cc_idem-#{System.unique_integer([:positive])}"
+      agent_uri_str = "entity://agent/default/cc_idem-#{System.unique_integer([:positive])}"
       uri = URI.parse(agent_uri_str)
 
       tmpl = %{
@@ -166,7 +166,7 @@ defmodule Ezagent.PluginCc.Template.CcAgentTest do
                  "t",
                  %{
                    "class" => "cc.agent",
-                   "agent_uri" => "entity://agent/cc_remote-x",
+                   "agent_uri" => "entity://agent/default/cc_remote-x",
                    "mode" => "remote-channel"
                  },
                  URI.parse("workspace://test")

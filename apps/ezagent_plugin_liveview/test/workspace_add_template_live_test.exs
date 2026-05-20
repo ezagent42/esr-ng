@@ -44,7 +44,7 @@ defmodule EzagentPluginLiveview.WorkspaceAddTemplateLiveTest do
       add_template: %{
         tmpl_name: "main",
         session_name: session_name,
-        members_csv: "entity://user/admin"
+        members_csv: "entity://user/default/admin"
       }
     )
     |> render_submit()

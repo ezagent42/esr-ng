@@ -144,7 +144,7 @@ defmodule Ezagent.Orchestrator.ToolsTest do
                Tools.update_template(
                  session_uri: URI.parse("session://pr48-test"),
                  workspace_uri: URI.parse("workspace://pr48-test"),
-                 caller: URI.parse("entity://agent/test_pr48-orchestrator"),
+                 caller: URI.parse("entity://agent/default/test_pr48-orchestrator"),
                  parent_template_uri: parent_uri
                )
     end

@@ -121,7 +121,9 @@ defmodule Ezagent.Orchestrator.Tools do
   """
   @spec remove_agent_slot(String.t(), keyword()) :: {:ok, :removed}
   def remove_agent_slot(slot_name, _opts \\ []) when is_binary(slot_name) do
-    agent_uri = URI.new!("entity://agent/#{slot_name}")
+    # Phase 9 PR-2 (SPEC v3 §3): defaulting to `default` workspace
+    # until orchestrator-side workspace plumbing lands in a later PR.
+    agent_uri = URI.new!("entity://agent/default/#{slot_name}")
 
     case Ezagent.KindRegistry.lookup(agent_uri) do
       {:ok, pid} ->
@@ -172,7 +174,9 @@ defmodule Ezagent.Orchestrator.Tools do
          {:ok, caller_uri} <- require_opt(opts, :caller) do
       receivers =
         Enum.map(receiver_slot_names, fn slot ->
-          URI.new!("entity://agent/#{slot}")
+          # Phase 9 PR-2 (SPEC v3 §3): defaulting to `default` workspace
+          # until orchestrator-side workspace plumbing lands.
+          URI.new!("entity://agent/default/#{slot}")
         end)
 
       RuleStore.add(
@@ -366,7 +370,7 @@ defmodule Ezagent.Orchestrator.Tools do
     # Derive agent_slots from live WorkspaceRegistry membership:
     # every entity://agent/* member in this workspace counts as a slot.
     # PR #141 SPEC v2: slot_name = the name segment (path) of the
-    # agent URI, e.g. `cc_architect` for `entity://agent/cc_architect`.
+    # agent URI, e.g. `cc_architect` for `entity://agent/default/cc_architect`.
     agent_slots =
       workspace_uri
       |> live_agents_in_workspace()

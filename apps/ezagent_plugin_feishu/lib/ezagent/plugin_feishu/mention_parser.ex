@@ -13,7 +13,7 @@ defmodule EzagentPluginFeishu.MentionParser do
       @<agent-name>  →  entity://agent/<flavor>_<agent-name>
 
   ESR is the source of truth for agent URIs, and the chat is just a
-  human-readable surface. If you have an `entity://agent/cc_architect`
+  human-readable surface. If you have an `entity://agent/default/cc_architect`
   live and someone types `@architect 看看`, the message routes only
   to that agent via MentionRouting (the existing matcher).
 
@@ -83,9 +83,16 @@ defmodule EzagentPluginFeishu.MentionParser do
 
   # True if the URI's name-suffix (text after the first `_`) matches
   # one of the typed `@<name>` tokens.
-  defp matches_any_typed_name?(%URI{path: "/" <> name}, typed_names) when name != "" do
-    case String.split(name, "_", parts: 2) do
-      [_flavor, suffix] when suffix != "" -> suffix in typed_names
+  # Phase 9 PR-2 (SPEC v3 §3): entity URIs are 3-segment
+  # /<workspace>/<entity_name>; extract entity_name first, then split
+  # on flavor `_` separator.
+  defp matches_any_typed_name?(%URI{path: "/" <> rest}, typed_names) when rest != "" do
+    with [_workspace, entity_name] when entity_name != "" <-
+           String.split(rest, "/", parts: 2),
+         [_flavor, suffix] when suffix != "" <-
+           String.split(entity_name, "_", parts: 2) do
+      suffix in typed_names
+    else
       _ -> false
     end
   end

@@ -11,7 +11,7 @@ defmodule Ezagent.RegistrationTest do
 
   test "slug_available?/1 + suggest_slug/1" do
     assert Registration.slug_available?("freshslug")
-    {:ok, _} = Ezagent.Users.create("entity://user/taken", nil, [])
+    {:ok, _} = Ezagent.Users.create("entity://user/default/taken", nil, [])
     refute Registration.slug_available?("taken")
     assert Registration.suggest_slug("taken") == "taken-2"
   end
@@ -29,13 +29,13 @@ defmodule Ezagent.RegistrationTest do
   test "principal_for_email/1 resolves an existing profile" do
     {:ok, _} =
       Profile.upsert(%{
-        entity_uri: "entity://user/known",
+        entity_uri: "entity://user/default/known",
         display_name: "Known",
         email: "known@good.com"
       })
 
     assert Registration.principal_for_email("known@good.com") ==
-             {:ok, URI.parse("entity://user/known")}
+             {:ok, URI.parse("entity://user/default/known")}
 
     assert Registration.principal_for_email("nobody@good.com") == :none
   end
@@ -44,9 +44,9 @@ defmodule Ezagent.RegistrationTest do
     assert {:ok, uri} =
              Registration.create_principal("newbie", "New Bie", "newbie@good.com")
 
-    assert URI.to_string(uri) == "entity://user/newbie"
+    assert URI.to_string(uri) == "entity://user/default/newbie"
     assert Ezagent.Users.get_by_uri(uri) != nil
-    assert Profile.by_email("newbie@good.com").entity_uri == "entity://user/newbie"
+    assert Profile.by_email("newbie@good.com").entity_uri == "entity://user/default/newbie"
     assert {:ok, _pid} = Ezagent.KindRegistry.lookup(uri)
   end
 

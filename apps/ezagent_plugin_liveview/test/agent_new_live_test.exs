@@ -59,7 +59,7 @@ defmodule EzagentPluginLiveview.AgentNewLiveTest do
       })
       |> render_change()
 
-    assert html =~ "entity://agent/echo_preview-demo"
+    assert html =~ "entity://agent/default/echo_preview-demo"
   end
 
   test "submit with valid inputs spawns agent + redirects", %{conn: conn} do
@@ -75,12 +75,12 @@ defmodule EzagentPluginLiveview.AgentNewLiveTest do
              })
              |> render_submit()
 
-    expected_uri = URI.encode_www_form("entity://agent/echo_#{name}")
+    expected_uri = URI.encode_www_form("entity://agent/default/echo_#{name}")
     assert to == "/identities/agents/#{expected_uri}"
 
     # Verify the agent actually exists in the live KindRegistry.
     {:ok, _pid} =
-      Ezagent.KindRegistry.lookup(URI.parse("entity://agent/echo_#{name}"))
+      Ezagent.KindRegistry.lookup(URI.parse("entity://agent/default/echo_#{name}"))
   end
 
   test "submit with empty name surfaces error and stays on page", %{conn: conn} do
@@ -113,7 +113,7 @@ defmodule EzagentPluginLiveview.AgentNewLiveTest do
 
   test "submit pre-existing URI surfaces 'already exists' error", %{conn: conn} do
     name = "dup-#{System.unique_integer([:positive])}"
-    uri = URI.parse("entity://agent/echo_#{name}")
+    uri = URI.parse("entity://agent/default/echo_#{name}")
 
     # Pre-create the agent.
     {:ok, _pid} = Ezagent.SpawnRegistry.spawn(uri)
@@ -152,7 +152,7 @@ defmodule EzagentPluginLiveview.AgentNewLiveTest do
              })
              |> render_submit()
 
-    agent_uri = URI.parse("entity://agent/echo_#{name}")
+    agent_uri = URI.parse("entity://agent/default/echo_#{name}")
     {:ok, _pid} = Ezagent.KindRegistry.lookup(agent_uri)
 
     # Verify caps parser accepts the placeholder string. This is the

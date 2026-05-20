@@ -11,14 +11,14 @@ defmodule Mix.Tasks.Ezagent.Agent.Create do
 
   ## Usage
 
-      mix ezagent.agent.create entity://agent/curl_my-deepseek \\
+      mix ezagent.agent.create entity://agent/default/curl_my-deepseek \\
           --kind-module Ezagent.Entity.CurlAgent
 
-      mix ezagent.agent.create entity://agent/cc_my-builder \\
+      mix ezagent.agent.create entity://agent/default/cc_my-builder \\
           --kind-module Ezagent.Entity.Agent
 
       # Kind module inferred from the flavor prefix (cc/curl/echo):
-      mix ezagent.agent.create entity://agent/echo_my-echo
+      mix ezagent.agent.create entity://agent/default/echo_my-echo
 
   Flags:
   - `--kind-module <Mod>` — explicit backing Kind module. Optional;
@@ -37,12 +37,12 @@ defmodule Mix.Tasks.Ezagent.Agent.Create do
   ## Examples
 
       # Bring an echo agent into existence
-      mix ezagent.agent.create entity://agent/echo_observer
+      mix ezagent.agent.create entity://agent/default/echo_observer
 
       # CC agent (PTY-managed) — useful for pre-registering an agent
       # so a bridge connecting from the same URI later attaches to
       # the already-live Kind.
-      mix ezagent.agent.create entity://agent/cc_architect
+      mix ezagent.agent.create entity://agent/default/cc_architect
   """
   use Mix.Task
 
@@ -66,8 +66,8 @@ defmodule Mix.Tasks.Ezagent.Agent.Create do
         usage: mix ezagent.agent.create <agent_uri> [--kind-module <Module>]
 
         Example:
-          mix ezagent.agent.create entity://agent/curl_my-deepseek
-          mix ezagent.agent.create entity://agent/cc_architect --kind-module Ezagent.Entity.Agent
+          mix ezagent.agent.create entity://agent/default/curl_my-deepseek
+          mix ezagent.agent.create entity://agent/default/cc_architect --kind-module Ezagent.Entity.Agent
         """)
     end
   end
@@ -95,20 +95,31 @@ defmodule Mix.Tasks.Ezagent.Agent.Create do
   end
 
   defp parse_uri(s) when is_binary(s) do
-    case URI.new(s) do
-      {:ok, %URI{scheme: "entity", host: "agent", path: "/" <> name} = u}
-      when name != "" ->
-        case String.split(name, "_", parts: 2) do
-          [flavor, rest] when flavor != "" and rest != "" ->
-            {:ok, u}
+    # Phase 9 PR-2 (SPEC v3 §3): route through Ezagent.URI.parse!/1
+    # so 2-segment URIs are rejected with the SPEC v3 error.
+    try do
+      uri = Ezagent.URI.parse!(s)
 
-          _ ->
-            {:error,
-             {:bad_uri, s, "expected entity://agent/<flavor>_<name> (e.g. cc_my-bot)"}}
-        end
+      case uri do
+        %URI{scheme: "entity", host: "agent", path: "/" <> rest} ->
+          with [_workspace, entity_name] when entity_name != "" <-
+                 String.split(rest, "/", parts: 2),
+               [flavor, suffix] when flavor != "" and suffix != "" <-
+                 String.split(entity_name, "_", parts: 2) do
+            {:ok, uri}
+          else
+            _ ->
+              {:error,
+               {:bad_uri, s,
+                "expected entity://agent/<workspace>/<flavor>_<name> (e.g. cc_my-bot)"}}
+          end
 
-      _ ->
-        {:error, {:bad_uri, s, "expected entity://agent/<flavor>_<name>"}}
+        _ ->
+          {:error, {:bad_uri, s, "expected entity://agent/<workspace>/<flavor>_<name>"}}
+      end
+    rescue
+      e in ArgumentError ->
+        {:error, {:bad_uri, s, Exception.message(e)}}
     end
   end
 

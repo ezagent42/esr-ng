@@ -1,7 +1,7 @@
 defmodule Mix.Tasks.Ezagent.Demo.SeedCcAgent do
   @shortdoc "Seed a demo cc agent into session://main"
   @moduledoc """
-  Operator-friendly seed task — spawns `entity://agent/cc_demo` and
+  Operator-friendly seed task — spawns `entity://agent/default/cc_demo` and
   joins it to `session://main`. Idempotent.
 
   Allen 2026-05-20: "session://main 中帮我加入 cc agent demo".
@@ -18,7 +18,7 @@ defmodule Mix.Tasks.Ezagent.Demo.SeedCcAgent do
 
   ## What it does
 
-  1. Ensures `entity://agent/cc_demo` is spawned in KindRegistry. If
+  1. Ensures `entity://agent/default/cc_demo` is spawned in KindRegistry. If
      already alive, no-op (idempotent).
   2. Dispatches `chat.join` to `session://main` with the cc_demo agent
      as the member to add. Session must exist (created via the first-
@@ -40,7 +40,7 @@ defmodule Mix.Tasks.Ezagent.Demo.SeedCcAgent do
   """
   use Mix.Task
 
-  @agent_uri_str "entity://agent/cc_demo"
+  @agent_uri_str "entity://agent/default/cc_demo"
   @session_uri_str "session://main"
 
   @impl Mix.Task

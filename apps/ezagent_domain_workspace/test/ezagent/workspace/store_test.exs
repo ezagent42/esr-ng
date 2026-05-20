@@ -17,8 +17,8 @@ defmodule Ezagent.Workspace.StoreTest do
 
     test "encodes members + templates + rules round-trip" do
       name = "store-rt-#{System.unique_integer([:positive])}"
-      members = [URI.parse("entity://user/admin"), URI.parse("entity://agent/test_x")]
-      tmpls = %{"main" => %{"members" => ["entity://user/admin"]}}
+      members = [URI.parse("entity://user/default/admin"), URI.parse("entity://agent/default/test_x")]
+      tmpls = %{"main" => %{"members" => ["entity://user/default/admin"]}}
       rules = [%{"matcher" => "always", "receivers" => ["session://a"]}]
 
       {:ok, decoded} =
@@ -50,7 +50,7 @@ defmodule Ezagent.Workspace.StoreTest do
     end
 
     test "update_members replaces the list", %{name: name} do
-      new_members = [URI.parse("entity://user/admin"), URI.parse("entity://agent/test_new")]
+      new_members = [URI.parse("entity://user/default/admin"), URI.parse("entity://agent/default/test_new")]
       {:ok, _} = Store.update_members(name, new_members)
 
       assert %{members: actual} = Store.get_by_name(name)
@@ -60,7 +60,7 @@ defmodule Ezagent.Workspace.StoreTest do
     end
 
     test "update_templates replaces the map", %{name: name} do
-      tmpls = %{"oncall" => %{"members" => ["entity://user/admin"]}}
+      tmpls = %{"oncall" => %{"members" => ["entity://user/default/admin"]}}
       {:ok, _} = Store.update_templates(name, tmpls)
 
       assert %{session_templates: ^tmpls} = Store.get_by_name(name)

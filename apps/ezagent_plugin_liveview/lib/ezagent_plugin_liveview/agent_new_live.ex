@@ -175,10 +175,16 @@ defmodule EzagentPluginLiveview.AgentNewLive do
 
   defp maybe_register_cc_template(_other_flavor, _agent_uri, _cwd), do: :ok
 
-  defp agent_name(%URI{path: "/" <> rest}), do: rest
+  defp agent_name(%URI{path: "/" <> rest}) do
+    # Phase 9 PR-2 (SPEC v3 §3): entity URI is /<workspace>/<entity_name>.
+    case String.split(rest, "/", parts: 2) do
+      [_workspace, entity_name] -> entity_name
+      [name] -> name
+    end
+  end
 
   defp compose_uri(flavor, name) do
-    full = "entity://agent/#{flavor}_#{name}"
+    full = "entity://agent/default/#{flavor}_#{name}"
 
     case URI.new(full) do
       {:ok, %URI{scheme: "entity", host: "agent", path: "/" <> _} = u} -> {:ok, u}
@@ -196,7 +202,7 @@ defmodule EzagentPluginLiveview.AgentNewLive do
   defp preview_uri(flavor, name) when is_binary(flavor) and is_binary(name) do
     cond do
       flavor == "" or name == "" -> "entity://agent/<flavor>_<name>"
-      true -> "entity://agent/#{flavor}_#{name}"
+      true -> "entity://agent/default/#{flavor}_#{name}"
     end
   end
 
@@ -267,7 +273,7 @@ defmodule EzagentPluginLiveview.AgentNewLive do
   def render(assigns) do
     assigns =
       assign_new(assigns, :current_entity_uri_str, fn ->
-        URI.to_string(Map.get(assigns, :current_entity_uri) || URI.parse("entity://user/admin"))
+        URI.to_string(Map.get(assigns, :current_entity_uri) || URI.parse("entity://user/default/admin"))
       end)
 
     ~H"""

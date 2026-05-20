@@ -21,7 +21,7 @@ defmodule EzagentPluginLiveview.UsersLiveTest do
   test "GET /identities/users renders existing admin row + create form", %{conn: conn} do
     {:ok, _lv, html} = live(conn, "/identities/users")
     assert html =~ "Users"
-    assert html =~ "entity://user/admin"
+    assert html =~ "entity://user/default/admin"
     assert html =~ "Create user"
   end
 
@@ -111,7 +111,7 @@ defmodule EzagentPluginLiveview.UsersLiveTest do
     # Direct facade test — UI form submission with hidden field is
     # awkward in Phoenix.LiveViewTest; the facade is exercised in
     # PR 4 unit tests + the LV button is plain HTML POST.
-    uri = "entity://user/lv-setpw-#{System.unique_integer([:positive])}"
+    uri = "entity://user/default/lv-setpw-#{System.unique_integer([:positive])}"
     {:ok, _} = Ezagent.Users.create(uri, nil, [])
     refute Ezagent.Users.verify_password(uri, "anything")
 

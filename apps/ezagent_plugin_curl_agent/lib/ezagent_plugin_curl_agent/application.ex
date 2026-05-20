@@ -19,7 +19,7 @@ defmodule EzagentPluginCurlAgent.Application do
   - `Ezagent.PluginCurlAgent.Template.instantiate/3` (workspace path,
     spawns under the plugin's own `InstanceSupervisor`); or
   - the chat plugin's `entity://` SpawnRegistry fn, which resolves
-    `entity://agent/curl_<name>` to `Ezagent.Entity.CurlAgent` via
+    `entity://agent/default/curl_<name>` to `Ezagent.Entity.CurlAgent` via
     snapshot / template / flavor-prefix lookup and spawns under
     `EzagentDomainChat.AgentSupervisor`.
   """

@@ -4,7 +4,7 @@ defmodule Ezagent.InvocationTest do
 
   setup do
     # PR #141: agent URIs are entity://agent/<flavor>_<name>; use "test" flavor
-    uri = URI.parse("entity://agent/test_invocation-#{System.unique_integer([:positive])}")
+    uri = URI.parse("entity://agent/default/test_invocation-#{System.unique_integer([:positive])}")
     :ok = Ezagent.BehaviorRegistry.register(TestKind, :noop, TestBehavior)
     :ok = Ezagent.BehaviorRegistry.register(TestKind, :fail, TestBehavior)
 
@@ -42,7 +42,7 @@ defmodule Ezagent.InvocationTest do
   describe "dispatch/1 — error paths" do
     test ":no_such_actor for unknown URI" do
       inv = %Invocation{
-        target: URI.parse("entity://agent/echo_does-not-exist?action=test.noop"),
+        target: URI.parse("entity://agent/default/echo_does-not-exist?action=test.noop"),
         mode: :call,
         args: %{msg: "x"},
         ctx: ctx_for(self())
@@ -147,7 +147,7 @@ defmodule Ezagent.InvocationTest do
 
   defp ctx_for(pid) do
     %{
-      caller: URI.parse("entity://user/admin"),
+      caller: URI.parse("entity://user/default/admin"),
       caps: Ezagent.Entity.User.admin_caps(),
       reply: {:caller_inbox, pid}
     }

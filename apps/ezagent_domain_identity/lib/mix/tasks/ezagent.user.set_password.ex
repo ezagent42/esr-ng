@@ -7,8 +7,8 @@ defmodule Mix.Tasks.Ezagent.User.SetPassword do
 
   ## Usage
 
-      mix ezagent.user.set_password entity://user/admin --password 'admin-pw'
-      mix ezagent.user.set_password entity://user/allen --password 'new-pw'
+      mix ezagent.user.set_password entity://user/default/admin --password 'admin-pw'
+      mix ezagent.user.set_password entity://user/default/allen --password 'new-pw'
   """
   use Mix.Task
 

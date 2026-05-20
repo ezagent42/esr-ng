@@ -4,7 +4,7 @@ defmodule EzagentCore.Repo.Migrations.Pr142EntityTokens do
 
   Replaces the User-table-only `cli_token` field with a separate
   `entity_tokens` table that can mint tokens for any Entity URI
-  (`entity://user/X` or `entity://agent/Y_Z`).
+  (`entity://user/default/X` or `entity://agent/default/Y_Z`).
 
   Per `entity-agnostic-architecture-reflection.md` §4 S-2 the table
   carries:

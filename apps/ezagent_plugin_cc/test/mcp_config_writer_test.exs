@@ -33,7 +33,7 @@ defmodule EzagentPluginCc.McpConfigWriterTest do
   end
 
   test "write!/1 emits mcp.json with token + agent_uri in env", %{out_dir: out_dir} do
-    agent_uri = "entity://agent/test_writer-test-#{System.unique_integer([:positive])}"
+    agent_uri = "entity://agent/default/test_writer-test-#{System.unique_integer([:positive])}"
 
     {:ok, path} =
       McpConfigWriter.write!(
@@ -61,7 +61,7 @@ defmodule EzagentPluginCc.McpConfigWriterTest do
   end
 
   test "write!/1 is token-idempotent — re-write returns the same token", %{out_dir: out_dir} do
-    agent_uri = "entity://agent/test_writer-idempotent-#{System.unique_integer([:positive])}"
+    agent_uri = "entity://agent/default/test_writer-idempotent-#{System.unique_integer([:positive])}"
 
     {:ok, path1} =
       McpConfigWriter.write!(

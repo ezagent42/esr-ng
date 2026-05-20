@@ -41,7 +41,7 @@ defmodule EzagentPluginLiveview.AdminLiveTest do
     # Composer input wired up with the autocomplete hook.
     assert html =~ ~s(phx-hook="MentionAutocomplete")
     # Caller URI shown somewhere in the IDE shell chrome.
-    assert html =~ "entity://user/admin"
+    assert html =~ "entity://user/default/admin"
   end
 
   test "Session members section shows admin User as online (Phase 2 boot)", %{conn: conn} do
@@ -50,7 +50,7 @@ defmodule EzagentPluginLiveview.AdminLiveTest do
     # Section header
     assert html =~ "session://main"
     # admin URI listed
-    assert html =~ "entity://user/admin"
+    assert html =~ "entity://user/default/admin"
     # admin is online (boot post-spawn dispatched chat/join)
     assert html =~ "online"
     # The members table id is rendered (not the empty-state placeholder)
@@ -71,7 +71,7 @@ defmodule EzagentPluginLiveview.AdminLiveTest do
     html = render(lv)
 
     assert html =~ text
-    assert html =~ "entity://user/admin"
+    assert html =~ "entity://user/default/admin"
   end
 
   test "Chat row shape identical for admin vs agent senders (CSS-level diff only)", %{conn: conn} do
@@ -86,7 +86,7 @@ defmodule EzagentPluginLiveview.AdminLiveTest do
     assert wait_until_html(lv, admin_text)
 
     # Simulate an agent reply landing via the chat_message broadcast.
-    agent_uri = URI.new!("entity://agent/test_test-#{System.unique_integer([:positive])}")
+    agent_uri = URI.new!("entity://agent/default/test_test-#{System.unique_integer([:positive])}")
     agent_msg = Ezagent.Message.new(agent_uri, %{text: "agent reply test", attachments: []})
 
     Phoenix.PubSub.broadcast(
@@ -122,7 +122,7 @@ defmodule EzagentPluginLiveview.AdminLiveTest do
     for i <- 1..100 do
       msg =
         Ezagent.Message.new(
-          URI.new!("entity://user/admin"),
+          URI.new!("entity://user/default/admin"),
           %{text: "histmsg-#{i}", attachments: []},
           inserted_at: DateTime.add(base, i, :second)
         )
@@ -187,7 +187,7 @@ defmodule EzagentPluginLiveview.AdminLiveTest do
       {:ok, lv, _html} = live(conn, "/sessions")
 
       render_hook(lv, "switch_to_pty_for_agent", %{
-        "agent" => "entity://agent/cc_demo"
+        "agent" => "entity://agent/default/cc_demo"
       })
 
       html = render(lv)

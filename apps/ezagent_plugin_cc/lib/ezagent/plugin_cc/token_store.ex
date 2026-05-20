@@ -6,10 +6,10 @@ defmodule EzagentPluginCc.TokenStore do
   YAML shape:
 
       instances:
-        entity://agent/cc_architect:
+        entity://agent/default/cc_architect:
           token: "tok_abc123..."
           minted_at: "2026-05-17T03:00:00Z"
-        entity://agent/cc_builder:
+        entity://agent/default/cc_builder:
           token: "tok_def456..."
           minted_at: "2026-05-17T03:01:00Z"
 

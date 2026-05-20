@@ -21,7 +21,7 @@ defmodule Mix.Tasks.Esr do
                          (default ~/.ezagent)
       EZAGENT_USER_TOKEN     Bearer token (verified via `entity_tokens`)
       EZAGENT_ENTITY_URI     Entity URI the token belongs to (e.g.
-                             `entity://user/admin` or `entity://agent/cc_demo`)
+                             `entity://user/default/admin` or `entity://agent/default/cc_demo`)
 
   ## Single-machine assumption
 

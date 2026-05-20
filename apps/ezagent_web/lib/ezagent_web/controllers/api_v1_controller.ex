@@ -24,7 +24,7 @@ defmodule EzagentWeb.ApiV1Controller do
       Authorization: Bearer esr_pat_xxx
       Content-Type: application/json
 
-      {"target": "entity://agent/echo_default", "args": {"message": "hi"}}
+      {"target": "entity://agent/default/echo_default", "args": {"message": "hi"}}
 
   Response:
 
@@ -153,7 +153,7 @@ defmodule EzagentWeb.ApiV1Controller do
 
           [] ->
             {:error, 401, "missing_entity_uri",
-             "X-Ezagent-Entity-URI header required (e.g. `entity://user/admin`)"}
+             "X-Ezagent-Entity-URI header required (e.g. `entity://user/default/admin`)"}
         end
 
       _ ->

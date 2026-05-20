@@ -74,7 +74,7 @@ defmodule Ezagent.Identity do
 
   ## Current implementation
 
-  Matches the seeded admin URI (`entity://user/admin`) exactly. This is
+  Matches the seeded admin URI (`entity://user/default/admin`) exactly. This is
   honest: the route gate (`EzagentWeb.Plugs.RequireEntity`) currently
   only requires a logged-in entity, not admin caps — so /admin is open
   to anyone authenticated. The dropdown gate hides the link for

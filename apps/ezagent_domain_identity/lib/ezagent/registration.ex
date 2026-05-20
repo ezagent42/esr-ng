@@ -33,10 +33,13 @@ defmodule Ezagent.Registration do
     end
   end
 
-  @doc "True if no User exists at `entity://user/<slug>`."
+  @doc "True if no User exists at `entity://user/default/<slug>`."
   @spec slug_available?(String.t()) :: boolean()
   def slug_available?(slug) when is_binary(slug) do
-    is_nil(Users.get_by_uri("entity://user/" <> slug))
+    # Phase 9 PR-2 (SPEC v3 §3): entity URIs carry a workspace
+    # segment. Until tenant-aware registration lands (PR-5), slugs
+    # default to the `default` workspace.
+    is_nil(Users.get_by_uri("entity://user/default/" <> slug))
   end
 
   @doc "Return the first free `<slug>`, `<slug>-2`, `<slug>-3`, ... variant."
@@ -85,7 +88,10 @@ defmodule Ezagent.Registration do
           {:ok, URI.t()} | {:error, term()}
   def create_principal(slug, display_name, email)
       when is_binary(slug) and is_binary(display_name) and is_binary(email) do
-    uri_str = "entity://user/" <> slug
+    # Phase 9 PR-2 (SPEC v3 §3): entity URIs carry a workspace
+    # segment; registration defaults to the `default` workspace
+    # until tenant-aware registration lands (PR-5).
+    uri_str = "entity://user/default/" <> slug
     uri = URI.parse(uri_str)
 
     cond do

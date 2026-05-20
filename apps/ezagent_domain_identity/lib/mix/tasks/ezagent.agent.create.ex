@@ -9,12 +9,12 @@ defmodule Mix.Tasks.Ezagent.Agent.Create do
 
   ## Usage
 
-      mix ezagent.agent.create entity://agent/cc_demo \\
+      mix ezagent.agent.create entity://agent/default/cc_demo \\
           --caps 'chat.send,workspace.read'
 
       # Spawn immediately into the live KindRegistry (default behavior;
       # use --no-spawn to only persist a snapshot for later boot)
-      mix ezagent.agent.create entity://agent/echo_bot
+      mix ezagent.agent.create entity://agent/default/echo_bot
 
   Flags:
   - `--caps <str>` — comma-separated cap specs (see
@@ -27,9 +27,9 @@ defmodule Mix.Tasks.Ezagent.Agent.Create do
   ## URI format
 
   Agent URIs follow the flavor-prefix convention (PR #149 / SPEC v2 §5.14):
-  - `entity://agent/cc_<name>` — Claude Code-managed agents
-  - `entity://agent/echo_<name>` — Echo plugin agents
-  - `entity://agent/curl_<name>` — Curl-agent plugin (HTTP-API agents)
+  - `entity://agent/default/cc_<name>` — Claude Code-managed agents
+  - `entity://agent/default/echo_<name>` — Echo plugin agents
+  - `entity://agent/default/curl_<name>` — Curl-agent plugin (HTTP-API agents)
 
   The flavor prefix routes the spawn to the correct plugin's
   AgentSupervisor via Ezagent.SpawnRegistry's flavor-resolution
@@ -46,13 +46,13 @@ defmodule Mix.Tasks.Ezagent.Agent.Create do
   ## Examples
 
       # Add a cc-orchestrated agent
-      mix ezagent.agent.create entity://agent/cc_demo --caps 'chat.send'
+      mix ezagent.agent.create entity://agent/default/cc_demo --caps 'chat.send'
 
       # Add an echo bot with no caps (default — purely for testing)
-      mix ezagent.agent.create entity://agent/echo_test
+      mix ezagent.agent.create entity://agent/default/echo_test
 
       # Privileged agent (rare — usually agents have narrow caps)
-      mix ezagent.agent.create entity://agent/admin_bot --caps '*' --allow-allcaps
+      mix ezagent.agent.create entity://agent/default/admin_bot --caps '*' --allow-allcaps
   """
   use Mix.Task
 
@@ -79,7 +79,7 @@ defmodule Mix.Tasks.Ezagent.Agent.Create do
         usage: mix ezagent.agent.create <agent_uri> [--caps 'kind.behavior,...'] [--allow-allcaps] [--no-spawn]
 
         Example:
-          mix ezagent.agent.create entity://agent/cc_demo --caps 'chat.send,workspace.read'
+          mix ezagent.agent.create entity://agent/default/cc_demo --caps 'chat.send,workspace.read'
 
         Agent URI format: entity://agent/<flavor>_<name>
           where <flavor> is one of cc, echo, curl (or any registered flavor)
@@ -106,16 +106,30 @@ defmodule Mix.Tasks.Ezagent.Agent.Create do
   end
 
   defp parse_uri(s) when is_binary(s) do
-    case URI.new(s) do
-      {:ok, %URI{scheme: "entity", host: "agent", path: "/" <> name} = u} when name != "" ->
-        if String.contains?(name, "_") do
-          {:ok, u}
-        else
-          {:error, {:bad_agent_uri, s, "agent path must be <flavor>_<name>, got '#{name}'"}}
-        end
+    # Phase 9 PR-2 (SPEC v3 §3): route through Ezagent.URI.parse!/1
+    # so 2-segment URIs are rejected with the SPEC v3 error.
+    try do
+      uri = Ezagent.URI.parse!(s)
 
-      _ ->
-        {:error, {:bad_uri, s, "expected entity://agent/<flavor>_<name>"}}
+      case uri do
+        %URI{scheme: "entity", host: "agent", path: "/" <> rest} ->
+          with [_workspace, entity_name] when entity_name != "" <-
+                 String.split(rest, "/", parts: 2),
+               true <- String.contains?(entity_name, "_") do
+            {:ok, uri}
+          else
+            _ ->
+              {:error,
+               {:bad_agent_uri, s,
+                "agent entity_name must be <flavor>_<name> (e.g. cc_my-bot)"}}
+          end
+
+        _ ->
+          {:error, {:bad_uri, s, "expected entity://agent/<workspace>/<flavor>_<name>"}}
+      end
+    rescue
+      e in ArgumentError ->
+        {:error, {:bad_uri, s, Exception.message(e)}}
     end
   end
 

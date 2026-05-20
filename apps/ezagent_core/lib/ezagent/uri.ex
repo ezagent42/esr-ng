@@ -2,10 +2,14 @@ defmodule Ezagent.URI do
   @moduledoc """
   URI helpers — thin convenience over stdlib `URI`.
 
-  ## Shape (SPEC v2 — PR #141 onwards, query-string actions since #148)
+  ## Shape (SPEC v3 — Phase 9 PR-2 onwards)
 
-  SPEC v2 §5.1 defines the **target** uniform 2-segment authority
-  for every Ezagent URI:
+  SPEC v3 §3 (entity scheme only) tightens `entity://` to a
+  **3-segment authority** carrying the workspace name:
+
+      entity://<type>/<workspace>/<name>[?action=<behavior>.<action>]
+
+  Other schemes keep the SPEC v2 §5.1 2-segment authority unchanged:
 
       <scheme>://<type>/<name>[/<sub-resource>...][?action=<behavior>.<action>]
 
@@ -13,48 +17,50 @@ defmodule Ezagent.URI do
     `Ezagent.URI.SchemeRegistry` — runtime ETS allowlist, PR #145).
   - `<type>` is the value on the scheme's type axis (e.g. `user` /
     `agent` for `entity://`, free-form tenant name for `workspace://`).
-  - `<name>` is the instance identity within `<scheme>/<type>`.
-  - Anything after `/<name>` is sub-resource (reserved for future named
-    sub-resources such as `/auth/...`; the previous path-based
-    `/behavior/<kind>/<action>` suffix was removed in PR #148,
-    SPEC v2 §5.2).
+  - `<workspace>` (entity scheme only — SPEC v3) is the workspace
+    name segment, matching the bare `<name>` of a `workspace://<name>`
+    URI.
+  - `<name>` is the instance identity. Sub-resource positions are
+    reserved for future use (`/auth/...` etc.) on non-entity schemes.
   - `?action=<behavior>.<action>` selects the Behavior + action to invoke
     (SPEC v2 §5.2, PR #148). The path is identity; the query carries the
     action verb.
 
-  PR #148 (SPEC v2 §5.2) moved action selection from a path suffix to a
-  query parameter:
-
-      OLD: entity://agent/cc_demo-builder + path suffix selecting behavior+action
-      NEW: entity://agent/cc_demo-builder?action=chat.receive
-
   ### Examples
 
-      entity://user/admin                                   # bare instance
-      entity://agent/cc_demo-builder?action=chat.receive    # action dispatch
-      session://default/main?action=chat.send
-      workspace://default/main?action=routing.add_rule
-      template://agent/cc-orchestrator
-      system://routing/default?action=add_rule
+      entity://user/default/admin                             # 3-seg entity (SPEC v3)
+      entity://agent/default/cc_demo?action=chat.receive      # 3-seg + action
+      entity://agent/team-alpha/curl_my-deepseek              # cross-workspace entity
+      session://default/main?action=chat.send                 # 2-seg session (unchanged)
+      workspace://default/main?action=routing.add_rule        # 2-seg workspace
+      template://agent/cc-orchestrator                        # 2-seg template
+      system://routing/default?action=add_rule                # 2-seg system
 
-  ## SPEC v2 deltas
+  ## SPEC v3 deltas (Phase 9 PR-2)
+
+  - `entity://` requires 3-segment path (`/<workspace>/<name>`); the
+    previous 2-segment form is rejected at parse time with
+    `ArgumentError: entity URI must include workspace segment`.
+  - New helper `entity_workspace_uri/1` extracts a
+    `workspace://<workspace>` URI from any entity URI.
+  - `instance/1` for entity returns the full 3-segment path stripped
+    of query/fragment.
+
+  ## SPEC v2 deltas (still in force)
 
   - `user://` + `agent://` schemes deleted — merged into `entity://` (PR #141).
-  - `instance/1` strips query + fragment + (legacy) trailing path segments.
   - `behavior_action/1` reads `?action=<behavior>.<action>` (PR #148).
-  - Agent flavor (cc / curl / echo) moves OUT of the URI type segment
-    INTO the name segment as a free-form prefix:
-    `entity://agent/cc_demo-builder`, `entity://agent/curl_my-deepseek`
-    (SPEC §5.14).
+  - Agent flavor (cc / curl / echo) lives in the name segment as a
+    free-form prefix: `entity://agent/<workspace>/cc_demo-builder`
+    (SPEC §5.14 + Phase 9 §3.1).
 
   ## Parser layering
 
   - `instance/1` is **positional**: it knows where the instance ends
-    based on uniform structure (always `host + /first-path-segment`),
-    NOT by searching for a keyword like "behavior".
+    based on the scheme's authority shape (3-segment for entity,
+    2-segment for system, 1-segment for legacy).
   - `behavior_action/1` is **named**: it pulls the `action` query param
-    and splits it on `.` into `{behavior_atom, action_atom}`. A future
-    `auth_action/1` could do the same for an `auth=` query param.
+    and splits it on `.` into `{behavior_atom, action_atom}`.
 
   ## Scheme allowlist — runtime ETS (PR #145)
 
@@ -81,6 +87,18 @@ defmodule Ezagent.URI do
   Rejects any scheme not registered in `Ezagent.URI.SchemeRegistry` —
   the SPEC v2 §5.11 lockdown that prevents documentation-drift bugs
   like the deleted-but-still-accepted `feishu://` scheme.
+
+  ## SPEC v3 (Phase 9 PR-2) — entity 3-segment authority
+
+  For the `entity://` scheme, the path MUST be `/<workspace>/<name>`:
+
+  - 2-segment paths (`entity://user/default/admin`) raise with
+    `ArgumentError: entity URI must include workspace segment`.
+  - 4+ segments (`entity://user/default/admin/extra`) raise with
+    `ArgumentError: entity URI sub-resource positions are reserved`.
+
+  Other schemes are unchanged — their authority shape is enforced by
+  their own consumers (e.g. `Ezagent.Workspace.create/2`).
   """
   @spec parse!(String.t()) :: URI.t()
   def parse!(s) when is_binary(s) do
@@ -90,6 +108,7 @@ defmodule Ezagent.URI do
 
       {:ok, %URI{scheme: scheme} = u} ->
         if Ezagent.URI.SchemeRegistry.registered?(scheme) do
+          validate_entity_shape!(u, s)
           u
         else
           raise ArgumentError,
@@ -102,6 +121,42 @@ defmodule Ezagent.URI do
     end
   end
 
+  # SPEC v3 §3.2 — entity URIs must have a 3-segment authority. Any
+  # other scheme is left alone (per Phase 9 non-goal: only entity://
+  # changes shape in Phase 9; other schemes stay 2-segment / 1-segment
+  # until SPEC v4 unifies them).
+  defp validate_entity_shape!(%URI{scheme: "entity", path: nil}, raw),
+    do:
+      raise(
+        ArgumentError,
+        "entity URI must include workspace segment (expected entity://<type>/<workspace>/<name>): " <>
+          inspect(raw)
+      )
+
+  defp validate_entity_shape!(%URI{scheme: "entity", path: "/" <> rest}, raw) do
+    case String.split(rest, "/") do
+      [_workspace, name] when name != "" ->
+        :ok
+
+      [_one] ->
+        raise ArgumentError,
+              "entity URI must include workspace segment (expected entity://<type>/<workspace>/<name>): " <>
+                inspect(raw)
+
+      [_workspace, _name | _extra] ->
+        raise ArgumentError,
+              "entity URI sub-resource positions are reserved (expected entity://<type>/<workspace>/<name>): " <>
+                inspect(raw)
+
+      _ ->
+        raise ArgumentError,
+              "entity URI must include workspace segment (expected entity://<type>/<workspace>/<name>): " <>
+                inspect(raw)
+    end
+  end
+
+  defp validate_entity_shape!(_uri, _raw), do: :ok
+
   @doc """
   Return the instance form of a URI — drop query + fragment and (for
   legacy 1-seg schemes) any trailing sub-resource path segments.
@@ -110,19 +165,23 @@ defmodule Ezagent.URI do
   string, NOT in the path. So instance/1 mostly just strips
   `query` + `fragment`. Path is the identity.
 
-  **2-segment-authority schemes** (`entity://`, `system://`) keep the
-  `host + /<first-path-segment>` split — if any trailing path segments
-  exist (reserved for future named sub-resources like `/auth/login`),
-  they are stripped.
+  **3-segment-authority schemes** (`entity://` — SPEC v3 Phase 9 PR-2):
+  keep both `/<workspace>/<name>` segments. The entity URI's identity
+  spans workspace AND name.
+
+  **2-segment-authority schemes** (`system://`) keep the
+  `host + /<first-path-segment>` split — trailing path segments
+  (reserved for future named sub-resources like `/auth/login`) are
+  stripped.
 
   **Legacy 1-seg-authority schemes** (`session://`, `workspace://`,
   `template://`, `resource://`) drop the entire path to recover the
   bare instance form. Migration to uniform 2-seg lives in a future PR.
 
   Examples:
-  - `entity://user/admin` → unchanged (no sub-resource, no query)
-  - `entity://agent/cc_demo-builder?action=chat.receive`
-    → `%URI{scheme: "entity", host: "agent", path: "/cc_demo-builder"}`
+  - `entity://user/default/admin` → unchanged
+  - `entity://agent/default/cc_demo?action=chat.receive`
+    → `%URI{scheme: "entity", host: "agent", path: "/default/cc_demo"}`
   - `system://routing/default?action=add_rule`
     → `%URI{scheme: "system", host: "routing", path: "/default"}`
   - `session://main?action=chat.send`
@@ -139,21 +198,30 @@ defmodule Ezagent.URI do
   def instance(%URI{path: nil} = uri), do: %URI{uri | query: nil, fragment: nil}
 
   def instance(%URI{scheme: "entity", path: "/" <> rest} = uri) do
-    # PR #141 SPEC v2 §5.1 — uniform 2-segment authority for entity:
-    # entity://<type>/<name>[/<sub-resource>...]
-    case String.split(rest, "/", parts: 2) do
-      [_name_only] ->
+    # SPEC v3 §3.2 (Phase 9 PR-2) — 3-segment authority for entity:
+    # entity://<type>/<workspace>/<name>. Both workspace AND name are
+    # part of the entity's identity, so instance/1 keeps both. parse!/1
+    # already rejected non-3-segment forms; if we encounter one here it
+    # means the URI was hand-constructed bypassing parse!/1 — treat as
+    # a programming error and leave the path unchanged (let the caller
+    # find out via downstream lookup failure rather than silently
+    # masking it).
+    case String.split(rest, "/", parts: 3) do
+      [_workspace, _name] ->
         %URI{uri | query: nil, fragment: nil}
 
-      [name, _subresource] ->
-        %URI{uri | path: "/" <> name, query: nil, fragment: nil}
+      [workspace, name, _subresource] ->
+        %URI{uri | path: "/" <> workspace <> "/" <> name, query: nil, fragment: nil}
+
+      _ ->
+        %URI{uri | query: nil, fragment: nil}
     end
   end
 
   def instance(%URI{scheme: "system", path: "/" <> rest} = uri) do
     # PR #146 SPEC v2 §5.1 + §5.10 — `system://<type>/<name>` is
     # 2-segment-authority (e.g. `system://routing/default`,
-    # `system://bootstrap/default`). Same split as `entity://`.
+    # `system://bootstrap/default`).
     case String.split(rest, "/", parts: 2) do
       [_name_only] ->
         %URI{uri | query: nil, fragment: nil}
@@ -172,6 +240,35 @@ defmodule Ezagent.URI do
   end
 
   @doc """
+  Extract the `workspace://<workspace>` URI from an `entity://` URI.
+
+  SPEC v3 §3.3 (Phase 9 PR-2) — entity URIs carry their workspace as
+  the first path segment under the type axis:
+  `entity://<type>/<workspace>/<name>`. This helper pulls the
+  workspace name out and returns a stdlib `%URI{}` for the
+  corresponding `workspace://<workspace>` URI.
+
+  Used by:
+  - Dispatch (Phase 9 PR-4) to derive caller / target workspace.
+  - LiveAuth (Phase 9 PR-5) to derive `current_workspace_uri` from
+    `current_entity_uri`.
+  - Capability matcher (Phase 9 PR-3) to enforce workspace dimension.
+
+  Examples:
+  - `entity://user/default/admin` → `workspace://default`
+  - `entity://agent/team-alpha/cc_demo` → `workspace://team-alpha`
+
+  Raises `FunctionClauseError` if the URI is not a 3-segment entity
+  URI (e.g. a `session://` URI is rejected — callers must dispatch
+  to `Ezagent.WorkspaceRegistry.lookup/1` for non-entity URIs).
+  """
+  @spec entity_workspace_uri(URI.t()) :: URI.t()
+  def entity_workspace_uri(%URI{scheme: "entity", path: "/" <> rest}) do
+    [workspace_name, _entity_name] = String.split(rest, "/", parts: 2)
+    URI.new!("workspace://" <> workspace_name)
+  end
+
+  @doc """
   Parse the `?action=<behavior>.<action>` query parameter of a URI.
   Returns `{:ok, {behavior_atom, action_atom}}` or
   `{:error, :missing_action | :malformed_action}`.
@@ -185,12 +282,12 @@ defmodule Ezagent.URI do
   key and converts the value (e.g. dotted form for action+behavior).
 
   Examples:
-  - `entity://agent/echo_default?action=echo.say` → `{:ok, {:echo, :say}}`
-  - `entity://agent/cc_demo-builder?action=chat.receive` → `{:ok, {:chat, :receive}}`
+  - `entity://agent/default/echo_default?action=echo.say` → `{:ok, {:echo, :say}}`
+  - `entity://agent/default/cc_demo-builder?action=chat.receive` → `{:ok, {:chat, :receive}}`
   - `session://default/main?action=chat.send` → `{:ok, {:chat, :send}}`
-  - `entity://agent/cc_demo-builder` → `{:error, :missing_action}`
-  - `entity://agent/cc_demo-builder?action=` → `{:error, :missing_action}`
-  - `entity://agent/cc_demo-builder?action=justone` → `{:error, :malformed_action}`
+  - `entity://agent/default/cc_demo-builder` → `{:error, :missing_action}`
+  - `entity://agent/default/cc_demo-builder?action=` → `{:error, :missing_action}`
+  - `entity://agent/default/cc_demo-builder?action=justone` → `{:error, :malformed_action}`
   """
   @spec behavior_action(URI.t()) ::
           {:ok, {atom(), atom()}} | {:error, :missing_action | :malformed_action}
@@ -226,8 +323,8 @@ defmodule Ezagent.URI do
   same split rule without re-deriving it.
 
   Examples:
-  - `entity://user/admin` → `""`
-  - `entity://agent/cc_demo-builder?action=chat.receive` → `"behavior/chat/receive"`
+  - `entity://user/default/admin` → `""`
+  - `entity://agent/default/cc_demo-builder?action=chat.receive` → `"behavior/chat/receive"`
   - `entity://agent/cc_demo-builder/auth/login` → `"auth/login"`
   - `session://default/main?action=chat.send` → `"behavior/chat/send"`
   """
@@ -235,10 +332,15 @@ defmodule Ezagent.URI do
   def subresource(%URI{path: nil}), do: ""
 
   def subresource(%URI{scheme: "entity", path: "/" <> rest}) do
-    # 2-segment authority: name is first segment; remainder is sub.
-    case String.split(rest, "/", parts: 2) do
-      [_name_only] -> ""
-      [_name, sub] -> sub
+    # SPEC v3 §3.2 (Phase 9 PR-2) — 3-segment authority:
+    # /<workspace>/<name>[/<sub-resource>...]. parse!/1 rejects
+    # 4+ segment URIs at the top, so in practice this returns "".
+    # The split is retained so manually-constructed URIs that bypass
+    # parse!/1 don't crash here.
+    case String.split(rest, "/", parts: 3) do
+      [_workspace, _name] -> ""
+      [_workspace, _name, sub] -> sub
+      _ -> ""
     end
   end
 

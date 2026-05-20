@@ -5,7 +5,7 @@ defmodule Ezagent.PluginCurlAgent.Template do
 
   Form fields (auto-derived UI via `Ezagent.UI.Form`):
 
-  - `agent_uri` — `entity://agent/curl_<name>` (PR #141 SPEC v2)
+  - `agent_uri` — `entity://agent/default/curl_<name>` (PR #141 SPEC v2)
   - `provider` — `"deepseek"` / `"openai"` / ... (matches the key
     provider stored on the owner User's `api_keys` slice)
   - `api_url` — full URL of the OpenAI-compatible
@@ -56,23 +56,34 @@ defmodule Ezagent.PluginCurlAgent.Template do
   defp check_class(%{"class" => other}), do: {:error, {:wrong_class, other}}
   defp check_class(_), do: {:error, :missing_class_field}
 
-  # PR #141 (SPEC v2 §5.14): strict `entity://agent/curl_<name>` shape.
+  # PR #141 (SPEC v2 §5.14): strict `entity://agent/default/curl_<name>` shape.
   # The legacy `agent://curl/<name>` and `curl-agent://` schemes are
   # both rejected — clean rebuild per SPEC §5.11.
   defp check_agent_uri(%{"agent_uri" => uri_str}) when is_binary(uri_str) and uri_str != "" do
     case URI.new(uri_str) do
-      {:ok, %URI{scheme: "entity", host: "agent", path: "/" <> name}} when name != "" ->
-        case String.split(name, "_", parts: 2) do
-          ["curl", rest] when rest != "" -> :ok
-          [flavor, _] -> {:error, {:wrong_agent_flavor, flavor, expected: "curl"}}
-          _ -> {:error, {:missing_flavor_prefix, uri_str,
-                         "agent URIs must be `entity://agent/curl_<name>` (PR #141)"}}
+      {:ok, %URI{scheme: "entity", host: "agent", path: "/" <> rest}} when rest != "" ->
+        # Phase 9 PR-2 (SPEC v3 §3): entity URIs are 3-segment:
+        # /<workspace>/<entity_name>. Flavor lives in entity_name prefix.
+        with [_workspace, entity_name] when entity_name != "" <-
+               String.split(rest, "/", parts: 2),
+             [flavor, suffix] when flavor != "" and suffix != "" <-
+               String.split(entity_name, "_", parts: 2) do
+          if flavor == "curl" do
+            :ok
+          else
+            {:error, {:wrong_agent_flavor, flavor, expected: "curl"}}
+          end
+        else
+          _ ->
+            {:error,
+             {:missing_flavor_prefix, uri_str,
+              "agent URIs must be `entity://agent/<workspace>/curl_<name>` (Phase 9 PR-2)"}}
         end
 
       {:ok, %URI{scheme: "entity"}} ->
         {:error,
          {:invalid_agent_uri, uri_str,
-          "agent URIs must be `entity://agent/curl_<name>` (PR #141)"}}
+          "agent URIs must be `entity://agent/<workspace>/curl_<name>` (Phase 9 PR-2)"}}
 
       _ ->
         {:error, {:bad_agent_uri, uri_str}}
@@ -149,13 +160,13 @@ defmodule Ezagent.PluginCurlAgent.Template do
 
   defp parse_int(_, default), do: default
 
-  defp parse_owner_uri(nil), do: URI.parse("entity://user/admin")
-  defp parse_owner_uri(""), do: URI.parse("entity://user/admin")
+  defp parse_owner_uri(nil), do: URI.parse("entity://user/default/admin")
+  defp parse_owner_uri(""), do: URI.parse("entity://user/default/admin")
 
   defp parse_owner_uri(s) when is_binary(s) do
     case URI.new(s) do
       {:ok, %URI{scheme: "entity", host: "user"} = u} -> u
-      _ -> URI.parse("entity://user/admin")
+      _ -> URI.parse("entity://user/default/admin")
     end
   end
 
@@ -167,9 +178,9 @@ defmodule Ezagent.PluginCurlAgent.Template do
       %{
         name: "agent_uri",
         type: :uri,
-        label: "Agent URI (entity://agent/curl_<name> — appears in mention/floating dropdowns)",
+        label: "Agent URI (entity://agent/default/curl_<name> — appears in mention/floating dropdowns)",
         required: true,
-        placeholder: "entity://agent/curl_my-deepseek"
+        placeholder: "entity://agent/default/curl_my-deepseek"
       },
       %{
         name: "provider",
@@ -211,7 +222,7 @@ defmodule Ezagent.PluginCurlAgent.Template do
         type: :uri,
         label: "Owner user URI (whose api_key gets used)",
         required: false,
-        placeholder: "entity://user/admin"
+        placeholder: "entity://user/default/admin"
       }
     ]
   end
