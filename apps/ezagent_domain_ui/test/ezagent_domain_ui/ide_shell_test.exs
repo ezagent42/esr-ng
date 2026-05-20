@@ -15,7 +15,7 @@ defmodule EzagentDomainUi.IdeShellTest do
     test "renders the 6 layout regions" do
       assigns = %{
         current_entity_uri: "entity://user/admin",
-        current_path: "/admin",
+        current_path: "/sessions",
         status: %{agents_alive: 0, bridges: 0, debug_events: 0, version: "test"}
       }
 
@@ -32,17 +32,19 @@ defmodule EzagentDomainUi.IdeShellTest do
         """)
 
       assert html =~ ~r/id="ide-shell"/
-      # Activity Bar — 6 items per Phase 8 polish (Allen 2026-05-20)
+      # Activity Bar — 5 items per Phase 8c PR-F (Allen 2026-05-20).
+      # Dashboard removed: /admin is now a settings drawer rendered by
+      # AdminSettingsShell, not a peer Activity.
       assert html =~ "Sessions"
       assert html =~ "Workspaces"
       assert html =~ "Identities"
       assert html =~ "Routing"
       assert html =~ "Plugins"
-      assert html =~ "Dashboard"
+      refute html =~ ~s(aria-label="Dashboard")
       # Phase 8 polish (Allen 2026-05-20): Settings moved from
       # Activity Bar into the avatar dropdown, so its label appears
-      # in HTML but NOT as an Activity Bar tile. We assert it's not
-      # in the activity bar specifically.
+      # in HTML (theme picker, Admin link icon, etc.) but NOT as an
+      # Activity Bar tile.
       refute html =~ ~s(aria-label="Settings")
       refute html =~ ~s(aria-label="Observability")
       # Top Command Bar
@@ -56,6 +58,102 @@ defmodule EzagentDomainUi.IdeShellTest do
       assert html =~ "agents"
       assert html =~ "bridges"
       assert html =~ "events"
+    end
+
+    test "Phase 8c PR-F — top-left shows `ezagent / <workspace_name>` when given" do
+      assigns = %{
+        current_entity_uri: "entity://user/admin",
+        current_path: "/sessions",
+        status: %{},
+        workspace_name: "default"
+      }
+
+      html =
+        rendered_to_string(~H"""
+        <IdeShell.ide_shell
+          current_entity_uri={@current_entity_uri}
+          current_path={@current_path}
+          status={@status}
+          workspace_name={@workspace_name}
+        >
+          <:main_window>main</:main_window>
+        </IdeShell.ide_shell>
+        """)
+
+      assert html =~ "ezagent"
+      assert html =~ "default"
+    end
+
+    test "Phase 8c PR-F — top-left shows bare `ezagent` when workspace_name is nil" do
+      assigns = %{
+        current_entity_uri: "entity://user/admin",
+        current_path: "/sessions",
+        status: %{}
+      }
+
+      html =
+        rendered_to_string(~H"""
+        <IdeShell.ide_shell
+          current_entity_uri={@current_entity_uri}
+          current_path={@current_path}
+          status={@status}
+        >
+          <:main_window>main</:main_window>
+        </IdeShell.ide_shell>
+        """)
+
+      assert html =~ "ezagent"
+    end
+
+    test "Phase 8c PR-F — avatar dropdown gains Admin link when is_admin?=true" do
+      assigns = %{
+        current_entity_uri: "entity://user/admin",
+        current_path: "/sessions",
+        status: %{},
+        is_admin?: true
+      }
+
+      html =
+        rendered_to_string(~H"""
+        <IdeShell.ide_shell
+          current_entity_uri={@current_entity_uri}
+          current_path={@current_path}
+          status={@status}
+          is_admin?={@is_admin?}
+        >
+          <:main_window>main</:main_window>
+        </IdeShell.ide_shell>
+        """)
+
+      assert html =~ ~s(href="/admin")
+      assert html =~ "Admin"
+    end
+
+    test "Phase 8c PR-F — avatar dropdown hides Admin link when is_admin?=false" do
+      assigns = %{
+        current_entity_uri: "entity://user/alice",
+        current_path: "/sessions",
+        status: %{},
+        is_admin?: false
+      }
+
+      html =
+        rendered_to_string(~H"""
+        <IdeShell.ide_shell
+          current_entity_uri={@current_entity_uri}
+          current_path={@current_path}
+          status={@status}
+          is_admin?={@is_admin?}
+        >
+          <:main_window>main</:main_window>
+        </IdeShell.ide_shell>
+        """)
+
+      # /admin link in the dropdown is hidden. Note: status bar may
+      # still link to /admin/logs (events link), so we use a more
+      # specific assertion: the dropdown Admin link has the icon+text
+      # combination, which won't appear elsewhere on the page.
+      refute html =~ ~r/<a[^>]*href="\/admin"[^>]*>\s*<span[^>]*aria-label="settings"/
     end
   end
 
@@ -89,11 +187,15 @@ defmodule EzagentDomainUi.IdeShellTest do
       assert IdeShell.activity_for_path("/plugins/feishu/bindings") == :plugins
     end
 
-    test "/admin → :dashboard" do
-      assert IdeShell.activity_for_path("/admin") == :dashboard
-      assert IdeShell.activity_for_path("/admin/logs") == :dashboard
-      assert IdeShell.activity_for_path("/admin/registry") == :dashboard
-      assert IdeShell.activity_for_path("/admin/snapshots") == :dashboard
+    test "/admin → nil (Phase 8c PR-F: admin is a settings drawer, not an Activity)" do
+      # The drawer (AdminSettingsShell) doesn't even render the
+      # Activity Bar, but activity_for_path/1 still returns nil so
+      # any caller that happens to evaluate it on an /admin path
+      # gets a sane non-highlighted result.
+      assert IdeShell.activity_for_path("/admin") == nil
+      assert IdeShell.activity_for_path("/admin/logs") == nil
+      assert IdeShell.activity_for_path("/admin/registry") == nil
+      assert IdeShell.activity_for_path("/admin/snapshots") == nil
     end
 
     test "unknown path → :sessions (fallback)" do
@@ -102,11 +204,15 @@ defmodule EzagentDomainUi.IdeShellTest do
   end
 
   describe "activity_items/0" do
-    test "returns 6 items in the SPEC-defined order (post-polish)" do
+    test "returns 5 items in the SPEC-defined order (Phase 8c PR-F)" do
       items = IdeShell.activity_items()
-      assert length(items) == 6
+      assert length(items) == 5
       keys = Enum.map(items, & &1.key)
-      assert keys == [:sessions, :workspaces, :identities, :routing, :plugins, :dashboard]
+      assert keys == [:sessions, :workspaces, :identities, :routing, :plugins]
+      # Dashboard explicitly NOT in the list — it's a settings drawer
+      # (`EzagentDomainUi.AdminSettingsShell`) opened from the avatar
+      # dropdown, not a peer Activity Bar item.
+      refute :dashboard in keys
     end
   end
 
@@ -181,7 +287,12 @@ defmodule EzagentDomainUi.IdeShellTest do
         open: true,
         query: "ses",
         results: [
-          %{key: "session://main", label: "session://main", icon: "message-square", group: "session"}
+          %{
+            key: "session://main",
+            label: "session://main",
+            icon: "message-square",
+            group: "session"
+          }
         ]
       }
 

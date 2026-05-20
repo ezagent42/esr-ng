@@ -10,7 +10,7 @@ defmodule EzagentPluginLiveview.ObservabilityLive do
   display existing data (KindRegistry, CC bridges, audit invocations).
   """
   use Phoenix.LiveView
-  alias EzagentDomainUi.IdeShell
+  alias EzagentDomainUi.AdminSettingsShell
   use EzagentDomainUi.Components
   use EzagentDomainUi.Primitives
 
@@ -68,34 +68,35 @@ defmodule EzagentPluginLiveview.ObservabilityLive do
       end)
 
     ~H"""
-    <IdeShell.ide_shell
+    <AdminSettingsShell.admin_settings_shell
       current_entity_uri={@current_entity_uri_str}
       current_path="/admin/logs"
-      status={%{agents_alive: 0, bridges: length(@bridges), debug_events: 0, version: "dev"}}
+      active_section={:logs}
     >
-      <:resource_panel>
-        <div class="p-3 flex flex-col gap-px">
-          <div class="text-[10px] uppercase tracking-wide text-zinc-500 mb-2">Observability</div>
-          <.tab_link tab={@tab} value={:overview} label="Overview" />
-          <.tab_link tab={@tab} value={:events} label="Events" />
-          <.tab_link tab={@tab} value={:audit} label="Audit Log" />
-          <.tab_link tab={@tab} value={:bridges} label="Bridges" />
-          <.tab_link tab={@tab} value={:snapshots} label="Snapshots" />
-        </div>
-      </:resource_panel>
-      <:main_window>
-        <div class="flex-1 overflow-auto px-6 py-6">
-          <.breadcrumb items={[{"Admin", "/admin"}, {"Logs & Audit", nil}]} />
+      <:main>
+        <div class="px-6 py-6">
+          <%!-- Phase 8c PR-F: sub-section tabs (overview / events / audit
+                / bridges / snapshots) live inline as a horizontal tab
+                strip. The left sidebar holds the top-level sub-section
+                nav (Overview / Logs & Audit / Registry / Snapshots);
+                a second vertical nav would be redundant. --%>
+          <nav class="flex items-center gap-1 mb-4 border-b border-zinc-200 dark:border-zinc-800 -mx-6 px-6 pb-0">
+            <.tab_link tab={@tab} value={:overview} label="Overview" />
+            <.tab_link tab={@tab} value={:events} label="Events" />
+            <.tab_link tab={@tab} value={:audit} label="Audit Log" />
+            <.tab_link tab={@tab} value={:bridges} label="Bridges" />
+            <.tab_link tab={@tab} value={:snapshots} label="Snapshots" />
+          </nav>
           {render_tab(assigns, @tab)}
         </div>
-      </:main_window>
-    </IdeShell.ide_shell>
+      </:main>
+    </AdminSettingsShell.admin_settings_shell>
     """
   end
 
-  attr :tab, :atom, required: true
-  attr :value, :atom, required: true
-  attr :label, :string, required: true
+  attr(:tab, :atom, required: true)
+  attr(:value, :atom, required: true)
+  attr(:label, :string, required: true)
 
   defp tab_link(assigns) do
     ~H"""
@@ -104,9 +105,10 @@ defmodule EzagentPluginLiveview.ObservabilityLive do
       phx-click="switch_tab"
       phx-value-key={Atom.to_string(@value)}
       class={[
-        "text-left px-2 py-1 text-xs rounded",
-        @tab == @value && "bg-zinc-100 dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 font-medium"
-          || "text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+        "px-3 py-1.5 text-xs border-b-2 -mb-px transition-colors",
+        (@tab == @value &&
+           "border-zinc-900 dark:border-zinc-100 text-zinc-900 dark:text-zinc-100 font-medium") ||
+          "border-transparent text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100"
       ]}
     >
       {@label}
@@ -152,7 +154,10 @@ defmodule EzagentPluginLiveview.ObservabilityLive do
           </tr>
         </thead>
         <tbody>
-          <tr :for={[target, action, authz, dur, _at] <- @audit_rows} class="border-b border-zinc-100 dark:border-zinc-900">
+          <tr
+            :for={[target, action, authz, dur, _at] <- @audit_rows}
+            class="border-b border-zinc-100 dark:border-zinc-900"
+          >
             <td class="px-3 py-1 truncate max-w-md">{target}</td>
             <td>{action || "—"}</td>
             <td>
@@ -171,7 +176,11 @@ defmodule EzagentPluginLiveview.ObservabilityLive do
     <.page_header title="CC Bridges (v2)">
       <:subtitle>Active Phoenix.Channel connections to /cc_socket.</:subtitle>
     </.page_header>
-    <.empty_state :if={@bridges == []} title="No connected bridges" description="A bridge connects when a cc.agent local-pty mode spawns claude with the sidecar." />
+    <.empty_state
+      :if={@bridges == []}
+      title="No connected bridges"
+      description="A bridge connects when a cc.agent local-pty mode spawns claude with the sidecar."
+    />
     <.card :if={@bridges != []} class="p-0">
       <table class="w-full text-xs font-mono">
         <thead class="bg-zinc-50 dark:bg-zinc-950 border-b border-zinc-200 dark:border-zinc-800 text-zinc-500">
@@ -198,7 +207,11 @@ defmodule EzagentPluginLiveview.ObservabilityLive do
     <.page_header title="Snapshots">
       <:subtitle>Persisted Kind state snapshots.</:subtitle>
     </.page_header>
-    <.empty_state :if={@snapshots == []} title="No snapshots" description="Kinds with persistence: {:snapshot, :on_change} write here." />
+    <.empty_state
+      :if={@snapshots == []}
+      title="No snapshots"
+      description="Kinds with persistence: {:snapshot, :on_change} write here."
+    />
     <.card :if={@snapshots != []} class="p-0">
       <table class="w-full text-xs font-mono">
         <thead class="bg-zinc-50 dark:bg-zinc-950 border-b border-zinc-200 dark:border-zinc-800 text-zinc-500">
@@ -211,7 +224,10 @@ defmodule EzagentPluginLiveview.ObservabilityLive do
           </tr>
         </thead>
         <tbody>
-          <tr :for={[uri, kind, version, bytes, updated_at] <- @snapshots} class="border-b border-zinc-100 dark:border-zinc-900">
+          <tr
+            :for={[uri, kind, version, bytes, updated_at] <- @snapshots}
+            class="border-b border-zinc-100 dark:border-zinc-900"
+          >
             <td class="px-3 py-1 truncate max-w-xs">{uri}</td>
             <td>{kind || "—"}</td>
             <td class="text-right tabular-nums">{version || 0}</td>

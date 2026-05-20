@@ -9,7 +9,7 @@ defmodule EzagentPluginLiveview.SnapshotsLive do
   """
 
   use Phoenix.LiveView
-  alias EzagentDomainUi.IdeShell
+  alias EzagentDomainUi.AdminSettingsShell
   use EzagentDomainUi.Components
   import Phoenix.Component
 
@@ -93,79 +93,98 @@ defmodule EzagentPluginLiveview.SnapshotsLive do
       end)
 
     ~H"""
-    <IdeShell.ide_shell
+    <AdminSettingsShell.admin_settings_shell
       current_entity_uri={@current_entity_uri_str}
       current_path="/admin/snapshots"
-      status={%{agents_alive: 0, bridges: 0, debug_events: 0, version: "dev"}}
+      active_section={:snapshots}
     >
-      <:main_window>
-        <div class="flex-1 overflow-auto px-6 py-6 text-zinc-900 dark:text-zinc-100">
-      <.breadcrumb items={[{"Admin", "/admin"}, {"Snapshots", nil}]} />
-      <header>
-        <h1 style="font-size: 22px; font-weight: 600;">Snapshots</h1>
-        <p style="font-size: 13px; color: #666;">
-          Per-Kind runtime state snapshots (Phase 4-completion PR 2,
-          Decision #115). One row per `kind_snapshots.uri`.
-        </p>
-      </header>
+      <:main>
+        <div class="px-6 py-6 text-zinc-900 dark:text-zinc-100">
+          <header>
+            <h1 style="font-size: 22px; font-weight: 600;">Snapshots</h1>
+            <p style="font-size: 13px; color: #666;">
+              Per-Kind runtime state snapshots (Phase 4-completion PR 2,
+              Decision #115). One row per `kind_snapshots.uri`.
+            </p>
+          </header>
 
-      <section id="snapshots-list" style="margin-top: 16px;">
-        <p :if={@snapshots == []} style="color: #57606a; font-style: italic;">No snapshots yet.</p>
+          <section id="snapshots-list" style="margin-top: 16px;">
+            <p :if={@snapshots == []} style="color: #57606a; font-style: italic;">
+              No snapshots yet.
+            </p>
 
-        <table :if={@snapshots != []} id="snapshots-table" style="width: 100%; font-size: 13px; border-collapse: collapse;">
-          <thead>
-            <tr style="border-bottom: 2px solid #d1d5da;">
-              <th style="text-align: left; padding: 6px 4px;">URI</th>
-              <th style="text-align: left;">Kind</th>
-              <th style="text-align: right;">Bytes</th>
-              <th style="text-align: left;">Version</th>
-              <th style="text-align: left;">Updated</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr :for={s <- @snapshots} style="border-bottom: 1px solid #eaeef2;">
-              <td style="padding: 6px 4px; font-family: monospace; font-size: 11px;">{s.uri}</td>
-              <td style="font-size: 11px;">{s.kind_type}</td>
-              <td style="text-align: right; font-size: 11px;">{s.bytes}</td>
-              <td style="font-size: 11px;">{s.version}</td>
-              <td style="font-size: 11px; color: #57606a;">{DateTime.to_iso8601(s.updated_at)}</td>
-              <td>
-                <button
-                  type="button"
-                  phx-click="dump"
-                  phx-value-uri={s.uri}
-                  style="padding: 4px 10px; background: white; color: #0969da; border: 1px solid #0969da; border-radius: 4px; cursor: pointer; font-size: 11px; margin-right: 4px;"
-                >Dump</button>
-                <button
-                  type="button"
-                  phx-click="clear"
-                  phx-value-uri={s.uri}
-                  style="padding: 4px 10px; background: white; color: #cf222e; border: 1px solid #cf222e; border-radius: 4px; cursor: pointer; font-size: 11px;"
-                  data-confirm="Clear this snapshot? Next Kind spawn will init_fresh — granted caps / runtime state are LOST."
-                >Clear</button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </section>
+            <table
+              :if={@snapshots != []}
+              id="snapshots-table"
+              style="width: 100%; font-size: 13px; border-collapse: collapse;"
+            >
+              <thead>
+                <tr style="border-bottom: 2px solid #d1d5da;">
+                  <th style="text-align: left; padding: 6px 4px;">URI</th>
+                  <th style="text-align: left;">Kind</th>
+                  <th style="text-align: right;">Bytes</th>
+                  <th style="text-align: left;">Version</th>
+                  <th style="text-align: left;">Updated</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr :for={s <- @snapshots} style="border-bottom: 1px solid #eaeef2;">
+                  <td style="padding: 6px 4px; font-family: monospace; font-size: 11px;">{s.uri}</td>
+                  <td style="font-size: 11px;">{s.kind_type}</td>
+                  <td style="text-align: right; font-size: 11px;">{s.bytes}</td>
+                  <td style="font-size: 11px;">{s.version}</td>
+                  <td style="font-size: 11px; color: #57606a;">
+                    {DateTime.to_iso8601(s.updated_at)}
+                  </td>
+                  <td>
+                    <button
+                      type="button"
+                      phx-click="dump"
+                      phx-value-uri={s.uri}
+                      style="padding: 4px 10px; background: white; color: #0969da; border: 1px solid #0969da; border-radius: 4px; cursor: pointer; font-size: 11px; margin-right: 4px;"
+                    >
+                      Dump
+                    </button>
+                    <button
+                      type="button"
+                      phx-click="clear"
+                      phx-value-uri={s.uri}
+                      style="padding: 4px 10px; background: white; color: #cf222e; border: 1px solid #cf222e; border-radius: 4px; cursor: pointer; font-size: 11px;"
+                      data-confirm="Clear this snapshot? Next Kind spawn will init_fresh — granted caps / runtime state are LOST."
+                    >
+                      Clear
+                    </button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </section>
 
-      <section :if={@selected_dump} id="dump-view" style="margin-top: 24px; padding: 16px; border: 1px solid #d1d5da; border-radius: 6px;">
-        <h2 style="font-size: 14px; font-weight: 500; margin: 0 0 8px 0;">
-          Dump: <code>{@selected_uri}</code>
-          <button
-            type="button"
-            phx-click="close_dump"
-            style="float: right; padding: 4px 10px; background: white; color: #57606a; border: 1px solid #d1d5da; border-radius: 4px; cursor: pointer; font-size: 11px;"
-          >Close</button>
-        </h2>
-        <pre style="background: #f6f8fa; padding: 12px; border-radius: 4px; overflow-x: auto; font-size: 11px; max-height: 480px;">{@selected_dump}</pre>
-      </section>
+          <section
+            :if={@selected_dump}
+            id="dump-view"
+            style="margin-top: 24px; padding: 16px; border: 1px solid #d1d5da; border-radius: 6px;"
+          >
+            <h2 style="font-size: 14px; font-weight: 500; margin: 0 0 8px 0;">
+              Dump: <code>{@selected_uri}</code>
+              <button
+                type="button"
+                phx-click="close_dump"
+                style="float: right; padding: 4px 10px; background: white; color: #57606a; border: 1px solid #d1d5da; border-radius: 4px; cursor: pointer; font-size: 11px;"
+              >
+                Close
+              </button>
+            </h2>
+            <pre style="background: #f6f8fa; padding: 12px; border-radius: 4px; overflow-x: auto; font-size: 11px; max-height: 480px;">{@selected_dump}</pre>
+          </section>
 
-      <p :if={@flash_error} style="color: #cf222e; font-size: 12px; margin-top: 8px;">{@flash_error}</p>
+          <p :if={@flash_error} style="color: #cf222e; font-size: 12px; margin-top: 8px;">
+            {@flash_error}
+          </p>
         </div>
-      </:main_window>
-    </IdeShell.ide_shell>
+      </:main>
+    </AdminSettingsShell.admin_settings_shell>
     """
   end
 end

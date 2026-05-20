@@ -8,10 +8,14 @@ defmodule EzagentPluginLiveview.AdminDashboardLive do
   `/admin/registry` (the KindRegistry live view, moved from
   `/admin/entities`), and `/admin/snapshots`.
 
-  The Activity Bar's "Dashboard" item routes here.
+  Phase 8c PR-F (2026-05-20): rendered inside
+  `EzagentDomainUi.AdminSettingsShell` (the "settings drawer"
+  perspective) instead of the IDE Shell. The drawer has no Activity
+  Bar — admin is not a peer workflow, it's a permission/role
+  perspective opened from the avatar dropdown.
   """
   use Phoenix.LiveView
-  alias EzagentDomainUi.IdeShell
+  alias EzagentDomainUi.AdminSettingsShell
   use EzagentDomainUi.Components
   use EzagentDomainUi.Primitives
 
@@ -59,27 +63,18 @@ defmodule EzagentPluginLiveview.AdminDashboardLive do
       end)
 
     ~H"""
-    <IdeShell.ide_shell
+    <AdminSettingsShell.admin_settings_shell
       current_entity_uri={@current_entity_uri_str}
       current_path="/admin"
-      status={%{agents_alive: @agents, bridges: 0, debug_events: 0, version: "dev"}}
+      active_section={:overview}
     >
-      <:resource_panel>
-        <div class="p-3 flex flex-col gap-px">
-          <div class="text-[10px] uppercase tracking-wide text-zinc-500 mb-2">Admin</div>
-          <a href="/admin" class="px-2 py-1 text-xs rounded bg-zinc-100 dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 font-medium">Overview</a>
-          <a href="/admin/logs" class="px-2 py-1 text-xs rounded text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800">Logs &amp; Audit</a>
-          <a href="/admin/registry" class="px-2 py-1 text-xs rounded text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800">Registry</a>
-          <a href="/admin/snapshots" class="px-2 py-1 text-xs rounded text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800">Snapshots</a>
-        </div>
-      </:resource_panel>
-      <:main_window>
-        <div class="flex-1 overflow-auto px-6 py-6 text-zinc-900 dark:text-zinc-100">
-          <.page_header title="Dashboard">
+      <:main>
+        <div class="px-6 py-6 text-zinc-900 dark:text-zinc-100">
+          <.page_header title="Overview">
             <:subtitle>
-              Sysadmin overview. Business surfaces live at the top-level
-              Activity Bar links (Sessions / Workspaces / Identities / Routing /
-              Plugins).
+              System layer (admin settings drawer). Workspace-layer surfaces
+              — Sessions, Workspaces, Identities, Routing, Plugins — live on
+              the main Activity Bar. Close this drawer to return.
             </:subtitle>
           </.page_header>
 
@@ -89,9 +84,9 @@ defmodule EzagentPluginLiveview.AdminDashboardLive do
                 ease-out curve. Falls back gracefully to the static
                 number if JS doesn't run. --%>
           <div class="grid grid-cols-4 gap-3 mb-6">
-            <.card><.kpi label="Sessions"    value={@sessions}    id="kpi-sessions" /></.card>
-            <.card><.kpi label="Workspaces"  value={@workspaces}  id="kpi-workspaces" /></.card>
-            <.card><.kpi label="Identities"  value={@identities}  id="kpi-identities" /></.card>
+            <.card><.kpi label="Sessions" value={@sessions} id="kpi-sessions" /></.card>
+            <.card><.kpi label="Workspaces" value={@workspaces} id="kpi-workspaces" /></.card>
+            <.card><.kpi label="Identities" value={@identities} id="kpi-identities" /></.card>
             <.card><.kpi label="Kinds alive" value={@kinds_total} id="kpi-kinds" /></.card>
           </div>
 
@@ -122,8 +117,8 @@ defmodule EzagentPluginLiveview.AdminDashboardLive do
             </a>
           </div>
         </div>
-      </:main_window>
-    </IdeShell.ide_shell>
+      </:main>
+    </AdminSettingsShell.admin_settings_shell>
     """
   end
 
@@ -138,9 +133,9 @@ defmodule EzagentPluginLiveview.AdminDashboardLive do
 
   `id` MUST be stable + unique on the page (LiveView hooks require it).
   """
-  attr :label, :string, required: true
-  attr :value, :integer, required: true
-  attr :id, :string, required: true
+  attr(:label, :string, required: true)
+  attr(:value, :integer, required: true)
+  attr(:id, :string, required: true)
 
   defp kpi(assigns) do
     ~H"""

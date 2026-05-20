@@ -16,11 +16,14 @@ defmodule EzagentDomainUi.IdeShell do
   to compute it.
 
   Phase 8 polish (Allen 2026-05-20):
-  - 6 Activity items (Settings moved under the avatar dropdown).
-  - Top bar shows avatar + dropdown trigger; no workspace label.
+  - 5 Activity items (Settings moved under the avatar dropdown; Dashboard
+    dropped in PR-F because /admin is now a settings-drawer perspective,
+    not a peer workflow).
+  - Top bar shows `ezagent / <workspace>` (workspace derived from the
+    current session's bound workspace via `Ezagent.WorkspaceRegistry`).
   - Business routes live at top level (`/sessions`, `/workspaces`,
-    `/identities`, `/routing`, `/plugins`). `/admin/*` is reserved
-    for the sysadmin Dashboard.
+    `/identities`, `/routing`, `/plugins`). `/admin/*` is rendered by
+    `EzagentDomainUi.AdminSettingsShell` (no Activity Bar, no status bar).
 
   ## Usage
 
@@ -48,13 +51,41 @@ defmodule EzagentDomainUi.IdeShell do
 
   # --- ide_shell -------------------------------------------------------------
 
-  attr :current_entity_uri, :any, required: true
-  attr :current_path, :string, required: true
-  attr :status, :map, default: %{}
-  slot :resource_panel
-  slot :main_window, required: true
-  slot :right_sidebar
-  slot :command_palette
+  attr(:current_entity_uri, :any, required: true)
+  attr(:current_path, :string, required: true)
+  attr(:status, :map, default: %{})
+
+  attr(:workspace_name, :string,
+    default: nil,
+    doc: """
+    Phase 8c PR-F (Allen 2026-05-20) — workspace name to display in the
+    top-left as `ezagent / <workspace_name>`. `nil` means no workspace
+    context, in which case top-left shows just `ezagent`.
+
+    LVs compute this from `Ezagent.WorkspaceRegistry.lookup(session_uri)`
+    and pass it through. Default `nil` keeps backward compat for any LV
+    that doesn't need workspace context.
+    """
+  )
+
+  attr(:is_admin?, :boolean,
+    default: false,
+    doc: """
+    Phase 8c PR-F (Allen 2026-05-20) — whether the current entity is an
+    admin. Controls visibility of the "Admin" link in the avatar
+    dropdown. Default `false` is the safe non-admin fallback.
+
+    LVs compute this via `Ezagent.Identity.admin?/1` and pass it in.
+    Threaded as an attr (rather than computed inside this component)
+    because ezagent_domain_ui is a pure UI library — it doesn't depend
+    on ezagent_domain_identity.
+    """
+  )
+
+  slot(:resource_panel)
+  slot(:main_window, required: true)
+  slot(:right_sidebar)
+  slot(:command_palette)
 
   def ide_shell(assigns) do
     ~H"""
@@ -62,12 +93,19 @@ defmodule EzagentDomainUi.IdeShell do
       id="ide-shell"
       class="fixed inset-0 flex flex-col bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 text-sm font-sans"
     >
-      <.top_command_bar current_entity_uri={@current_entity_uri} />
+      <.top_command_bar
+        current_entity_uri={@current_entity_uri}
+        workspace_name={@workspace_name}
+        is_admin?={@is_admin?}
+      />
 
       <div class="flex-1 flex min-h-0">
         <.activity_bar current_path={@current_path} />
 
-        <div :if={@resource_panel != []} class="w-56 border-r border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 overflow-y-auto">
+        <div
+          :if={@resource_panel != []}
+          class="w-56 border-r border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 overflow-y-auto"
+        >
           {render_slot(@resource_panel)}
         </div>
 
@@ -75,7 +113,11 @@ defmodule EzagentDomainUi.IdeShell do
           {render_slot(@main_window)}
         </div>
 
-        <div :if={@right_sidebar != []} id="right-sidebar" class="w-72 border-l border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 overflow-y-auto hidden lg:block">
+        <div
+          :if={@right_sidebar != []}
+          id="right-sidebar"
+          class="w-72 border-l border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 overflow-y-auto hidden lg:block"
+        >
           {render_slot(@right_sidebar)}
         </div>
       </div>
@@ -93,9 +135,11 @@ defmodule EzagentDomainUi.IdeShell do
   # --- activity_bar ----------------------------------------------------------
 
   @doc """
-  Vertical icon strip on the left edge. 6 top-level Activities.
+  Vertical icon strip on the left edge. 5 top-level Activities (PR-F:
+  Dashboard removed — /admin is now a settings drawer rendered by
+  `EzagentDomainUi.AdminSettingsShell`, not a peer Activity).
   """
-  attr :current_path, :string, required: true
+  attr(:current_path, :string, required: true)
 
   def activity_bar(assigns) do
     items = activity_items()
@@ -109,9 +153,9 @@ defmodule EzagentDomainUi.IdeShell do
         href={item.path}
         class={[
           "relative w-10 h-10 flex items-center justify-center rounded-md transition-colors",
-          item.key == @active_key
-            && "bg-white dark:bg-zinc-900 shadow-sm text-zinc-900 dark:text-zinc-100"
-            || "text-zinc-500 hover:bg-zinc-200 dark:hover:bg-zinc-700 hover:text-zinc-700 dark:hover:text-zinc-300"
+          (item.key == @active_key &&
+             "bg-white dark:bg-zinc-900 shadow-sm text-zinc-900 dark:text-zinc-100") ||
+            "text-zinc-500 hover:bg-zinc-200 dark:hover:bg-zinc-700 hover:text-zinc-700 dark:hover:text-zinc-300"
         ]}
         title={item.label}
         aria-label={item.label}
@@ -132,12 +176,15 @@ defmodule EzagentDomainUi.IdeShell do
   end
 
   @doc """
-  List of all 6 Activity Bar items in display order.
+  List of all 5 Activity Bar items in display order.
 
-  Phase 8 polish (2026-05-20): Settings is no longer a top-level
-  Activity — it moved under the avatar dropdown. The 6 items are
-  business features (Sessions / Workspaces / Identities / Routing /
-  Plugins) plus the admin Dashboard.
+  Phase 8c PR-F (2026-05-20): Dashboard removed — /admin is no longer
+  a peer Activity (it conflated "permission/role" with "workflow"
+  dimensions). It is now a settings-drawer perspective opened from
+  the avatar dropdown and rendered by `EzagentDomainUi.AdminSettingsShell`.
+
+  The 5 items are pure business workflow: Sessions / Workspaces /
+  Identities / Routing / Plugins.
   """
   def activity_items do
     [
@@ -145,13 +192,16 @@ defmodule EzagentDomainUi.IdeShell do
       %{key: :workspaces, label: "Workspaces", icon: "folder", path: "/workspaces"},
       %{key: :identities, label: "Identities", icon: "users", path: "/identities"},
       %{key: :routing, label: "Routing", icon: "route", path: "/routing"},
-      %{key: :plugins, label: "Plugins", icon: "puzzle", path: "/plugins"},
-      %{key: :dashboard, label: "Dashboard", icon: "dashboard", path: "/admin"}
+      %{key: :plugins, label: "Plugins", icon: "puzzle", path: "/plugins"}
     ]
   end
 
   @doc """
   Compute which Activity is "active" based on the current path.
+
+  Returns `nil` for `/admin*` paths — the admin drawer renders inside
+  `EzagentDomainUi.AdminSettingsShell` which has no Activity Bar, so
+  no Activity should be highlighted when the admin surface is open.
 
   Examples:
 
@@ -162,7 +212,7 @@ defmodule EzagentDomainUi.IdeShell do
       :workspaces
 
       iex> activity_for_path("/admin/logs")
-      :dashboard
+      nil
   """
   def activity_for_path(path) when is_binary(path) do
     cond do
@@ -171,7 +221,7 @@ defmodule EzagentDomainUi.IdeShell do
       String.starts_with?(path, "/identities") -> :identities
       String.starts_with?(path, "/routing") -> :routing
       String.starts_with?(path, "/plugins") -> :plugins
-      String.starts_with?(path, "/admin") -> :dashboard
+      String.starts_with?(path, "/admin") -> nil
       String.starts_with?(path, "/profile") -> :sessions
       String.starts_with?(path, "/settings") -> :sessions
       true -> :sessions
@@ -182,13 +232,27 @@ defmodule EzagentDomainUi.IdeShell do
 
   # --- top_command_bar -------------------------------------------------------
 
-  attr :current_entity_uri, :any, required: true
+  attr(:current_entity_uri, :any, required: true)
+  attr(:workspace_name, :string, default: nil)
+  attr(:is_admin?, :boolean, default: false)
 
   def top_command_bar(assigns) do
     ~H"""
     <header class="h-10 border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 flex items-center gap-3 shrink-0">
+      <%!-- Phase 8c PR-F (Allen 2026-05-20) — restore workspace label
+            in the top-left. Format: `ezagent / <workspace>` when a
+            workspace is in scope; bare `ezagent` otherwise (e.g. on
+            /workspaces index page or any LV without a session-bound
+            workspace). --%>
       <div class="flex items-center gap-2 shrink-0">
         <span class="font-semibold text-xs tracking-tight">ezagent</span>
+        <span :if={@workspace_name} class="text-zinc-400 dark:text-zinc-600 select-none">/</span>
+        <span
+          :if={@workspace_name}
+          class="font-mono text-xs text-zinc-600 dark:text-zinc-400"
+        >
+          {@workspace_name}
+        </span>
       </div>
 
       <%!-- Phase 8c PR-D — cycling typing-animation placeholder. 4
@@ -204,7 +268,10 @@ defmodule EzagentDomainUi.IdeShell do
           class="w-full flex items-center gap-2 px-3 py-1.5 bg-zinc-100 dark:bg-zinc-900 hover:bg-zinc-200 dark:hover:bg-zinc-700 rounded-md text-xs text-zinc-500 transition-colors"
         >
           <.icon name="search" size="xs" />
-          <span class="ez-typing-placeholder relative flex-1 text-left h-4 overflow-hidden" aria-live="polite">
+          <span
+            class="ez-typing-placeholder relative flex-1 text-left h-4 overflow-hidden"
+            aria-live="polite"
+          >
             <span class="ez-typing-line">搜索 sessions</span>
             <span class="ez-typing-line">召唤 entity</span>
             <span class="ez-typing-line">执行 action</span>
@@ -215,9 +282,20 @@ defmodule EzagentDomainUi.IdeShell do
       </div>
 
       <div class="flex items-center gap-2 shrink-0">
-        <.icon name="bell" size="sm" class="text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 cursor-pointer" />
-        <.icon name="help" size="sm" class="text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 cursor-pointer" />
-        <.avatar_menu current_entity_uri={@current_entity_uri} />
+        <.icon
+          name="bell"
+          size="sm"
+          class="text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 cursor-pointer"
+        />
+        <.icon
+          name="help"
+          size="sm"
+          class="text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 cursor-pointer"
+        />
+        <.avatar_menu
+          current_entity_uri={@current_entity_uri}
+          is_admin?={@is_admin?}
+        />
       </div>
     </header>
     """
@@ -236,7 +314,8 @@ defmodule EzagentDomainUi.IdeShell do
 
   Tooltip on the avatar shows "Your profile".
   """
-  attr :current_entity_uri, :any, required: true
+  attr(:current_entity_uri, :any, required: true)
+  attr(:is_admin?, :boolean, default: false)
 
   def avatar_menu(assigns) do
     assigns =
@@ -269,7 +348,9 @@ defmodule EzagentDomainUi.IdeShell do
         <div class="px-3 py-3 border-b border-zinc-200 dark:border-zinc-800 flex items-center gap-2">
           <.avatar uri={@current_entity_uri} size="md" />
           <div class="flex-1 min-w-0">
-            <div class="font-mono text-[11px] text-zinc-700 dark:text-zinc-300 truncate">{@uri_str}</div>
+            <div class="font-mono text-[11px] text-zinc-700 dark:text-zinc-300 truncate">
+              {@uri_str}
+            </div>
             <div class="flex items-center gap-1 text-[10px] text-zinc-500 mt-0.5">
               <.status_dot color="green" />
               <span>online</span>
@@ -280,11 +361,28 @@ defmodule EzagentDomainUi.IdeShell do
           <a
             href="/profile"
             class="block px-3 py-1.5 text-xs text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800"
-          >Profile</a>
+          >
+            Profile
+          </a>
           <a
             href="/settings"
             class="block px-3 py-1.5 text-xs text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800"
-          >Settings</a>
+          >
+            Settings
+          </a>
+          <%!-- Phase 8c PR-F (Allen 2026-05-20) — Admin link opens the
+                AdminSettingsShell drawer (system layer of the 3-layer
+                architecture). Gated on `Ezagent.Identity.admin?/1`;
+                hidden for non-admin entities for UX clarity.
+                TODO Phase 8d: replace with proper cap:admin check
+                once /admin enforces admin caps at the route gate. --%>
+          <a
+            :if={@is_admin?}
+            href="/admin"
+            class="block px-3 py-1.5 text-xs text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center gap-2"
+          >
+            <.icon name="settings" size="xs" /> Admin
+          </a>
         </div>
         <%!-- Phase 8c PR-C: dark mode toggle. daisyUI infrastructure
               already exists in root.html.heex (data-theme + localStorage +
@@ -326,7 +424,9 @@ defmodule EzagentDomainUi.IdeShell do
             <button
               type="submit"
               class="w-full text-left px-3 py-1.5 text-xs text-rose-600 dark:text-rose-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"
-            >Sign out</button>
+            >
+              Sign out
+            </button>
           </form>
         </div>
       </div>
@@ -336,8 +436,8 @@ defmodule EzagentDomainUi.IdeShell do
 
   # --- status_bar ------------------------------------------------------------
 
-  attr :current_entity_uri, :any, required: true
-  attr :status, :map, default: %{}
+  attr(:current_entity_uri, :any, required: true)
+  attr(:status, :map, default: %{})
 
   def status_bar(assigns) do
     # Phase 8c PR-B (Allen 2026-05-20) — state-aware signal lights.
@@ -375,13 +475,18 @@ defmodule EzagentDomainUi.IdeShell do
         <.status_dot color={@bridges_color} />
         <span>{@bridges_count} bridges</span>
       </span>
-      <a href="/admin/logs" class="flex items-center gap-1 hover:text-zinc-900 dark:hover:text-zinc-100 ml-auto">
+      <a
+        href="/admin/logs"
+        class="flex items-center gap-1 hover:text-zinc-900 dark:hover:text-zinc-100 ml-auto"
+      >
         <.icon name="bug" size="xs" />
-        <span class={@events_color == "amber" && "text-amber-700 dark:text-amber-300" || ""}>
+        <span class={(@events_color == "amber" && "text-amber-700 dark:text-amber-300") || ""}>
           {@events_count} events
         </span>
       </a>
-      <span class="font-mono text-zinc-400 dark:text-zinc-600">v{Map.get(@status, :version, "dev")}</span>
+      <span class="font-mono text-zinc-400 dark:text-zinc-600">
+        v{Map.get(@status, :version, "dev")}
+      </span>
     </footer>
     """
   end
@@ -398,10 +503,10 @@ defmodule EzagentDomainUi.IdeShell do
 
       <.editor_tabs items={[{:session, "main"}, {:terminal, "cc_demo"}]} selected={:session} />
   """
-  attr :items, :list, required: true
-  attr :selected, :any, required: true
-  attr :on_select, :string, default: "select_editor_tab"
-  attr :on_close, :string, default: "close_editor_tab"
+  attr(:items, :list, required: true)
+  attr(:selected, :any, required: true)
+  attr(:on_select, :string, default: "select_editor_tab")
+  attr(:on_close, :string, default: "close_editor_tab")
 
   def editor_tabs(assigns) do
     ~H"""
@@ -410,9 +515,9 @@ defmodule EzagentDomainUi.IdeShell do
         :for={{key, label} <- @items}
         class={[
           "flex items-center gap-1 px-3 py-1.5 text-xs font-medium border-b-2 cursor-pointer",
-          to_string(key) == to_string(@selected)
-            && "border-zinc-900 dark:border-zinc-100 text-zinc-900 dark:text-zinc-100 bg-white dark:bg-zinc-900"
-            || "border-transparent text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+          (to_string(key) == to_string(@selected) &&
+             "border-zinc-900 dark:border-zinc-100 text-zinc-900 dark:text-zinc-100 bg-white dark:bg-zinc-900") ||
+            "border-transparent text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800"
         ]}
         phx-click={@on_select}
         phx-value-key={inspect(key)}
@@ -436,18 +541,21 @@ defmodule EzagentDomainUi.IdeShell do
   @doc """
   Optional vertical or horizontal split between two slots.
   """
-  attr :open, :boolean, default: false
-  attr :direction, :string, default: "vertical", values: ~w(vertical horizontal)
-  slot :primary, required: true
-  slot :secondary
+  attr(:open, :boolean, default: false)
+  attr(:direction, :string, default: "vertical", values: ~w(vertical horizontal))
+  slot(:primary, required: true)
+  slot(:secondary)
 
   def split_pane(assigns) do
     ~H"""
     <div class={[
       "flex flex-1 min-h-0 min-w-0",
-      @direction == "vertical" && "flex-row" || "flex-col"
+      (@direction == "vertical" && "flex-row") || "flex-col"
     ]}>
-      <div class={["flex-1 min-h-0 min-w-0", @open && @secondary != [] && "border-r border-zinc-200 dark:border-zinc-800"]}>
+      <div class={[
+        "flex-1 min-h-0 min-w-0",
+        @open && @secondary != [] && "border-r border-zinc-200 dark:border-zinc-800"
+      ]}>
         {render_slot(@primary)}
       </div>
       <div
@@ -465,9 +573,9 @@ defmodule EzagentDomainUi.IdeShell do
   @doc """
   Command palette modal — triggered by ⌘K or CmdK button in TopCommandBar.
   """
-  attr :open, :boolean, default: false
-  attr :query, :string, default: ""
-  attr :results, :list, default: []
+  attr(:open, :boolean, default: false)
+  attr(:query, :string, default: "")
+  attr(:results, :list, default: [])
 
   def command_palette(assigns) do
     ~H"""
@@ -498,7 +606,7 @@ defmodule EzagentDomainUi.IdeShell do
         </form>
         <div class="max-h-96 overflow-y-auto">
           <div :if={@results == []} class="px-4 py-8 text-center text-xs text-zinc-500">
-            {@query == "" && "输入开始搜索" || "没有结果"}
+            {(@query == "" && "输入开始搜索") || "没有结果"}
           </div>
           <button
             :for={r <- @results}
@@ -509,7 +617,12 @@ defmodule EzagentDomainUi.IdeShell do
           >
             <.icon name={r.icon || "dot"} size="xs" />
             <span class="font-mono">{r.label}</span>
-            <span :if={Map.get(r, :group)} class="ml-auto text-[10px] text-zinc-400 dark:text-zinc-600 uppercase">{r.group}</span>
+            <span
+              :if={Map.get(r, :group)}
+              class="ml-auto text-[10px] text-zinc-400 dark:text-zinc-600 uppercase"
+            >
+              {r.group}
+            </span>
           </button>
         </div>
       </div>

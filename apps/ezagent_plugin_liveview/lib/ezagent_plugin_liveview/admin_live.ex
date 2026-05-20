@@ -190,7 +190,8 @@ defmodule EzagentPluginLiveview.AdminLive do
   end
 
   def handle_event("chat_compose", _params, socket) do
-    {:noreply, assign(socket, :flash_error, "Message text or at least one attachment is required.")}
+    {:noreply,
+     assign(socket, :flash_error, "Message text or at least one attachment is required.")}
   end
 
   def handle_event("switch_session", %{"session_uri" => session_uri_str}, socket) do
@@ -336,11 +337,17 @@ defmodule EzagentPluginLiveview.AdminLive do
             }
 
             case Ezagent.Invocation.dispatch(inv) do
-              :ok -> {:noreply, socket}
-              {:ok, _} -> {:noreply, socket}
+              :ok ->
+                {:noreply, socket}
+
+              {:ok, _} ->
+                {:noreply, socket}
+
               {:error, :unauthorized} ->
                 {:noreply,
-                 assign(socket, :flash_error,
+                 assign(
+                   socket,
+                   :flash_error,
                    "Unauthorized — need agent.pty.write cap on this agent."
                  )}
 
@@ -394,12 +401,24 @@ defmodule EzagentPluginLiveview.AdminLive do
         }
       end)
       |> assign_new(:view_render_fn, fn -> resolve_view_render(assigns) end)
+      # Phase 8c PR-F: top-left `ezagent / <workspace>` label +
+      # avatar dropdown "Admin" link gate. workspace_name reads the
+      # current session's bound workspace (PR-E #2 binds session://main
+      # to workspace://default, so this typically resolves to "default").
+      |> assign_new(:workspace_name, fn ->
+        workspace_name_for(assigns.current_session_uri)
+      end)
+      |> assign_new(:is_admin?, fn ->
+        Ezagent.Identity.admin?(assigns.caller_uri_str)
+      end)
 
     ~H"""
     <IdeShell.ide_shell
       current_entity_uri={@caller_uri_str}
       current_path="/sessions"
       status={@status}
+      workspace_name={@workspace_name}
+      is_admin?={@is_admin?}
     >
       <:main_window>
         <SessionEditor.session_editor
@@ -439,9 +458,13 @@ defmodule EzagentPluginLiveview.AdminLive do
               <span class={[
                 "px-1 rounded font-semibold",
                 ev.level == "error" && "bg-rose-100 dark:bg-rose-900 text-rose-700 dark:text-rose-300",
-                ev.level == "warning" && "bg-amber-100 dark:bg-amber-900 text-amber-700 dark:text-amber-300",
-                ev.level not in ["error", "warning"] && "bg-zinc-200 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300"
-              ]}>{ev.level}</span>
+                ev.level == "warning" &&
+                  "bg-amber-100 dark:bg-amber-900 text-amber-700 dark:text-amber-300",
+                ev.level not in ["error", "warning"] &&
+                  "bg-zinc-200 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300"
+              ]}>
+                {ev.level}
+              </span>
               <span class="font-mono text-[10px] text-zinc-500">{ev.bridge_id}</span>
               <span class="flex-1">{ev.text}</span>
             </li>
@@ -459,11 +482,11 @@ defmodule EzagentPluginLiveview.AdminLive do
   # Helper component: render whichever SessionView is active. We pull
   # the module out of assigns and call its `render/1` with the assigns
   # the view declares it needs.
-  attr :view_module, :atom, required: true
-  attr :messages_stream, :any, required: true
-  attr :oldest_cursor, :any, default: nil
-  attr :active_pty_agent_uri, :any, default: nil
-  attr :empty_state?, :boolean, default: false
+  attr(:view_module, :atom, required: true)
+  attr(:messages_stream, :any, required: true)
+  attr(:oldest_cursor, :any, default: nil)
+  attr(:active_pty_agent_uri, :any, default: nil)
+  attr(:empty_state?, :boolean, default: false)
 
   defp render_active_view(assigns) do
     case assigns.view_module do
@@ -690,9 +713,12 @@ defmodule EzagentPluginLiveview.AdminLive do
   defp body_text(%{"text" => t}) when is_binary(t), do: t
   defp body_text(_), do: ""
 
-  defp body_attachments(%{attachments: list}) when is_list(list), do: Enum.map(list, &att_to_link/1)
+  defp body_attachments(%{attachments: list}) when is_list(list),
+    do: Enum.map(list, &att_to_link/1)
+
   defp body_attachments(%{"attachments" => list}) when is_list(list),
     do: Enum.map(list, &att_to_link/1)
+
   defp body_attachments(_), do: []
 
   defp att_to_link(%URI{scheme: "resource", host: "uploads", path: "/" <> filename}),
@@ -734,7 +760,8 @@ defmodule EzagentPluginLiveview.AdminLive do
 
   defp send_chat_message(socket, text, attachments, mentions) do
     msg =
-      Ezagent.Message.new(socket.assigns.caller_uri,
+      Ezagent.Message.new(
+        socket.assigns.caller_uri,
         %{text: text, attachments: attachments},
         mentions: mentions
       )
@@ -772,4 +799,17 @@ defmodule EzagentPluginLiveview.AdminLive do
   end
 
   defp friendly_error(action, reason), do: "#{action} failed: #{inspect(reason)}"
+
+  # Phase 8c PR-F: look up the workspace name bound to the current
+  # session. Returns the URI host (e.g. "default" for workspace://default)
+  # or nil if the session isn't bound to any workspace. Used for the
+  # top-left `ezagent / <name>` label.
+  defp workspace_name_for(nil), do: nil
+
+  defp workspace_name_for(session_uri) do
+    case Ezagent.WorkspaceRegistry.lookup(session_uri) do
+      {:ok, %URI{host: name}} when is_binary(name) and name != "" -> name
+      _ -> nil
+    end
+  end
 end

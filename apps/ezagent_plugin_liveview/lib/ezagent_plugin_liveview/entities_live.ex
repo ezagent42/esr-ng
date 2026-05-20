@@ -15,7 +15,7 @@ defmodule EzagentPluginLiveview.EntitiesLive do
   """
 
   use Phoenix.LiveView
-  alias EzagentDomainUi.IdeShell
+  alias EzagentDomainUi.AdminSettingsShell
   use EzagentDomainUi.Components
   import Phoenix.Component
 
@@ -81,82 +81,98 @@ defmodule EzagentPluginLiveview.EntitiesLive do
       end)
 
     ~H"""
-    <IdeShell.ide_shell
+    <AdminSettingsShell.admin_settings_shell
       current_entity_uri={@current_entity_uri_str}
       current_path="/admin/registry"
-      status={%{agents_alive: 0, bridges: 0, debug_events: 0, version: "dev"}}
+      active_section={:registry}
     >
-      <:resource_panel>
-        <div class="p-3 flex flex-col gap-1">
-          <div class="text-[10px] uppercase tracking-wide text-zinc-500 mb-1">Filters</div>
-          <.filter_chip filter={@filter} value="all" label="all" />
-          <.filter_chip filter={@filter} value="user" label="entity://user" />
-          <.filter_chip filter={@filter} value="agent" label="entity://agent" />
-          <.filter_chip filter={@filter} value="session" label="session://" />
-          <.filter_chip filter={@filter} value="workspace" label="workspace://" />
-          <.filter_chip filter={@filter} value="template" label="template://" />
-          <.filter_chip filter={@filter} value="system" label="system://" />
-        </div>
-      </:resource_panel>
-      <:main_window>
-        <div class="flex-1 overflow-auto px-6 py-6 text-zinc-900 dark:text-zinc-100">
-        <.breadcrumb items={[{"Admin", "/admin"}, {"Registry", nil}]} />
-        <header>
-        <h1 style="font-size: 22px; font-weight: 600;">Entities (live registry)</h1>
-        <p style="font-size: 13px; color: #666;">
-          Every Kind currently registered in <code>Ezagent.KindRegistry</code> — users,
-          agents, sessions, workspaces, templates, system sentinels.
-        </p>
-      </header>
+      <:main>
+        <div class="px-6 py-6 text-zinc-900 dark:text-zinc-100">
+          <header>
+            <h1 style="font-size: 22px; font-weight: 600;">Entities (live registry)</h1>
+            <p style="font-size: 13px; color: #666;">
+              Every Kind currently registered in <code>Ezagent.KindRegistry</code> — users,
+              agents, sessions, workspaces, templates, system sentinels.
+            </p>
+          </header>
 
-      <section style="margin-top: 16px;">
-        <p :if={@entities == []} id="entities-empty" style="font-size: 13px; color: #57606a; font-style: italic;">
-          No entities match the current filter.
-        </p>
+          <%!-- Phase 8c PR-F: filter chips inlined above the table since
+            the left rail is now the admin sub-section nav. --%>
+          <div class="flex items-center gap-1 flex-wrap mt-3">
+            <span class="text-[10px] uppercase tracking-wide text-zinc-500 mr-2">Filters</span>
+            <.filter_chip filter={@filter} value="all" label="all" />
+            <.filter_chip filter={@filter} value="user" label="entity://user" />
+            <.filter_chip filter={@filter} value="agent" label="entity://agent" />
+            <.filter_chip filter={@filter} value="session" label="session://" />
+            <.filter_chip filter={@filter} value="workspace" label="workspace://" />
+            <.filter_chip filter={@filter} value="template" label="template://" />
+            <.filter_chip filter={@filter} value="system" label="system://" />
+          </div>
 
-        <table :if={@entities != []} id="entities-table" style="width: 100%; font-size: 13px; border-collapse: collapse;">
-          <thead>
-            <tr style="border-bottom: 2px solid #d1d5da;">
-              <th style="text-align: left; padding: 6px 4px;">scheme</th>
-              <th style="text-align: left;">host</th>
-              <th style="text-align: left;">path</th>
-              <th style="text-align: left;">pid</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr :for={e <- @entities} style="border-bottom: 1px solid #eaeef2;">
-              <td style="padding: 6px 4px; font-family: monospace; font-size: 12px; color: #6f42c1;">{e.scheme || "—"}</td>
-              <td style="font-family: monospace; font-size: 12px;">{e.host || "—"}</td>
-              <td style="font-family: monospace; font-size: 12px;">{e.path || "—"}</td>
-              <td style="font-family: monospace; font-size: 11px; color: #57606a;">{e.pid_str}</td>
-              <td>
-                <a
-                  :if={e.scheme}
-                  href={"/plugins/auto/#{e.scheme}/#{URI.encode_www_form(e.uri_str)}"}
-                  style="color: #0969da; font-size: 12px;"
-                >detail →</a>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </section>
+          <section style="margin-top: 16px;">
+            <p
+              :if={@entities == []}
+              id="entities-empty"
+              style="font-size: 13px; color: #57606a; font-style: italic;"
+            >
+              No entities match the current filter.
+            </p>
+
+            <table
+              :if={@entities != []}
+              id="entities-table"
+              style="width: 100%; font-size: 13px; border-collapse: collapse;"
+            >
+              <thead>
+                <tr style="border-bottom: 2px solid #d1d5da;">
+                  <th style="text-align: left; padding: 6px 4px;">scheme</th>
+                  <th style="text-align: left;">host</th>
+                  <th style="text-align: left;">path</th>
+                  <th style="text-align: left;">pid</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr :for={e <- @entities} style="border-bottom: 1px solid #eaeef2;">
+                  <td style="padding: 6px 4px; font-family: monospace; font-size: 12px; color: #6f42c1;">
+                    {e.scheme || "—"}
+                  </td>
+                  <td style="font-family: monospace; font-size: 12px;">{e.host || "—"}</td>
+                  <td style="font-family: monospace; font-size: 12px;">{e.path || "—"}</td>
+                  <td style="font-family: monospace; font-size: 11px; color: #57606a;">
+                    {e.pid_str}
+                  </td>
+                  <td>
+                    <a
+                      :if={e.scheme}
+                      href={"/plugins/auto/#{e.scheme}/#{URI.encode_www_form(e.uri_str)}"}
+                      style="color: #0969da; font-size: 12px;"
+                    >
+                      detail →
+                    </a>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </section>
         </div>
-      </:main_window>
-    </IdeShell.ide_shell>
+      </:main>
+    </AdminSettingsShell.admin_settings_shell>
     """
   end
 
-  attr :filter, :string, required: true
-  attr :value, :string, required: true
-  attr :label, :string, required: true
+  attr(:filter, :string, required: true)
+  attr(:value, :string, required: true)
+  attr(:label, :string, required: true)
 
   defp filter_chip(assigns) do
     ~H"""
     <a
       href={"/admin/registry?filter=#{@value}"}
       style={chip_style(@filter == @value)}
-    >{@label}</a>
+    >
+      {@label}
+    </a>
     """
   end
 

@@ -20,4 +20,37 @@ defmodule Ezagent.IdentityTest do
              end)
     end
   end
+
+  describe "admin?/1 (Phase 8c PR-F)" do
+    test "returns true for the seeded admin URI (struct form)" do
+      assert Ezagent.Identity.admin?(Ezagent.Entity.User.admin_uri())
+    end
+
+    test "returns true for the seeded admin URI (string form)" do
+      assert Ezagent.Identity.admin?("entity://user/admin")
+    end
+
+    test "returns false for a non-admin user URI" do
+      refute Ezagent.Identity.admin?("entity://user/alice")
+      refute Ezagent.Identity.admin?(URI.parse("entity://user/bob"))
+    end
+
+    test "returns false for an agent URI" do
+      refute Ezagent.Identity.admin?("entity://agent/claude-1")
+    end
+
+    test "returns false for nil" do
+      refute Ezagent.Identity.admin?(nil)
+    end
+
+    test "returns false for a malformed URI string" do
+      refute Ezagent.Identity.admin?("not a uri")
+      refute Ezagent.Identity.admin?("")
+    end
+
+    test "returns false for any other input type" do
+      refute Ezagent.Identity.admin?(:admin)
+      refute Ezagent.Identity.admin?(42)
+    end
+  end
 end
