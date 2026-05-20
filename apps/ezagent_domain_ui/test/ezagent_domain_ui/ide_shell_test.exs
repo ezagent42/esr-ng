@@ -32,14 +32,19 @@ defmodule EzagentDomainUi.IdeShellTest do
         """)
 
       assert html =~ ~r/id="ide-shell"/
-      # Activity Bar — 5 items per Phase 8c PR-F (Allen 2026-05-20).
-      # Dashboard removed: /admin is now a settings drawer rendered by
-      # AdminSettingsShell, not a peer Activity.
+      # Activity Bar — 4 items per Phase 8c PR-L (Allen 2026-05-20).
+      # Dashboard removed in PR-F (admin became a settings drawer);
+      # Workspaces removed in PR-L (folded into the top-left
+      # `ezagent / <workspace>` dropdown — workspace is a context
+      # container, not a feature surface).
       assert html =~ "Sessions"
-      assert html =~ "Workspaces"
       assert html =~ "Identities"
       assert html =~ "Routing"
       assert html =~ "Plugins"
+      # Workspaces no longer an Activity Bar tile (the WorkspacesLive
+      # page itself still renders — reachable via the top-left
+      # "Manage workspaces..." dropdown link).
+      refute html =~ ~s(aria-label="Workspaces")
       refute html =~ ~s(aria-label="Dashboard")
       # Phase 8 polish (Allen 2026-05-20): Settings moved from
       # Activity Bar into the avatar dropdown, so its label appears
@@ -105,6 +110,79 @@ defmodule EzagentDomainUi.IdeShellTest do
       assert html =~ "ezagent"
     end
 
+    test "Phase 8c PR-L — top-left becomes a dropdown when workspaces list is non-empty" do
+      assigns = %{
+        current_entity_uri: "entity://user/admin",
+        current_path: "/sessions",
+        status: %{},
+        workspace_name: "default",
+        workspaces: [
+          %{name: "default", uri: "workspace://default"},
+          %{name: "demo", uri: "workspace://demo"}
+        ]
+      }
+
+      html =
+        rendered_to_string(~H"""
+        <IdeShell.ide_shell
+          current_entity_uri={@current_entity_uri}
+          current_path={@current_path}
+          status={@status}
+          workspace_name={@workspace_name}
+          workspaces={@workspaces}
+        >
+          <:main_window>main</:main_window>
+        </IdeShell.ide_shell>
+        """)
+
+      # Dropdown structure
+      assert html =~ ~s(id="workspace-menu")
+      assert html =~ ~s(aria-label="Switch workspace")
+      # WORKSPACES caption (case-insensitive — Tailwind uppercase class
+      # renders the source text lowercase)
+      assert html =~ "Workspaces"
+      # Both workspaces appear in the list
+      assert html =~ "default"
+      assert html =~ "demo"
+      # Current marker on the active workspace
+      assert html =~ "current"
+      # Non-current workspace links to /workspaces/<name>
+      assert html =~ ~s(href="/workspaces/demo")
+      # Manage link points to /workspaces
+      assert html =~ ~s(href="/workspaces")
+      assert html =~ "Manage workspaces..."
+    end
+
+    test "Phase 8c PR-L — empty workspaces list keeps plain text label (no dropdown)" do
+      assigns = %{
+        current_entity_uri: "entity://user/admin",
+        current_path: "/sessions",
+        status: %{},
+        workspace_name: "default",
+        workspaces: []
+      }
+
+      html =
+        rendered_to_string(~H"""
+        <IdeShell.ide_shell
+          current_entity_uri={@current_entity_uri}
+          current_path={@current_path}
+          status={@status}
+          workspace_name={@workspace_name}
+          workspaces={@workspaces}
+        >
+          <:main_window>main</:main_window>
+        </IdeShell.ide_shell>
+        """)
+
+      # Plain text still rendered
+      assert html =~ "ezagent"
+      assert html =~ "default"
+      # No dropdown apparatus
+      refute html =~ ~s(id="workspace-menu")
+      refute html =~ ~s(aria-label="Switch workspace")
+    end
+
     test "Phase 8c PR-F — avatar dropdown gains Admin link when is_admin?=true" do
       assigns = %{
         current_entity_uri: "entity://user/admin",
@@ -167,9 +245,12 @@ defmodule EzagentDomainUi.IdeShellTest do
       assert IdeShell.activity_for_path("/sessions/main") == :sessions
     end
 
-    test "/workspaces → :workspaces" do
-      assert IdeShell.activity_for_path("/workspaces") == :workspaces
-      assert IdeShell.activity_for_path("/workspaces/demo") == :workspaces
+    test "/workspaces → nil (Phase 8c PR-L: workspaces folded into top-left dropdown)" do
+      # PR-L removed the Workspaces Activity Bar tile. WorkspacesLive
+      # still renders (reachable via the top-left "Manage workspaces..."
+      # dropdown link), but no Activity should highlight while it's open.
+      assert IdeShell.activity_for_path("/workspaces") == nil
+      assert IdeShell.activity_for_path("/workspaces/demo") == nil
     end
 
     test "/identities → :identities" do
@@ -204,15 +285,20 @@ defmodule EzagentDomainUi.IdeShellTest do
   end
 
   describe "activity_items/0" do
-    test "returns 5 items in the SPEC-defined order (Phase 8c PR-F)" do
+    test "returns 4 items in the SPEC-defined order (Phase 8c PR-L)" do
       items = IdeShell.activity_items()
-      assert length(items) == 5
+      assert length(items) == 4
       keys = Enum.map(items, & &1.key)
-      assert keys == [:sessions, :workspaces, :identities, :routing, :plugins]
+      assert keys == [:sessions, :identities, :routing, :plugins]
       # Dashboard explicitly NOT in the list — it's a settings drawer
       # (`EzagentDomainUi.AdminSettingsShell`) opened from the avatar
       # dropdown, not a peer Activity Bar item.
       refute :dashboard in keys
+      # Workspaces explicitly NOT in the list (PR-L) — workspace is a
+      # context container, folded into the top-left `ezagent /
+      # <workspace>` dropdown. /workspaces management page still exists,
+      # reached via "Manage workspaces..." link in that dropdown.
+      refute :workspaces in keys
     end
   end
 

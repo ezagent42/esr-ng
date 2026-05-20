@@ -16,13 +16,18 @@ defmodule EzagentDomainUi.IdeShell do
   to compute it.
 
   Phase 8 polish (Allen 2026-05-20):
-  - 5 Activity items (Settings moved under the avatar dropdown; Dashboard
+  - 4 Activity items (Settings moved under the avatar dropdown; Dashboard
     dropped in PR-F because /admin is now a settings-drawer perspective,
-    not a peer workflow).
+    not a peer workflow; Workspaces folded into the top-left dropdown in
+    PR-L because workspace is a context container, not a feature surface).
   - Top bar shows `ezagent / <workspace>` (workspace derived from the
     current session's bound workspace via `Ezagent.WorkspaceRegistry`).
-  - Business routes live at top level (`/sessions`, `/workspaces`,
-    `/identities`, `/routing`, `/plugins`). `/admin/*` is rendered by
+    When the LV passes a non-empty `workspaces` list, the label becomes a
+    clickable dropdown listing every workspace + a "Manage workspaces..."
+    link to `/workspaces`.
+  - Business routes live at top level (`/sessions`, `/identities`,
+    `/routing`, `/plugins`). `/workspaces` still routes — it's reached
+    via the top-left dropdown. `/admin/*` is rendered by
     `EzagentDomainUi.AdminSettingsShell` (no Activity Bar, no status bar).
 
   ## Usage
@@ -68,6 +73,22 @@ defmodule EzagentDomainUi.IdeShell do
     """
   )
 
+  attr(:workspaces, :list,
+    default: [],
+    doc: """
+    Phase 8c PR-L (Allen 2026-05-20) — list of known workspaces, used
+    to populate the top-left `ezagent / <workspace>` dropdown. Each item
+    is a map `%{name: String.t(), uri: String.t() | URI.t()}`.
+
+    When the list is non-empty, the top-left chrome becomes a clickable
+    dropdown listing every workspace + a "Manage workspaces..." link to
+    `/workspaces`. When empty (the default), the chrome stays plain
+    text — non-admin surfaces don't need the dropdown affordance.
+
+    Only `admin_live` (the sessions surface) currently opts in.
+    """
+  )
+
   attr(:is_admin?, :boolean,
     default: false,
     doc: """
@@ -96,6 +117,7 @@ defmodule EzagentDomainUi.IdeShell do
       <.top_command_bar
         current_entity_uri={@current_entity_uri}
         workspace_name={@workspace_name}
+        workspaces={@workspaces}
         is_admin?={@is_admin?}
       />
 
@@ -135,9 +157,11 @@ defmodule EzagentDomainUi.IdeShell do
   # --- activity_bar ----------------------------------------------------------
 
   @doc """
-  Vertical icon strip on the left edge. 5 top-level Activities (PR-F:
+  Vertical icon strip on the left edge. 4 top-level Activities (PR-F:
   Dashboard removed — /admin is now a settings drawer rendered by
-  `EzagentDomainUi.AdminSettingsShell`, not a peer Activity).
+  `EzagentDomainUi.AdminSettingsShell`, not a peer Activity. PR-L:
+  Workspaces removed — workspace is a context container, folded into
+  the top-left `ezagent / <workspace>` dropdown).
   """
   attr(:current_path, :string, required: true)
 
@@ -176,20 +200,26 @@ defmodule EzagentDomainUi.IdeShell do
   end
 
   @doc """
-  List of all 5 Activity Bar items in display order.
+  List of all 4 Activity Bar items in display order.
 
   Phase 8c PR-F (2026-05-20): Dashboard removed — /admin is no longer
   a peer Activity (it conflated "permission/role" with "workflow"
   dimensions). It is now a settings-drawer perspective opened from
   the avatar dropdown and rendered by `EzagentDomainUi.AdminSettingsShell`.
 
-  The 5 items are pure business workflow: Sessions / Workspaces /
-  Identities / Routing / Plugins.
+  Phase 8c PR-L (2026-05-20): Workspaces removed — workspace is a
+  deployment-unit / context concept, not a feature workflow. Placing
+  /workspaces in Activity Bar peer-with Sessions/Identities/Routing/Plugins
+  muddled the "context container" vs "feature surface" distinction.
+  Workspace context lives in the top-left chrome (`ezagent / <name>`)
+  and reaches the management page via dropdown link.
+
+  The 4 items are pure feature surfaces: Sessions / Identities /
+  Routing / Plugins.
   """
   def activity_items do
     [
       %{key: :sessions, label: "Sessions", icon: "message-square", path: "/sessions"},
-      %{key: :workspaces, label: "Workspaces", icon: "folder", path: "/workspaces"},
       %{key: :identities, label: "Identities", icon: "users", path: "/identities"},
       %{key: :routing, label: "Routing", icon: "route", path: "/routing"},
       %{key: :plugins, label: "Plugins", icon: "puzzle", path: "/plugins"}
@@ -203,13 +233,18 @@ defmodule EzagentDomainUi.IdeShell do
   `EzagentDomainUi.AdminSettingsShell` which has no Activity Bar, so
   no Activity should be highlighted when the admin surface is open.
 
+  Returns `nil` for `/workspaces*` paths (PR-L) — workspaces are no
+  longer a top-level Activity. The WorkspacesLive page still renders
+  (reachable via the top-left "Manage workspaces..." dropdown link),
+  but the Activity Bar shows no highlighted item while it's open.
+
   Examples:
 
       iex> activity_for_path("/sessions")
       :sessions
 
       iex> activity_for_path("/workspaces/demo")
-      :workspaces
+      nil
 
       iex> activity_for_path("/admin/logs")
       nil
@@ -217,7 +252,7 @@ defmodule EzagentDomainUi.IdeShell do
   def activity_for_path(path) when is_binary(path) do
     cond do
       String.starts_with?(path, "/sessions") -> :sessions
-      String.starts_with?(path, "/workspaces") -> :workspaces
+      String.starts_with?(path, "/workspaces") -> nil
       String.starts_with?(path, "/identities") -> :identities
       String.starts_with?(path, "/routing") -> :routing
       String.starts_with?(path, "/plugins") -> :plugins
@@ -234,26 +269,39 @@ defmodule EzagentDomainUi.IdeShell do
 
   attr(:current_entity_uri, :any, required: true)
   attr(:workspace_name, :string, default: nil)
+  attr(:workspaces, :list, default: [])
   attr(:is_admin?, :boolean, default: false)
 
   def top_command_bar(assigns) do
     ~H"""
     <header class="h-10 border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 flex items-center gap-3 shrink-0">
-      <%!-- Phase 8c PR-F (Allen 2026-05-20) — restore workspace label
-            in the top-left. Format: `ezagent / <workspace>` when a
-            workspace is in scope; bare `ezagent` otherwise (e.g. on
-            /workspaces index page or any LV without a session-bound
-            workspace). --%>
-      <div class="flex items-center gap-2 shrink-0">
-        <span class="font-semibold text-xs tracking-tight">ezagent</span>
-        <span :if={@workspace_name} class="text-zinc-400 dark:text-zinc-600 select-none">/</span>
-        <span
-          :if={@workspace_name}
-          class="font-mono text-xs text-zinc-600 dark:text-zinc-400"
-        >
-          {@workspace_name}
-        </span>
-      </div>
+      <%!-- Phase 8c PR-F (Allen 2026-05-20) — workspace label in the
+            top-left. Format: `ezagent / <workspace>` when a workspace
+            is in scope; bare `ezagent` otherwise.
+
+            Phase 8c PR-L (Allen 2026-05-20) — when the LV passes a
+            non-empty `workspaces` list, the label becomes a clickable
+            dropdown button (Activity Bar 5→4 dropped the Workspaces
+            tile in favor of this dropdown). When `workspaces` is empty
+            (the default), the chrome stays as plain text — non-admin
+            surfaces don't need the dropdown affordance. --%>
+      <%= if @workspaces != [] do %>
+        <.workspace_dropdown
+          workspace_name={@workspace_name}
+          workspaces={@workspaces}
+        />
+      <% else %>
+        <div class="flex items-center gap-2 shrink-0">
+          <span class="font-semibold text-xs tracking-tight">ezagent</span>
+          <span :if={@workspace_name} class="text-zinc-400 dark:text-zinc-600 select-none">/</span>
+          <span
+            :if={@workspace_name}
+            class="font-mono text-xs text-zinc-600 dark:text-zinc-400"
+          >
+            {@workspace_name}
+          </span>
+        </div>
+      <% end %>
 
       <%!-- Phase 8c PR-D — cycling typing-animation placeholder. 4
             prompts rotate every 3s for a 12s total cycle. Pure CSS:
@@ -300,6 +348,127 @@ defmodule EzagentDomainUi.IdeShell do
     </header>
     """
   end
+
+  # --- workspace_dropdown ----------------------------------------------------
+
+  @doc """
+  Top-left `ezagent / <workspace>` button + dropdown menu (Phase 8c
+  PR-L, Allen 2026-05-20).
+
+  Replaces the prior plain-text label in `top_command_bar/1` when the
+  LV opts in by passing a non-empty `workspaces` list. Activity Bar
+  dropped its Workspaces tile (5→4); workspace management is reached
+  from this dropdown's "Manage workspaces..." link instead.
+
+  Dropdown contents:
+  - WORKSPACES caption header
+  - One row per known workspace; the current one (matches
+    `workspace_name`) shows a "current" badge and is not clickable.
+    Other rows navigate to `/workspaces/<name>` (the workspace detail
+    page) — "switching context" mid-session is a future flow.
+  - Divider
+  - "Manage workspaces..." link → `/workspaces`
+
+  Uses the same `Phoenix.LiveView.JS.toggle/1` transition idiom as
+  `avatar_menu/1` and the session_editor settings dropdown — no LV
+  state needed since the menu is purely presentational.
+  """
+  attr(:workspace_name, :string, default: nil)
+  attr(:workspaces, :list, required: true)
+
+  def workspace_dropdown(assigns) do
+    assigns =
+      assigns
+      |> assign_new(:menu_id, fn -> "workspace-menu" end)
+
+    ~H"""
+    <div class="relative">
+      <button
+        type="button"
+        phx-click={
+          JS.toggle(
+            to: "##{@menu_id}",
+            in: {"ease-out duration-150", "opacity-0 -translate-y-1", "opacity-100 translate-y-0"},
+            out: {"ease-in duration-100", "opacity-100 translate-y-0", "opacity-0 -translate-y-1"}
+          )
+        }
+        title="Switch workspace"
+        aria-label="Switch workspace"
+        class="flex items-center gap-2 px-1.5 py-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 transition-colors"
+      >
+        <span class="font-semibold text-xs tracking-tight">ezagent</span>
+        <span :if={@workspace_name} class="text-zinc-400 dark:text-zinc-600 select-none">/</span>
+        <span
+          :if={@workspace_name}
+          class="font-mono text-xs text-zinc-600 dark:text-zinc-400"
+        >
+          {@workspace_name}
+        </span>
+        <.icon name="chevron-down" size="xs" class="text-zinc-400 dark:text-zinc-600" />
+      </button>
+
+      <div
+        id={@menu_id}
+        class="hidden absolute left-0 top-full mt-1 w-64 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md shadow-lg z-40 transition transform"
+      >
+        <div class="px-3 py-2 border-b border-zinc-200 dark:border-zinc-800">
+          <div class="text-[10px] uppercase tracking-wide text-zinc-500">Workspaces</div>
+        </div>
+        <div class="py-1 max-h-64 overflow-y-auto">
+          <%= for ws <- @workspaces do %>
+            <% ws_name = workspace_item_name(ws) %>
+            <% current? = ws_name == @workspace_name %>
+            <%= if current? do %>
+              <div class="px-3 py-1.5 text-xs text-zinc-700 dark:text-zinc-300 flex items-center justify-between gap-2 bg-zinc-50 dark:bg-zinc-950">
+                <span class="font-mono truncate">{ws_name}</span>
+                <span class="text-[10px] uppercase tracking-wide px-1.5 py-0.5 rounded border bg-zinc-900 dark:bg-zinc-100 text-zinc-50 dark:text-zinc-900 border-zinc-900 dark:border-zinc-100 shrink-0">
+                  current
+                </span>
+              </div>
+            <% else %>
+              <a
+                href={"/workspaces/#{ws_name}"}
+                class="block px-3 py-1.5 text-xs text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+              >
+                <span class="font-mono truncate">{ws_name}</span>
+              </a>
+            <% end %>
+          <% end %>
+        </div>
+        <div class="border-t border-zinc-200 dark:border-zinc-800 py-1">
+          <a
+            href="/workspaces"
+            class="block px-3 py-1.5 text-xs text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center gap-2"
+          >
+            <.icon name="folder" size="xs" /> Manage workspaces...
+          </a>
+        </div>
+      </div>
+    </div>
+    """
+  end
+
+  # Extract the workspace display name from whatever shape the LV passed.
+  # Accepts: %{name: "..."} | %{uri: "workspace://name"} |
+  # %{uri: %URI{host: "name"}} | %URI{host: "name"} | "workspace://name" |
+  # "name". Robust to whichever source the LV pulls from (Workspace.Store
+  # row vs WorkspaceRegistry vs hand-built map).
+  defp workspace_item_name(%{name: name}) when is_binary(name) and name != "", do: name
+  defp workspace_item_name(%{uri: %URI{host: host}}) when is_binary(host), do: host
+  defp workspace_item_name(%{uri: uri_str}) when is_binary(uri_str) do
+    case URI.parse(uri_str) do
+      %URI{host: host} when is_binary(host) -> host
+      _ -> uri_str
+    end
+  end
+  defp workspace_item_name(%URI{host: host}) when is_binary(host), do: host
+  defp workspace_item_name(s) when is_binary(s) do
+    case URI.parse(s) do
+      %URI{host: host} when is_binary(host) and host != "" -> host
+      _ -> s
+    end
+  end
+  defp workspace_item_name(_), do: "—"
 
   # --- avatar_menu -----------------------------------------------------------
 

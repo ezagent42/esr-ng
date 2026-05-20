@@ -408,6 +408,7 @@ defmodule EzagentPluginLiveview.AdminLive do
       |> assign_new(:workspace_name, fn ->
         workspace_name_for(assigns.current_session_uri)
       end)
+      |> assign_new(:workspaces, fn -> list_known_workspaces() end)
       |> assign_new(:is_admin?, fn ->
         Ezagent.Identity.admin?(assigns.caller_uri_str)
       end)
@@ -418,6 +419,7 @@ defmodule EzagentPluginLiveview.AdminLive do
       current_path="/sessions"
       status={@status}
       workspace_name={@workspace_name}
+      workspaces={@workspaces}
       is_admin?={@is_admin?}
     >
       <:main_window>
@@ -811,5 +813,17 @@ defmodule EzagentPluginLiveview.AdminLive do
       {:ok, %URI{host: name}} when is_binary(name) and name != "" -> name
       _ -> nil
     end
+  end
+
+  # Phase 8c PR-L (Allen 2026-05-20): list known workspaces for the
+  # top-left dropdown. Source is `Ezagent.Workspace.list_persisted/0`
+  # — the persisted set (what's declared to exist), not the live set.
+  # Same source as WorkspacesLive so the dropdown agrees with the
+  # management page. Returns `[%{name: ..., uri: ...}]` as
+  # IdeShell.top_command_bar/1 expects.
+  defp list_known_workspaces do
+    Ezagent.Workspace.list_persisted()
+    |> Enum.map(fn ws -> %{name: ws.name, uri: ws.uri} end)
+    |> Enum.sort_by(& &1.name)
   end
 end
