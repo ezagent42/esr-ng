@@ -430,7 +430,7 @@ defmodule EzagentPluginLiveview.AdminLive do
     ~H"""
     <IdeShell.ide_shell
       current_entity_uri={@caller_uri_str}
-      current_path="/admin"
+      current_path="/sessions"
       status={@status}
     >
       <:resource_panel>

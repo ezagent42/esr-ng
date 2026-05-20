@@ -1,6 +1,6 @@
 defmodule EzagentPluginLiveview.FeishuBindingsLive do
   @moduledoc """
-  Phase 6 PR 15 — /admin/feishu/bindings.
+  Phase 6 PR 15 — /plugins/feishu/bindings.
 
   Lists all `feishu_user_bindings` rows + a bind form. The unbind
   button on each row deletes via `EzagentPluginFeishu.UserBinding.unbind/1`.
@@ -84,7 +84,7 @@ defmodule EzagentPluginLiveview.FeishuBindingsLive do
     ~H"""
     <IdeShell.ide_shell
       current_entity_uri={@current_entity_uri_str}
-      current_path="/admin/feishu/bindings"
+      current_path="/plugins/feishu/bindings"
       status={%{agents_alive: 0, bridges: 0, debug_events: 0, version: "dev"}}
     >
       <:main_window>
@@ -95,7 +95,7 @@ defmodule EzagentPluginLiveview.FeishuBindingsLive do
           gets the default session-participation caps via BindingPolicy.
           (chat_id ↔ session bindings live in a separate table — manage
           them with `mix ezagent.feishu.chat.bind`.)
-          <a href="/admin" class="text-zinc-600 underline hover:text-zinc-900 ml-1">← /admin</a>
+          <a href="/plugins" class="text-zinc-600 underline hover:text-zinc-900 ml-1">← Plugins</a>
         </:subtitle>
       </.page_header>
 

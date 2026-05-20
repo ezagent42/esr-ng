@@ -303,7 +303,7 @@ defmodule EzagentPluginLiveview.RoutingLive do
     ~H"""
     <IdeShell.ide_shell
       current_entity_uri={@current_entity_uri_str}
-      current_path="/admin/routing"
+      current_path="/routing"
       status={%{agents_alive: 0, bridges: 0, debug_events: 0, version: "dev"}}
     >
       <:resource_panel>

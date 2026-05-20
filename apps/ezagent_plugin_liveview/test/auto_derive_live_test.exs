@@ -25,21 +25,21 @@ defmodule EzagentPluginLiveview.AutoDeriveLiveTest do
     {:ok, conn: conn}
   end
 
-  test "/admin/auto/session mounts + renders title", %{conn: conn} do
-    {:ok, _lv, html} = live(conn, "/admin/auto/session")
+  test "/plugins/auto/session mounts + renders title", %{conn: conn} do
+    {:ok, _lv, html} = live(conn, "/plugins/auto/session")
 
     assert html =~ "Auto-derived: session"
     assert html =~ "live instance(s)"
   end
 
-  test "/admin/auto/user mounts (admin user is live)", %{conn: conn} do
-    {:ok, _lv, html} = live(conn, "/admin/auto/user")
+  test "/plugins/auto/user mounts (admin user is live)", %{conn: conn} do
+    {:ok, _lv, html} = live(conn, "/plugins/auto/user")
 
     assert html =~ "Auto-derived: user"
   end
 
-  test "/admin/auto/<unknown> mounts to empty list", %{conn: conn} do
-    {:ok, _lv, html} = live(conn, "/admin/auto/nonexistent_kind")
+  test "/plugins/auto/<unknown> mounts to empty list", %{conn: conn} do
+    {:ok, _lv, html} = live(conn, "/plugins/auto/nonexistent_kind")
     assert html =~ "No live instances"
   end
 end

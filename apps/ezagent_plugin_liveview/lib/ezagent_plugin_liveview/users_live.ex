@@ -1,6 +1,6 @@
 defmodule EzagentPluginLiveview.UsersLive do
   @moduledoc """
-  /admin/users — list + create + disable Users (Phase 5 PR 2).
+  /identities/users — list + create + disable Users (Phase 5 PR 2).
 
   Admin-only surface (route gate via RequireUser). Backed by `Ezagent.Users`
   (Phase 4-completion PR 4) — separate from User-Kind snapshot per
@@ -125,7 +125,7 @@ defmodule EzagentPluginLiveview.UsersLive do
     ~H"""
     <IdeShell.ide_shell
       current_entity_uri={@current_entity_uri_str}
-      current_path="/admin/users"
+      current_path="/identities/users"
       status={%{agents_alive: 0, bridges: 0, debug_events: 0, version: "dev"}}
     >
       <:main_window>

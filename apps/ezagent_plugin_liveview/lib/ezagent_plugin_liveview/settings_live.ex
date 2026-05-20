@@ -31,7 +31,7 @@ defmodule EzagentPluginLiveview.SettingsLive do
     ~H"""
     <IdeShell.ide_shell
       current_entity_uri={@current_entity_uri_str}
-      current_path="/admin/settings"
+      current_path="/settings"
       status={%{agents_alive: 0, bridges: 0, debug_events: 0, version: "dev"}}
     >
       <:resource_panel>
@@ -136,9 +136,9 @@ defmodule EzagentPluginLiveview.SettingsLive do
       <:subtitle>Manage users, capabilities, API keys, Feishu bindings.</:subtitle>
     </.page_header>
     <div class="grid grid-cols-2 gap-3">
-      <.access_card href="/admin/users" title="Users" desc="List + create users + set passwords" />
-      <.access_card href="/admin/entities" title="Entities" desc="Live registry of every Kind instance" />
-      <.access_card href="/admin/feishu/bindings" title="Feishu bindings" desc="open_id ↔ user URI bindings" />
+      <.access_card href="/identities/users" title="Users" desc="List + create users + set passwords" />
+      <.access_card href="/admin/registry" title="Registry" desc="Live registry of every Kind instance" />
+      <.access_card href="/plugins/feishu/bindings" title="Feishu bindings" desc="open_id ↔ user URI bindings" />
     </div>
     """
   end
