@@ -131,4 +131,18 @@ defmodule EzagentWeb.Router do
       live_dashboard "/dashboard", metrics: EzagentWeb.Telemetry
     end
   end
+
+  # Catch-all browser GET — renders the ezagent-branded 404 page for any
+  # path that didn't match above. Without this, Phoenix's dev `debug_errors`
+  # serves the stacktrace exception page instead, which mis-represents
+  # what a real user would see. Production behavior was already correct
+  # via ErrorHTML; this just unifies dev with prod.
+  #
+  # Allen 2026-05-20: see memory feedback_ui_no_misleading_buttons —
+  # 404s should be rare (every real link points somewhere) AND graceful.
+  scope "/", EzagentWeb do
+    pipe_through :browser
+
+    get "/*path", FallbackController, :not_found
+  end
 end
