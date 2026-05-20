@@ -76,7 +76,12 @@ defmodule EzagentPluginFeishu.BindingPolicy do
   # — this module doesn't know what "default" means, it only ensures
   # the baseline is applied.
   defp ensure_user_default_caps(user_uri, admin_uri) do
-    Ezagent.Entity.User.default_caps()
+    # Phase 9 PR-3 (SPEC v3 §4.5): default caps are workspace-scoped
+    # — derive the bound user's workspace from their URI.
+    workspace_uri = Ezagent.URI.entity_workspace_uri(to_uri(user_uri))
+
+    workspace_uri
+    |> Ezagent.Entity.User.default_caps()
     |> Enum.reduce_while(:ok, fn cap, _acc ->
       case grant_cap(user_uri, admin_uri, cap) do
         :ok -> {:cont, :ok}

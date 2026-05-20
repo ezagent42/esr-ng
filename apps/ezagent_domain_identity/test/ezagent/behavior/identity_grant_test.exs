@@ -1,22 +1,34 @@
 defmodule Ezagent.Behavior.IdentityGrantTest do
   @moduledoc """
   Phase 6 PR 6 — grant_cap / revoke_cap behavior actions.
+
+  Phase 9 PR-3 (SPEC v3 §4): caps carry `workspace_uri`. Tests pass
+  the field explicitly since `@enforce_keys` rejects struct
+  construction without it.
   """
   use EzagentCore.DataCase, async: false
 
   alias Ezagent.Behavior.Identity
   alias Ezagent.Capability
 
-  test "grant_cap adds to slice + returns updated list" do
-    slice = %{caps: MapSet.new()}
+  @workspace_uri URI.new!("workspace://default")
+  @granter URI.parse("entity://user/default/admin")
 
-    new_cap = %Capability{
+  defp echo_cap do
+    %Capability{
       kind: :echo,
       behavior: :any,
       instance: :any,
-      granted_by: URI.parse("entity://user/default/admin"),
+      workspace_uri: @workspace_uri,
+      granted_by: @granter,
       granted_at: DateTime.utc_now()
     }
+  end
+
+  test "grant_cap adds to slice + returns updated list" do
+    slice = %{caps: MapSet.new()}
+
+    new_cap = echo_cap()
 
     {:ok, new_slice, %{caps: caps}} =
       Identity.invoke(:grant_cap, slice, %{cap: new_cap}, %{})
@@ -26,13 +38,7 @@ defmodule Ezagent.Behavior.IdentityGrantTest do
   end
 
   test "revoke_cap removes from slice" do
-    cap = %Capability{
-      kind: :echo,
-      behavior: :any,
-      instance: :any,
-      granted_by: URI.parse("entity://user/default/admin"),
-      granted_at: DateTime.utc_now()
-    }
+    cap = echo_cap()
 
     slice = %{caps: MapSet.new([cap])}
 
@@ -44,13 +50,7 @@ defmodule Ezagent.Behavior.IdentityGrantTest do
   end
 
   test "grant_cap is idempotent (MapSet semantics)" do
-    cap = %Capability{
-      kind: :echo,
-      behavior: :any,
-      instance: :any,
-      granted_by: URI.parse("entity://user/default/admin"),
-      granted_at: DateTime.utc_now()
-    }
+    cap = echo_cap()
 
     slice = %{caps: MapSet.new([cap])}
 

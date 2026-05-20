@@ -52,12 +52,20 @@ defmodule Ezagent.Identity do
   # "self-grant" needed to dispatch list_caps_for one's own URI without
   # already having external caps. Since admin's caps include :any/:any/:any,
   # this matters only for non-admin first-mount.
+  #
+  # Phase 9 PR-3 (SPEC v3 §4): the self-cap is scoped to the user's
+  # own workspace — they're reading their own caps, which lives in
+  # their workspace. `entity_workspace_uri/1` derives it from the
+  # 3-segment entity URI shape (`entity://user/<workspace>/<name>`).
   defp bootstrap_self_cap(user_uri) do
+    workspace_uri = Ezagent.URI.entity_workspace_uri(user_uri)
+
     MapSet.new([
       %Ezagent.Capability{
         kind: :user,
         behavior: Ezagent.Behavior.Identity,
         instance: user_uri,
+        workspace_uri: workspace_uri,
         granted_by: URI.parse("system://bootstrap"),
         granted_at: ~U[2026-01-01 00:00:00Z]
       }
@@ -115,4 +123,77 @@ defmodule Ezagent.Identity do
 
   defp parse_uri(%URI{} = u), do: u
   defp parse_uri(s) when is_binary(s), do: URI.parse(s)
+
+  @doc """
+  Grant a capability to `entity_uri`. Dispatches `identity.grant_cap`
+  on the target Entity Kind using `granter_uri`'s admin caps.
+
+  Accepts either a fully-constructed `Ezagent.Capability` struct OR a
+  plain params map. When a map is passed, missing keys are
+  defaulted:
+
+  - `workspace_uri` — defaults to the grantee's workspace via
+    `Ezagent.URI.entity_workspace_uri/1` when the grantee URI is an
+    `entity://` URI. Explicit `:any` requests a cross-workspace
+    grant — Phase 9 PR-4 will add the `cross-workspace:dispatch`
+    cap check at this point; PR-3 just plumbs the field.
+
+  Returns `:ok` or `{:error, reason}`.
+
+  Phase 9 PR-3 (SPEC v3 §4.3) — workspace dimension threading. The
+  facade exists so callers don't have to know the dispatch URI shape
+  (`?action=identity.grant_cap`) + admin-cap context.
+  """
+  @spec grant_cap(URI.t() | String.t(), Ezagent.Capability.t() | map(), URI.t() | String.t()) ::
+          :ok | {:error, term()}
+  def grant_cap(entity_uri, %Ezagent.Capability{} = cap, granter_uri) do
+    target_uri = parse_uri(entity_uri)
+    granter = parse_uri(granter_uri)
+    target = URI.new!("#{URI.to_string(target_uri)}?action=identity.grant_cap")
+
+    inv = %Ezagent.Invocation{
+      target: target,
+      mode: :call,
+      args: %{cap: cap},
+      ctx: %{
+        caller: granter,
+        # Granter's admin caps — Phase 9 PR-4 will replace with
+        # caller's actual caps once cross-workspace grant policy
+        # lives here.
+        caps: Ezagent.Entity.User.admin_caps(),
+        reply: :sync
+      }
+    }
+
+    case Ezagent.Invocation.dispatch(inv) do
+      {:ok, _} -> :ok
+      :ok -> :ok
+      err -> err
+    end
+  end
+
+  def grant_cap(entity_uri, %{workspace_uri: _} = cap_params, granter_uri) do
+    cap = build_cap_from_params(cap_params, granter_uri)
+    grant_cap(entity_uri, cap, granter_uri)
+  end
+
+  def grant_cap(entity_uri, cap_params, granter_uri) when is_map(cap_params) do
+    # Default workspace_uri to grantee's workspace (SPEC v3 §4.3 —
+    # intra-workspace grant is the common path). Caller asks for
+    # cross-workspace explicitly by passing `workspace_uri: :any`.
+    parsed = parse_uri(entity_uri)
+    default_ws = Ezagent.URI.entity_workspace_uri(parsed)
+    grant_cap(entity_uri, Map.put(cap_params, :workspace_uri, default_ws), granter_uri)
+  end
+
+  defp build_cap_from_params(%{} = p, granter_uri) do
+    %Ezagent.Capability{
+      kind: Map.get(p, :kind, :any),
+      behavior: Map.get(p, :behavior, :any),
+      instance: Map.get(p, :instance, :any),
+      workspace_uri: Map.fetch!(p, :workspace_uri),
+      granted_by: parse_uri(granter_uri),
+      granted_at: Map.get(p, :granted_at, DateTime.utc_now())
+    }
+  end
 end

@@ -2,19 +2,31 @@ defmodule Ezagent.Capability do
   @moduledoc """
   Capability — a Push-based authorization grant carried in `ctx.caps`.
 
-  A capability matches an `Ezagent.Invocation` when all four fields match
-  (with `:any` acting as wildcard for `kind` / `behavior` / `instance`).
+  A capability matches an `Ezagent.Invocation` when all FOUR fields
+  match (with `:any` acting as wildcard for `kind` / `behavior` /
+  `instance` / `workspace_uri`):
+
+  - `kind` — Kind type atom (e.g. `:echo`); `:any` matches all
+  - `behavior` — Behavior module ref (e.g. `Ezagent.Behavior.Echo`);
+    `:any` matches all
+  - `instance` — target URI, scope tuple, or `:any`
+  - `workspace_uri` — Phase 9 PR-3 (SPEC v3 §4): the
+    `workspace://<workspace>` URI the cap is scoped to. `:any` is
+    the structural cross-workspace marker reserved for the
+    bootstrap admin cap + explicit cross-workspace grants. Required
+    on construction — `@enforce_keys` rejects pre-PR-3 4-field caps
+    at compile time so no silent drops can slip past.
 
   `revoke/2` is admin-protected per Decision #81: `entity://user/default/admin`'s
   all-caps capability (`%Ezagent.Capability{kind: :any, behavior: :any,
-  instance: :any, ...}` granted_by `system://bootstrap/default`) is a
-  structural invariant and cannot be removed. The check lives here at
-  the data-layer boundary so any caller path is forced through one
-  chokepoint.
+  instance: :any, workspace_uri: :any, ...}` granted_by
+  `system://bootstrap/default`) is a structural invariant and cannot
+  be removed. The check lives here at the data-layer boundary so any
+  caller path is forced through one chokepoint.
   """
 
-  @enforce_keys [:kind, :behavior, :instance, :granted_by, :granted_at]
-  defstruct [:kind, :behavior, :instance, :granted_by, :granted_at]
+  @enforce_keys [:kind, :behavior, :instance, :workspace_uri, :granted_by, :granted_at]
+  defstruct [:kind, :behavior, :instance, :workspace_uri, :granted_by, :granted_at]
 
   @type scope_tuple ::
           {:within_session, URI.t()}
@@ -24,6 +36,7 @@ defmodule Ezagent.Capability do
           kind: atom() | :any,
           behavior: module() | :any,
           instance: URI.t() | :any | scope_tuple(),
+          workspace_uri: URI.t() | :any,
           granted_by: URI.t(),
           granted_at: DateTime.t()
         }
@@ -32,8 +45,10 @@ defmodule Ezagent.Capability do
   Does this capability authorize the given invocation?
 
   Matches kind (Kind type atom, e.g. `:echo`), behavior (module, e.g.
-  `Ezagent.Behavior.Echo`), and instance (the target URI). `:any` matches
-  everything in that position.
+  `Ezagent.Behavior.Echo`), instance (the target URI), and
+  `workspace_uri` (the workspace scope the action targets, derived
+  via `cap_for_action/3`). `:any` matches everything in that
+  position.
 
   ## Scope-bounded instance shapes (Phase 7 PR 42 / D7-3)
 
@@ -59,22 +74,27 @@ defmodule Ezagent.Capability do
   more specific, not more permissive. Any cap with a scope tuple
   is bounded by the scope; `:any` remains the only true wildcard.
 
-  ## Why the placeholder for `{:spawned_by, _}`
+  ## Workspace dimension (Phase 9 PR-3 / SPEC v3 §4)
 
-  Splitting the contract change (this PR) from the lineage
-  registry (PR 40) keeps each PR small and reviewable. The
-  contract is observable + tested NOW; the registry implementation
-  + its tests land in PR 40 without re-touching `matches?/2`.
+  Adds workspace scoping as a fourth match dimension. Concrete
+  `workspace://X` cap matches only `workspace://X` needed; `:any`
+  cap is cross-workspace (reserved for admin + explicit
+  cross-workspace grants). Without this dimension, a cap granted in
+  workspace A would silently authorize action on workspace B's
+  entities sharing the same name (e.g. both workspaces have a
+  `demo` session).
   """
   @spec matches?(t(), %{
           required(:kind) => atom(),
           required(:behavior) => module(),
-          required(:instance) => URI.t()
+          required(:instance) => URI.t(),
+          required(:workspace_uri) => URI.t() | :any
         }) :: boolean()
-  def matches?(%__MODULE__{} = cap, %{kind: k, behavior: b, instance: i}) do
+  def matches?(%__MODULE__{} = cap, %{kind: k, behavior: b, instance: i, workspace_uri: w}) do
     field_match?(cap.kind, k) and
       field_match?(cap.behavior, b) and
-      instance_match?(cap.instance, i)
+      instance_match?(cap.instance, i) and
+      workspace_match?(cap.workspace_uri, w)
   end
 
   # Kind + behavior fields use plain `:any` or exact equality.
@@ -112,12 +132,23 @@ defmodule Ezagent.Capability do
   defp instance_match?(same, same), do: true
   defp instance_match?(_, _), do: false
 
+  # Workspace field — concrete URI must equal-string-match;
+  # `:any` on either side is the cross-workspace marker.
+  defp workspace_match?(:any, _), do: true
+  defp workspace_match?(_, :any), do: true
+
+  defp workspace_match?(%URI{} = held, %URI{} = needed),
+    do: URI.to_string(held) == URI.to_string(needed)
+
+  defp workspace_match?(_, _), do: false
+
   @doc """
   Remove a capability from a MapSet of caps.
 
   Refuses to remove the admin all-caps invariant — `entity://user/default/admin`'s
-  triple-`:any` capability granted_by `system://bootstrap/default` is
-  structural per Decision #81 and would break the bootstrap principal.
+  quadruple-`:any` capability granted_by `system://bootstrap/default`
+  is structural per Decision #81 + SPEC v3 §4.4 and would break the
+  bootstrap principal.
 
   Returns `{:ok, new_caps}` on success, `{:error, :cannot_revoke_admin}`
   if the input cap is the admin all-caps invariant.
@@ -132,10 +163,13 @@ defmodule Ezagent.Capability do
   end
 
   @doc false
+  # SPEC v3 §4.4 — admin's structural invariant gains `workspace_uri:
+  # :any` so the cap is cross-workspace by structural design.
   def admin_invariant?(%__MODULE__{
         kind: :any,
         behavior: :any,
         instance: :any,
+        workspace_uri: :any,
         granted_by: %URI{scheme: "system", host: "bootstrap"}
       }),
       do: true
@@ -147,7 +181,8 @@ defmodule Ezagent.Capability do
   storage per Phase 4-completion Spec 05 Part A).
 
   Atoms become strings; modules become strings; URIs become strings.
-  Inverse of `from_map/1`.
+  `workspace_uri` is serialized via `uri_or_any_to_string/1` (SPEC v3
+  §4 — `:any` round-trips as `"any"`). Inverse of `from_map/1`.
   """
   @spec to_map(t()) :: map()
   def to_map(%__MODULE__{} = cap) do
@@ -155,6 +190,7 @@ defmodule Ezagent.Capability do
       "kind" => atom_or_module_to_string(cap.kind),
       "behavior" => atom_or_module_to_string(cap.behavior),
       "instance" => uri_or_any_to_string(cap.instance),
+      "workspace_uri" => uri_or_any_to_string(cap.workspace_uri),
       "granted_by" => uri_or_any_to_string(cap.granted_by),
       "granted_at" => DateTime.to_iso8601(cap.granted_at)
     }
@@ -162,6 +198,14 @@ defmodule Ezagent.Capability do
 
   @doc """
   Deserialize a Capability from a JSON-decoded map.
+
+  SPEC v3 §4 — pre-PR-3 caps_json rows lack the `workspace_uri`
+  key; per the "no back-compat shim" rule (memory
+  `feedback_let_it_crash_no_workarounds` + SPEC v3 §8 wipe-and-
+  rebuild), the DB is reset on Phase 9 migration. To preserve
+  round-trip soundness on test fixtures however, a missing key
+  defaults to `:any` (the cap won't be authored without the field
+  in any post-PR-3 code path).
   """
   @spec from_map(map()) :: t()
   def from_map(%{} = m) do
@@ -169,6 +213,7 @@ defmodule Ezagent.Capability do
       kind: string_to_atom_or_module(Map.get(m, "kind")),
       behavior: string_to_atom_or_module(Map.get(m, "behavior")),
       instance: string_to_uri_or_any(Map.get(m, "instance")),
+      workspace_uri: string_to_uri_or_any(Map.get(m, "workspace_uri", "any")),
       granted_by: string_to_uri_or_any(Map.get(m, "granted_by")),
       granted_at: parse_datetime(Map.get(m, "granted_at"))
     }
@@ -219,13 +264,25 @@ defmodule Ezagent.Capability do
   `BehaviorRegistry.lookup(kind_module, action)` — same lookup
   `Kind.Runtime` does for invoke routing.
 
-  Returns the 3-field map `Capability.matches?/2` expects:
-  `%{kind: atom, behavior: module, instance: %URI{}}`.
+  ## Workspace derivation (Phase 9 PR-3 / SPEC v3 §4.2)
+
+  `workspace_uri` is derived from the target URI:
+
+  - `entity://<type>/<workspace>/<name>` — `Ezagent.URI.entity_workspace_uri/1`
+  - `session://<template>/<name>` — `Ezagent.WorkspaceRegistry.lookup/1`
+    (raises if unbound — invariant 4)
+  - `workspace://<name>` — the URI itself IS the workspace
+  - `system://`, `template://`, `resource://` — `:any`
+    (cross-cutting schemes; workspace boundary doesn't apply)
+
+  Returns the 4-field map `Capability.matches?/2` expects:
+  `%{kind: atom, behavior: module, instance: %URI{}, workspace_uri: %URI{} | :any}`.
   """
   @spec cap_for_action(module(), atom(), URI.t()) :: %{
           kind: atom(),
           behavior: module(),
-          instance: URI.t()
+          instance: URI.t(),
+          workspace_uri: URI.t() | :any
         }
   def cap_for_action(kind_module, action, %URI{} = target_uri)
       when is_atom(kind_module) and is_atom(action) do
@@ -238,7 +295,45 @@ defmodule Ezagent.Capability do
     %{
       kind: kind_module.type_name(),
       behavior: behavior,
-      instance: Ezagent.URI.instance(target_uri)
+      instance: Ezagent.URI.instance(target_uri),
+      workspace_uri: workspace_of(target_uri)
     }
   end
+
+  # SPEC v3 §4.2 / §5.3 — derive the workspace scope of a target URI.
+  #
+  # Targets carry a `?action=` query — strip it before workspace
+  # derivation so the lookup key matches the canonical identity URI
+  # (`Ezagent.URI.instance/1` does the same on the instance dimension).
+  defp workspace_of(%URI{scheme: "entity"} = uri) do
+    Ezagent.URI.entity_workspace_uri(%URI{uri | query: nil, fragment: nil})
+  end
+
+  defp workspace_of(%URI{scheme: "session"} = uri) do
+    bare = %URI{uri | query: nil, fragment: nil}
+
+    case Ezagent.WorkspaceRegistry.lookup(bare) do
+      {:ok, ws} ->
+        ws
+
+      :error ->
+        raise "session #{URI.to_string(bare)} has no workspace binding " <>
+                "(invariant 4 violated — Template Class must call " <>
+                "Ezagent.WorkspaceRegistry.bind/2 after SpawnRegistry.spawn)"
+    end
+  end
+
+  defp workspace_of(%URI{scheme: "workspace"} = uri), do: %URI{uri | query: nil, fragment: nil}
+  defp workspace_of(%URI{scheme: "system"}), do: :any
+  defp workspace_of(%URI{scheme: "template"}), do: :any
+  defp workspace_of(%URI{scheme: "resource"}), do: :any
+
+  # Catch-all for test-only schemes (e.g. `probecli://`, `test://`)
+  # and any future scheme not yet wired through workspace derivation.
+  # Defaults to `:any` (cross-workspace) so unknown schemes don't
+  # silently fail with FunctionClauseError — production paths are
+  # constrained by `Ezagent.URI.SchemeRegistry` ETS allowlist per
+  # SPEC v2 §5.8, so this only fires for test fixtures using
+  # unregistered schemes.
+  defp workspace_of(%URI{}), do: :any
 end

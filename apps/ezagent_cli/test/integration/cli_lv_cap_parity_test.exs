@@ -71,6 +71,8 @@ defmodule EzagentCli.Integration.CliLvCapParityTest do
       kind: :workspace,
       behavior: :any,
       instance: :any,
+      # Phase 9 PR-3 (SPEC v3 §4): explicit workspace scope.
+      workspace_uri: URI.new!("workspace://default"),
       granted_by: URI.parse("entity://user/default/admin"),
       granted_at: ~U[2026-05-18 00:00:00Z]
     }

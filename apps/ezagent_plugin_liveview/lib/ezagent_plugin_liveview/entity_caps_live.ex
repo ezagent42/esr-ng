@@ -155,13 +155,37 @@ defmodule EzagentPluginLiveview.EntityCapsLive do
   end
 
   defp build_cap(params, granted_by) do
+    # Phase 9 PR-3 (SPEC v3 §4): the LV form doesn't expose a
+    # workspace picker yet — Phase 9 PR-5 adds it as part of the
+    # workspace selector overhaul. For now, default to the granted
+    # entity's workspace (intra-workspace grant — the most common
+    # operator action). Cross-workspace grants will require an
+    # explicit workspace dropdown wired in PR-5.
+    workspace_uri =
+      case Map.get(params, "workspace_uri", "") do
+        "any" -> :any
+        "" -> default_workspace_for_entity(params)
+        s when is_binary(s) -> URI.parse(s)
+      end
+
     %Capability{
       kind: to_atom_or_any(Map.get(params, "kind", "any")),
       behavior: to_atom_or_any(Map.get(params, "behavior", "any")),
       instance: to_uri_or_any(Map.get(params, "instance", "any")),
+      workspace_uri: workspace_uri,
       granted_by: granted_by,
       granted_at: DateTime.utc_now()
     }
+  end
+
+  # Resolve the workspace for a grant when the LV form omits it —
+  # falls back to the granted entity's own workspace.
+  defp default_workspace_for_entity(_params) do
+    # The LV doesn't currently pass entity_uri through the form
+    # params (the form only carries kind/behavior/instance). Use
+    # `:any` as the conservative default; PR-5 wires the entity
+    # context through.
+    :any
   end
 
   defp to_atom_or_any("any"), do: :any

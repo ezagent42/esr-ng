@@ -175,11 +175,28 @@ defmodule Ezagent.Entity.Session do
   # Both granted by the human owner who triggered Generator. Decision
   # #137 marker: this is the v1 scope-bounded-delegation baseline.
   defp grant_scoped_caps(orchestrator_uri, session_uri, owner_uri) do
+    # Phase 9 PR-3 (SPEC v3 §4): scope the orchestrator's bounded
+    # caps to the session's workspace. The session must already be
+    # bound (invariant 4 — Workspace.Loader.invoke_template /
+    # SessionTemplate spawn paths call WorkspaceRegistry.bind);
+    # without a binding we let it crash rather than silently grant
+    # a cross-workspace cap.
+    session_workspace =
+      case Ezagent.WorkspaceRegistry.lookup(session_uri) do
+        {:ok, ws} ->
+          ws
+
+        :error ->
+          raise "session #{URI.to_string(session_uri)} has no workspace binding " <>
+                  "— cannot derive workspace_uri for orchestrator scope caps"
+      end
+
     caps = [
       %Ezagent.Capability{
         kind: :session,
         behavior: :any,
         instance: {:within_session, session_uri},
+        workspace_uri: session_workspace,
         granted_by: owner_uri,
         granted_at: DateTime.utc_now()
       },
@@ -187,6 +204,7 @@ defmodule Ezagent.Entity.Session do
         kind: :agent,
         behavior: :any,
         instance: {:spawned_by, orchestrator_uri},
+        workspace_uri: session_workspace,
         granted_by: owner_uri,
         granted_at: DateTime.utc_now()
       }

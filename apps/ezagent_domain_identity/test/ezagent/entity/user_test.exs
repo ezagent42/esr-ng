@@ -20,6 +20,9 @@ defmodule Ezagent.Entity.UserTest do
     assert cap.kind == :any
     assert cap.behavior == :any
     assert cap.instance == :any
+    # Phase 9 PR-3 (SPEC v3 §4.4): admin's structural cap gains
+    # `workspace_uri: :any` so it is cross-workspace by design.
+    assert cap.workspace_uri == :any
     # PR #141 SPEC v2 §5.1: system://bootstrap → system://bootstrap/default
     assert cap.granted_by.scheme == "system"
     assert cap.granted_by.host == "bootstrap"
@@ -32,7 +35,8 @@ defmodule Ezagent.Entity.UserTest do
     assert Capability.matches?(cap, %{
              kind: :random,
              behavior: SomeMod,
-             instance: URI.parse("entity://agent/default/test_anything")
+             instance: URI.parse("entity://agent/default/test_anything"),
+             workspace_uri: URI.new!("workspace://anything")
            })
   end
 
@@ -48,9 +52,11 @@ defmodule Ezagent.Entity.UserTest do
     assert User.persistence() == {:snapshot, :on_change}
   end
 
-  describe "default_caps/0 (PR 27)" do
+  describe "default_caps/1 (PR 27 + Phase 9 PR-3)" do
+    @workspace URI.new!("workspace://default")
+
     test "includes a kind=:session cap so every user can attempt session behaviors" do
-      caps = User.default_caps()
+      caps = User.default_caps(@workspace)
 
       assert is_list(caps)
 
@@ -61,17 +67,27 @@ defmodule Ezagent.Entity.UserTest do
     end
 
     test "default caps are granted_by system://bootstrap (structural, not human-issued)" do
-      for cap <- User.default_caps() do
-        assert cap.granted_by.scheme == "system"
-        assert cap.granted_by.host == "bootstrap"
+      for c <- User.default_caps(@workspace) do
+        assert c.granted_by.scheme == "system"
+        assert c.granted_by.host == "bootstrap"
       end
     end
 
     test "default_caps does NOT include the admin wildcard" do
-      refute Enum.any?(User.default_caps(), fn c ->
+      refute Enum.any?(User.default_caps(@workspace), fn c ->
                c.kind == :any and c.behavior == :any and c.instance == :any
              end),
              "default_caps must not grant the admin escape hatch to ordinary users"
+    end
+
+    test "default caps carry the workspace URI passed in (Phase 9 PR-3 §4.5)" do
+      ws = URI.new!("workspace://team-alpha")
+
+      for c <- User.default_caps(ws) do
+        assert URI.to_string(c.workspace_uri) == "workspace://team-alpha",
+               "default_caps/1 must propagate workspace_uri so per-user caps " <>
+                 "are workspace-scoped (cross-workspace requires explicit cap)"
+      end
     end
   end
 end
