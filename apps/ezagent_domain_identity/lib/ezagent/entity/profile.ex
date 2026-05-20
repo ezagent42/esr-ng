@@ -1,0 +1,73 @@
+defmodule Ezagent.Entity.Profile do
+  @moduledoc """
+  Username & Auth M1 — entity-agnostic display profile store.
+
+  One row per Entity URI. Holds the *mutable* attributes (`display_name`,
+  `email`) that hang off the *immutable* URI primary key. `email` is
+  user-only (NULL for agents) and the resolution key for magic-link
+  login (M3).
+
+  Schema + facade in one module, matching the `Ezagent.Users` /
+  `Ezagent.Entity.Token` pattern. Display-side reads go through
+  `Ezagent.EntityPresenter`; this module owns writes + lookups.
+  """
+
+  use Ecto.Schema
+  import Ecto.Changeset
+  import Ecto.Query
+  alias EzagentCore.Repo
+
+  @primary_key {:entity_uri, :string, autogenerate: false}
+  schema "entity_profiles" do
+    field(:display_name, :string)
+    field(:email, :string)
+    timestamps(type: :utc_datetime_usec)
+  end
+
+  @type t :: %__MODULE__{}
+
+  @doc "Insert-or-update a profile keyed by `entity_uri`."
+  @spec upsert(map()) :: {:ok, t()} | {:error, Ecto.Changeset.t()}
+  def upsert(attrs) when is_map(attrs) do
+    attrs = normalize(attrs)
+    existing = Repo.get(__MODULE__, attrs.entity_uri) || %__MODULE__{}
+
+    existing
+    |> cast(attrs, [:entity_uri, :display_name, :email])
+    |> validate_required([:entity_uri, :display_name])
+    |> unique_constraint(:email, name: :entity_profiles_email_index)
+    |> Repo.insert_or_update()
+  end
+
+  @doc "Fetch a profile by entity URI. Returns `nil` if absent."
+  @spec get(URI.t() | String.t()) :: t() | nil
+  def get(uri), do: Repo.get(__MODULE__, to_str(uri))
+
+  @doc "Resolve an email (case-insensitive) to its profile. `nil` if none."
+  @spec by_email(String.t()) :: t() | nil
+  def by_email(email) when is_binary(email) do
+    down = String.downcase(String.trim(email))
+    Repo.one(from(p in __MODULE__, where: fragment("lower(?)", p.email) == ^down))
+  end
+
+  def by_email(_), do: nil
+
+  # entity_uri stored as string; email lower-cased + trimmed so the
+  # uniqueness invariant means what callers expect.
+  defp normalize(attrs) do
+    attrs
+    |> Map.new(fn {k, v} -> {to_atom(k), v} end)
+    |> Map.update(:entity_uri, nil, &to_str/1)
+    |> then(fn m ->
+      case Map.get(m, :email) do
+        e when is_binary(e) and e != "" -> Map.put(m, :email, String.downcase(String.trim(e)))
+        _ -> Map.put(m, :email, nil)
+      end
+    end)
+  end
+
+  defp to_atom(a) when is_atom(a), do: a
+  defp to_atom(s) when is_binary(s), do: String.to_existing_atom(s)
+  defp to_str(%URI{} = u), do: URI.to_string(u)
+  defp to_str(s) when is_binary(s), do: s
+end
