@@ -18,6 +18,7 @@ defmodule EzagentWeb.SessionController do
   import Plug.Conn
 
   alias Ezagent.Entity
+  alias EzagentWeb.SessionPrincipal
 
   @login_html """
   <!DOCTYPE html>
@@ -291,18 +292,24 @@ defmodule EzagentWeb.SessionController do
   # (no separate page-bounce — that was the bug Allen reported
   # 2026-05-20).
   def credentials_create(conn, %{"entity_uri" => uri_str, "secret" => secret}) do
-    canonical = normalize_principal(uri_str)
+    case SessionPrincipal.canonicalize(uri_str) do
+      canonical ->
+        case authenticate(canonical, secret) do
+          :ok ->
+            conn
+            |> SessionPrincipal.put(canonical)
+            |> redirect(to: "/sessions")
 
-    case authenticate(canonical, secret) do
-      :ok ->
-        conn
-        |> configure_session(renew: true)
-        |> put_session(:current_entity_uri, canonical)
-        |> redirect(to: "/sessions")
-
-      :error ->
-        render_login_page(conn, cred_error: "Invalid URI or credentials.")
+          :error ->
+            render_login_page(conn, cred_error: "Invalid URI or credentials.")
+        end
     end
+  rescue
+    # User typed something that isn't a valid handle / URI at all
+    # (e.g. "foo@bar.com" or whitespace) — same UX as bad credentials,
+    # no enumeration leak.
+    ArgumentError ->
+      render_login_page(conn, cred_error: "Invalid URI or credentials.")
   end
 
   def credentials_create(conn, _params) do
@@ -374,45 +381,13 @@ defmodule EzagentWeb.SessionController do
     end
   end
 
+  # Caller guarantees `uri_str` is already canonical
+  # (`entity://user/...` or `entity://agent/...`) — `SessionPrincipal`
+  # validated it before we got here.
   defp authenticate(uri_str, secret) when is_binary(uri_str) and is_binary(secret) do
-    case URI.parse(uri_str) do
-      %URI{scheme: "entity"} = uri ->
-        case Entity.authenticate(uri, secret) do
-          {:ok, _} -> :ok
-          {:error, _} -> :error
-        end
-
-      _ ->
-        :error
+    case Entity.authenticate(URI.parse(uri_str), secret) do
+      {:ok, _} -> :ok
+      {:error, _} -> :error
     end
   end
-
-  # Phase 8c follow-up (Allen 2026-05-20) — accept bare handles at the
-  # credentials login: "admin" → "entity://user/admin", "allen" →
-  # "entity://user/allen". Full `entity://...` URIs pass through
-  # unchanged so existing flows / scripts keep working.
-  #
-  # The canonical form is what gets stored in the session — RequireEntity
-  # parses it on every request and rejects non-entity-URIs. Storing raw
-  # "admin" caused all subsequent requests to bounce to /login (Allen's
-  # 2026-05-20 report).
-  #
-  # Display name is intentionally NOT accepted as a login key — it's
-  # not unique (two entities can share the same display name).
-  defp normalize_principal(input) when is_binary(input) do
-    trimmed = String.trim(input)
-
-    cond do
-      String.starts_with?(trimmed, "entity://") ->
-        trimmed
-
-      String.match?(trimmed, ~r/^[a-zA-Z0-9_-]+$/) ->
-        "entity://user/" <> String.downcase(trimmed)
-
-      true ->
-        trimmed
-    end
-  end
-
-  defp normalize_principal(other), do: other
 end

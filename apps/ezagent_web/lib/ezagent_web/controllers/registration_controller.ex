@@ -105,10 +105,9 @@ defmodule EzagentWeb.RegistrationController do
     :ok = Ezagent.Entity.spawn_principal(uri)
 
     conn
-    |> configure_session(renew: true)
     |> delete_session(:pending_registration_email)
-    |> put_session(:current_entity_uri, URI.to_string(uri))
-    |> redirect(to: "/admin")
+    |> EzagentWeb.SessionPrincipal.put(URI.to_string(uri))
+    |> redirect(to: "/sessions")
   end
 
   defp render_form(conn, email, handle, display, error) do

@@ -117,6 +117,39 @@ defmodule EzagentWeb.SessionControllerTest do
       assert redirected_to(conn) == "/sessions"
       assert Plug.Conn.get_session(conn, :current_entity_uri) == uri
     end
+
+    # Layer 3 of the 2026-05-20 defense-in-depth: ROUND-TRIP. This is
+    # the test most directly mirroring Allen's reported experience:
+    # bare-handle login succeeded but the next request bounced to
+    # /login. None of the controller-only happy-path tests caught it
+    # because they stop at the redirect. This test continues:
+    # bare-handle POST -> take resulting session -> simulate next
+    # request -> assert RequireEntity passes through.
+    test "round-trip: bare-handle login → next request passes RequireEntity (regression)" do
+      handle = "round#{System.unique_integer([:positive])}"
+      uri = "entity://user/" <> handle
+      {:ok, _} = Ezagent.Users.create(uri, "pw", [])
+
+      login_conn =
+        build_conn()
+        |> Plug.Test.init_test_session(%{})
+        |> post("/login/credentials", %{"entity_uri" => handle, "secret" => "pw"})
+
+      # Cross-handler simulation: copy the principal slot the login
+      # handler set into a brand-new conn, then drive it through the
+      # downstream RequireEntity plug — the exact pipeline a real
+      # follow-up request hits.
+      principal = Plug.Conn.get_session(login_conn, :current_entity_uri)
+
+      next_conn =
+        Phoenix.ConnTest.build_conn(:get, "/sessions")
+        |> Plug.Test.init_test_session(%{"current_entity_uri" => principal})
+        |> EzagentWeb.Plugs.RequireEntity.call([])
+
+      refute next_conn.halted, "RequireEntity should pass through; saw bounce — login is broken"
+      assert next_conn.assigns.current_entity_uri.scheme == "entity"
+      assert next_conn.assigns.current_entity_uri.host == "user"
+    end
   end
 
   describe "POST /login (email magic link)" do
