@@ -98,6 +98,17 @@ defmodule EzagentDomainChat do
   end
 
   defp join_creator(session_uri, creator_uri) do
+    # PR-M (Allen 2026-05-20) — `chat.join` requires the member's Kind
+    # alive in KindRegistry (see Behavior.Chat.invoke(:join) — returns
+    # `{:error, {:member_not_registered, _}}` if absent). In production
+    # the login path already calls `Ezagent.Entity.ensure_spawned/1`
+    # before the wizard reaches create_session. For mix tasks /
+    # boot-time test seeds, the test-env admin Kind seed in
+    # `EzagentDomainIdentity.Application` covers admin. Demand-spawn
+    # any non-admin caller here as belt-and-suspenders — idempotent
+    # ({:ok, pid} for already-alive).
+    _ = Ezagent.SpawnRegistry.spawn(creator_uri)
+
     target = URI.new!("#{URI.to_string(session_uri)}?action=chat.join")
 
     _ =

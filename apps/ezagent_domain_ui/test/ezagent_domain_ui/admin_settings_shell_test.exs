@@ -90,15 +90,17 @@ defmodule EzagentDomainUi.AdminSettingsShellTest do
         """)
 
       # AdminSettingsShell is structurally NOT an IdeShell — no
-      # 5-Activity icon strip, no bottom status bar.
+      # Activity icon strip, no bottom status bar.
       refute html =~ ~s(id="ide-shell")
       refute html =~ "agents"
       refute html =~ "bridges"
       refute html =~ ~s(aria-label="Sessions")
-      refute html =~ ~s(aria-label="Workspaces")
+      # PR-M (Allen 2026-05-20): Workspaces IS a sidebar item now; the
+      # negative refute against "Workspaces" Activity Bar aria-label
+      # stays narrow — sidebar links don't use aria-label.
     end
 
-    test "sidebar lists all 4 sub-sections" do
+    test "sidebar lists all 5 sub-sections (PR-M added Workspaces)" do
       assigns = %{current_entity_uri: "entity://user/admin", current_path: "/admin"}
 
       html =
@@ -112,11 +114,12 @@ defmodule EzagentDomainUi.AdminSettingsShellTest do
         """)
 
       assert html =~ "Overview"
+      assert html =~ "Workspaces"
       assert html =~ "Logs &amp; Audit" or html =~ "Logs & Audit"
       assert html =~ "Registry"
       assert html =~ "Snapshots"
-      # Each entry links to its /admin/* path.
       assert html =~ ~s(href="/admin")
+      assert html =~ ~s(href="/workspaces")
       assert html =~ ~s(href="/admin/logs")
       assert html =~ ~s(href="/admin/registry")
       assert html =~ ~s(href="/admin/snapshots")
@@ -178,6 +181,11 @@ defmodule EzagentDomainUi.AdminSettingsShellTest do
       assert AdminSettingsShell.section_for_path("/admin/snapshots") == :snapshots
     end
 
+    test "/workspaces → :workspaces (PR-M)" do
+      assert AdminSettingsShell.section_for_path("/workspaces") == :workspaces
+      assert AdminSettingsShell.section_for_path("/workspaces/demo") == :workspaces
+    end
+
     test "unknown path → :overview (fallback)" do
       assert AdminSettingsShell.section_for_path("/sessions") == :overview
       assert AdminSettingsShell.section_for_path("/anything") == :overview
@@ -189,11 +197,11 @@ defmodule EzagentDomainUi.AdminSettingsShellTest do
   end
 
   describe "sections/0" do
-    test "returns 4 sub-sections in display order" do
+    test "returns 5 sub-sections in display order (PR-M added Workspaces)" do
       items = AdminSettingsShell.sections()
-      assert length(items) == 4
+      assert length(items) == 5
       keys = Enum.map(items, & &1.key)
-      assert keys == [:overview, :logs, :registry, :snapshots]
+      assert keys == [:overview, :workspaces, :logs, :registry, :snapshots]
     end
 
     test "each section has key/label/icon/path" do
@@ -202,7 +210,11 @@ defmodule EzagentDomainUi.AdminSettingsShellTest do
         assert is_binary(section.label)
         assert is_binary(section.icon)
         assert is_binary(section.path)
-        assert String.starts_with?(section.path, "/admin")
+        # PR-M (Allen 2026-05-20): Workspaces path is /workspaces, not
+        # /admin/workspaces — the route is preserved, only the rendering
+        # shell moved into the admin drawer.
+        assert String.starts_with?(section.path, "/admin") or
+                 String.starts_with?(section.path, "/workspaces")
       end
     end
   end

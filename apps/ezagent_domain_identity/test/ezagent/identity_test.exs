@@ -10,7 +10,16 @@ defmodule Ezagent.IdentityTest do
     end
 
     test "returns admin's all-cap MapSet for live admin Kind" do
-      # Admin User is spawned at chat plugin Application.start with admin_caps
+      # PR-M (2026-05-20): admin User Kind is no longer a static
+      # supervisor child — it spawns lazily on first reference. The
+      # production login path (`Ezagent.Entity.authenticate/2`) calls
+      # `ensure_spawned/1` which hydrates caps from the `users` DB row
+      # (populated by `EzagentDomainIdentity.Application.ensure_admin_user/0`
+      # at boot). For this direct-read test, spawn explicitly via
+      # SpawnRegistry; the boot-time DB hydration is what makes the
+      # slice reflect admin_caps.
+      {:ok, _pid} = Ezagent.SpawnRegistry.spawn(Ezagent.Entity.User.admin_uri())
+
       caps = Ezagent.Identity.list_caps_for(Ezagent.Entity.User.admin_uri())
 
       assert MapSet.size(caps) >= 1

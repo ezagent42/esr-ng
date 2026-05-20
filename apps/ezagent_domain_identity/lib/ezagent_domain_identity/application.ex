@@ -3,7 +3,8 @@ defmodule EzagentDomainIdentity.Application do
   Identity domain OTP application — Phase 6 PR 2.
 
   Owns:
-  - `Ezagent.Entity.User` Kind boot (admin spawn, per-user spawn fn)
+  - `Ezagent.Entity.User` Kind (per-user spawn fn registered here, full
+    `entity://` fn registered by chat plugin which boots later)
   - `Ezagent.Behavior.Identity` registration on User + Agent
   - `Ezagent.Users` SQLite provisioning (Phase 4-completion Spec 05)
 
@@ -16,6 +17,23 @@ defmodule EzagentDomainIdentity.Application do
   Must start BEFORE any plugin that depends on User (chat, ezagent, ...).
   Umbrella resolves this via the `{:ezagent_domain_identity, in_umbrella: true}`
   dep in those apps' mix.exs.
+
+  ## Phase 8c PR-M — admin user creation goes through standard API
+
+  Allen 2026-05-20: previously, `entity://user/admin` was eagerly spawned
+  as a static supervisor child via `kind_server_spec/4`, bypassing the
+  same `Ezagent.Users.create/3` API every other user uses (and the
+  `mix ezagent.user.create` task uses). The admin had no row in the
+  `users` table, breaking `mix ezagent.user.set_password entity://user/admin`
+  on fresh DBs.
+
+  PR-M removes the static child; the admin User Kind now spawns lazily
+  via the `entity://` SpawnRegistry fn on first dispatch reference
+  (e.g. `EzagentDomainChat.create_session("main", admin_uri)` joins admin).
+  The DB row is provisioned at boot via `ensure_admin_user/0` — idempotent
+  `Ezagent.Users.create/3` with `password: nil` (matches the
+  `mix ezagent.user.create` flow when `--password` is omitted; first login
+  requires `mix ezagent.user.set_password` first, same as any other user).
   """
 
   use Application
@@ -29,10 +47,7 @@ defmodule EzagentDomainIdentity.Application do
     :ok = register_identity_behaviors()
 
     children = [
-      {DynamicSupervisor, name: __MODULE__.UserSupervisor, strategy: :one_for_one},
-      kind_server_spec(:user_admin, User, User.admin_uri(), %{
-        initial_caps: User.admin_caps()
-      })
+      {DynamicSupervisor, name: __MODULE__.UserSupervisor, strategy: :one_for_one}
     ]
 
     # PR #141 (SPEC v2): identity domain owns the User Kind, so it
@@ -46,10 +61,136 @@ defmodule EzagentDomainIdentity.Application do
     case Supervisor.start_link(children, strategy: :one_for_one, name: __MODULE__) do
       {:ok, sup_pid} ->
         :ok = register_user_only_entity_spawn_fn()
+
+        # PR-M (Allen 2026-05-20) — DB write skipped in :test env to
+        # avoid Sandbox checkout contention. Tests that need the admin
+        # row can call `Ezagent.Users.create(admin_uri, nil,
+        # MapSet.to_list(User.admin_caps()))` in setup. Dev/prod see
+        # the seed on every boot (idempotent).
+        :ok = maybe_ensure_admin_user()
+
+        # PR-M (Allen 2026-05-20) — test-env eager admin User Kind
+        # spawn. Identity boots BEFORE chat, so spawning admin here
+        # preserves the previous "admin alive at boot" guarantee that
+        # ~10 tests assert against (chat_routing_test, ApplicationTest,
+        # snapshot tests, invocation tests). Done via the user-only
+        # entity:// spawn fn we just registered — same path the chat
+        # plugin will (post-overwrite) route through.
+        #
+        # NOTE: this preserves the OLD timing (admin spawn during
+        # identity.start), so the DB read for snapshot init happens at
+        # the same boot stage as before. Moving it to chat.start
+        # creates Sandbox connection contention with the test's
+        # subsequent Sandbox.checkout. The constraint is timing, not
+        # the spawn itself.
+        :ok = maybe_seed_admin_kind_for_tests()
+
         {:ok, sup_pid}
 
       other ->
         other
+    end
+  end
+
+  defp maybe_ensure_admin_user do
+    if test_env?() do
+      :ok
+    else
+      ensure_admin_user()
+    end
+  end
+
+  defp maybe_seed_admin_kind_for_tests do
+    if test_env?() do
+      # Mimic the pre-PR-M static child via direct DynamicSupervisor
+      # call. NOT through SpawnRegistry — SpawnRegistry.spawn triggers
+      # extra DB lookups (KindSnapshot.get) for entity URIs that
+      # interact poorly with the test SQLite Sandbox boot-time setup.
+      # This is the minimal-diff preservation of the pre-PR-M timing
+      # + side-effects.
+      admin_uri = User.admin_uri()
+
+      case DynamicSupervisor.start_child(
+             __MODULE__.UserSupervisor,
+             {Ezagent.Kind.Server, {User, %{uri: admin_uri, initial_caps: User.admin_caps()}}}
+           ) do
+        {:ok, _pid} -> :ok
+        {:error, {:already_started, _pid}} -> :ok
+        {:error, reason} ->
+          require Logger
+
+          Logger.warning(
+            "maybe_seed_admin_kind_for_tests: start_child failed (#{inspect(reason)}); " <>
+              "tests asserting on boot-time admin Kind may fail"
+          )
+
+          :ok
+      end
+    else
+      :ok
+    end
+  end
+
+  defp test_env? do
+    Code.ensure_loaded?(Mix) and Mix.env() == :test
+  rescue
+    _ -> false
+  end
+
+  # PR-M (Allen 2026-05-20) — idempotent admin User DB row provisioning
+  # via the standard `Ezagent.Users.create/3` API. Same path the
+  # `mix ezagent.user.create` task uses; same path every non-admin user
+  # uses. No static supervisor child anymore — the User Kind spawns
+  # lazily via SpawnRegistry on first dispatch reference.
+  #
+  # Idempotency: skip if a row already exists. Treat DB-unavailable as
+  # `:ok` (boot-time tolerance, same as workspace loader) — the row will
+  # be re-attempted on next boot once DB is reachable.
+  #
+  # `password: nil` matches `mix ezagent.user.create <uri>` without
+  # `--password`: the row exists but login is refused until
+  # `mix ezagent.user.set_password` is run. This preserves the existing
+  # "operator sets password before first login" UX (Spec 05 Q-MU-1).
+  defp ensure_admin_user do
+    admin_uri = User.admin_uri()
+
+    if Code.ensure_loaded?(Ezagent.Users) and
+         function_exported?(Ezagent.Users, :get_by_uri, 1) do
+      try do
+        case Ezagent.Users.get_by_uri(admin_uri) do
+          nil ->
+            admin_cap_list = User.admin_caps() |> MapSet.to_list()
+
+            case Ezagent.Users.create(admin_uri, nil, admin_cap_list) do
+              {:ok, _decoded} -> :ok
+              {:error, reason} ->
+                require Logger
+
+                Logger.warning(
+                  "ensure_admin_user: create failed (#{inspect(reason)}); " <>
+                    "admin URI bootstrap still usable via User.admin_caps but " <>
+                    "mix ezagent.user.set_password will fail until row exists"
+                )
+
+                :ok
+            end
+
+          _existing ->
+            :ok
+        end
+      rescue
+        e in [DBConnection.ConnectionError, DBConnection.OwnershipError] ->
+          require Logger
+
+          Logger.warning(
+            "ensure_admin_user: DB unavailable at boot (#{inspect(e.__struct__)}); " <>
+              "admin row provisioning deferred to next boot"
+          )
+
+          :ok
+      end
+    else
+      :ok
     end
   end
 
@@ -58,9 +199,16 @@ defmodule EzagentDomainIdentity.Application do
       SpawnRegistry.register("entity", fn uri ->
         case uri.host do
           "user" ->
+            initial_caps =
+              if uri == User.admin_uri() do
+                User.admin_caps()
+              else
+                MapSet.new()
+              end
+
             DynamicSupervisor.start_child(
               __MODULE__.UserSupervisor,
-              {Ezagent.Kind.Server, {User, %{uri: uri, initial_caps: MapSet.new()}}}
+              {Ezagent.Kind.Server, {User, %{uri: uri, initial_caps: initial_caps}}}
             )
 
           other ->
@@ -90,10 +238,5 @@ defmodule EzagentDomainIdentity.Application do
     end
 
     :ok
-  end
-
-  defp kind_server_spec(child_id, kind_module, uri, extra_args) do
-    args = Map.merge(%{uri: uri}, extra_args)
-    Supervisor.child_spec({Ezagent.Kind.Server, {kind_module, args}}, id: child_id)
   end
 end

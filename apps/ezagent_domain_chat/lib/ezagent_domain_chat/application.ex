@@ -101,6 +101,25 @@ defmodule EzagentDomainChat.Application do
         # PR 12 closeout: replace with an explicit registry-ready gate.
         :ok = EzagentDomainWorkspace.Application.boot_complete()
 
+        # PR-M (Allen 2026-05-20) — idempotently persist
+        # `workspace://default` so it shows up in `/workspaces` listing
+        # and `/workspaces/default` detail loads. Previously the
+        # default workspace existed only as a `WorkspaceRegistry.bind/2`
+        # ETS entry (session→workspace), bypassing
+        # `Ezagent.Workspace.create/2` (the canonical "persist + spawn"
+        # API). Now goes through the same path every operator-created
+        # workspace uses. Test-env skip — see helper docstring.
+        :ok = ensure_default_workspace()
+
+        # PR-M (Allen 2026-05-20) — idempotently spawn the default Echo
+        # agent via SpawnRegistry. Previously the echo plugin used
+        # `DynamicSupervisor.start_child` directly at its own boot,
+        # bypassing `SpawnRegistry.spawn/1`. The echo plugin boots
+        # before chat (no chat dep), so the `entity://` spawn fn isn't
+        # registered yet at echo's boot time — chat (the last app)
+        # invokes the standardized spawn here.
+        :ok = ensure_echo_default()
+
         # Phase 7 PR 45: install the cc-orchestrator AgentTemplate seed
         # so SessionTemplate-instantiation paths (PR 41 Generator) can
         # reference `template://agent/cc-orchestrator` without operator
@@ -109,6 +128,16 @@ defmodule EzagentDomainChat.Application do
 
         # Phase 8c PR-J — test-only main session seed. See moduledoc.
         :ok = maybe_seed_main_session_for_tests()
+
+        # PR-M (Allen 2026-05-20) — admin User Kind is NOT auto-spawned
+        # at boot. The static `kind_server_spec(:user_admin, ...)` child
+        # in `EzagentDomainIdentity.Application` was removed; admin now
+        # spawns lazily via SpawnRegistry on first dispatch reference
+        # (login, session join, cap lookup). Tests that need the admin
+        # Kind alive at boot must call
+        # `Ezagent.SpawnRegistry.spawn(Ezagent.Entity.User.admin_uri())`
+        # in setup — `EzagentDomainChat.ApplicationTest` is the
+        # canonical example.
 
         {:ok, sup_pid}
 
@@ -126,6 +155,11 @@ defmodule EzagentDomainChat.Application do
   # on the operator's first login.
   defp maybe_seed_main_session_for_tests do
     if test_env?() do
+      # PR-M (2026-05-20) — `create_session/2` now demand-spawns the
+      # creator via SpawnRegistry before dispatching `chat.join` (see
+      # `join_creator/2`). Admin User Kind is no longer a static child;
+      # the demand-spawn covers the gap so admin appears in
+      # session://main's members map post-seed.
       case EzagentDomainChat.create_session("main", User.admin_uri()) do
         {:ok, _uri} -> :ok
         # Identity domain may not have spawned admin User yet on first
@@ -154,6 +188,115 @@ defmodule EzagentDomainChat.Application do
   defp register_template_classes do
     :ok = Ezagent.TemplateRegistry.register(Ezagent.Template.GenericSession)
     :ok
+  end
+
+  # PR-M (Allen 2026-05-20) — idempotently persist the default workspace
+  # via the standard `Ezagent.Workspace.create/2` API. Previously the
+  # default existed only as a session→workspace ETS binding via
+  # `Ezagent.WorkspaceRegistry.bind/2`; the Workspace row was never
+  # created in SQLite, so `/workspaces` listed nothing and
+  # `/workspaces/default` returned "not found".
+  #
+  # Idempotency: skip if the row exists. DB-unavailable at boot is
+  # logged and tolerated — next boot retries (same pattern as workspace
+  # loader).
+  #
+  # Test-env skip: boot-time DB writes interact poorly with Ecto SQL
+  # Sandbox checkout in tests that don't use DataCase (the Audit.Writer
+  # GenServer mid-flush blocks Sandbox.checkout). Tests that need the
+  # row can call `Ezagent.Workspace.create("default", %{})` explicitly
+  # in setup; the UI verification path is dev/prod-only.
+  defp ensure_default_workspace do
+    if test_env?() do
+      :ok
+    else
+      do_ensure_default_workspace()
+    end
+  end
+
+  defp do_ensure_default_workspace do
+    try do
+      case Ezagent.Workspace.Store.get_by_name("default") do
+        nil ->
+          case Ezagent.Workspace.create("default", %{}) do
+            {:ok, _pid} ->
+              :ok
+
+            {:error, {:already_started, _pid}} ->
+              # Kind already alive but no Store row — happens if a
+              # prior boot bound via WorkspaceRegistry without
+              # persisting. Re-attempt just the Store row.
+              case Ezagent.Workspace.Store.create("default", %{}) do
+                {:ok, _} -> :ok
+                {:error, _} -> :ok
+              end
+
+            {:error, reason} ->
+              require Logger
+
+              Logger.warning(
+                "ensure_default_workspace: create failed (#{inspect(reason)}); " <>
+                  "/workspaces listing will be incomplete until next boot"
+              )
+
+              :ok
+          end
+
+        _existing ->
+          :ok
+      end
+    rescue
+      e in [DBConnection.ConnectionError, DBConnection.OwnershipError] ->
+        require Logger
+
+        Logger.warning(
+          "ensure_default_workspace: DB unavailable at boot (#{inspect(e.__struct__)}); " <>
+            "default Workspace provisioning deferred to next boot"
+        )
+
+        :ok
+    end
+  end
+
+  # PR-M (Allen 2026-05-20) — idempotently spawn the default Echo agent
+  # via the standardized `Ezagent.SpawnRegistry.spawn/1` API. Previously
+  # the echo plugin's own Application.start/2 called
+  # `DynamicSupervisor.start_child/2` directly, bypassing the registry.
+  # The echo plugin boots before chat (no chat dep), so the `entity://`
+  # spawn fn isn't registered yet at echo's boot — this post-boot hook
+  # in the last app to start (chat) does the spawn properly.
+  #
+  # `Code.ensure_loaded?` guards against test contexts where the echo
+  # plugin isn't loaded. `{:already_started, _}` from SpawnRegistry is
+  # treated as :ok (the echo plugin may have spawned via snapshot
+  # rehydration before this hook runs).
+  defp ensure_echo_default do
+    if Code.ensure_loaded?(EzagentPluginEcho.Application) and
+         function_exported?(EzagentPluginEcho.Application, :default_uri, 0) do
+      do_ensure_echo_default(EzagentPluginEcho.Application.default_uri())
+    else
+      :ok
+    end
+  end
+
+  defp do_ensure_echo_default(uri) do
+    case Ezagent.SpawnRegistry.spawn(uri) do
+      {:ok, _pid} ->
+        :ok
+
+      {:error, {:already_started, _pid}} ->
+        :ok
+
+      {:error, reason} ->
+        require Logger
+
+        Logger.warning(
+          "ensure_echo_default: spawn failed (#{inspect(reason)}); " <>
+            "F1 echo round-trip tests will fail until echo agent is available"
+        )
+
+        :ok
+    end
   end
 
   # Phase 7 PR 45 — seed cc-orchestrator AgentTemplate at boot.
@@ -216,9 +359,23 @@ defmodule EzagentDomainChat.Application do
       Ezagent.SpawnRegistry.register("entity", fn uri ->
         case uri.host do
           "user" ->
+            # PR-M (2026-05-20): special-case admin URI to seed
+            # `initial_caps: User.admin_caps()`. Non-admin users have
+            # caps_json hydrated via the login path's
+            # `Ezagent.Entity.ensure_spawned/1` (see ezagent/entity.ex);
+            # admin has no login path (password is nil until operator
+            # sets it), so demand-spawn from a `chat.join` dispatch
+            # (caller=admin) needs the bootstrap caps inline.
+            initial_caps =
+              if uri == User.admin_uri() do
+                User.admin_caps()
+              else
+                MapSet.new()
+              end
+
             DynamicSupervisor.start_child(
               EzagentDomainIdentity.Application.UserSupervisor,
-              {Ezagent.Kind.Server, {User, %{uri: uri, initial_caps: MapSet.new()}}}
+              {Ezagent.Kind.Server, {User, %{uri: uri, initial_caps: initial_caps}}}
             )
 
           "agent" ->

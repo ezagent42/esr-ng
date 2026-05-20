@@ -58,8 +58,13 @@ defmodule EzagentDomainUi.AdminSettingsShell do
   attr(:active_section, :atom,
     default: nil,
     doc: """
-    Which sidebar item is highlighted. One of `:overview | :logs | :registry |
-    :snapshots`, OR `nil` to derive from `current_path`.
+    Which sidebar item is highlighted. One of `:overview | :workspaces |
+    :logs | :registry | :snapshots`, OR `nil` to derive from `current_path`.
+
+    PR-M (Allen 2026-05-20): `:workspaces` added — `/workspaces*` is now
+    a configuration surface (workspace management = templates / members
+    / routing config), rendered inside this drawer rather than as a peer
+    workflow surface in `IdeShell`. The "no two header types" UX rule.
     """
   )
 
@@ -166,14 +171,19 @@ defmodule EzagentDomainUi.AdminSettingsShell do
   # --- sections / routing helpers ------------------------------------------
 
   @doc """
-  The 4 admin sub-sections in display order. Each entry:
+  The 5 admin sub-sections in display order. Each entry:
 
       %{key: atom, label: String.t(), icon: String.t(), path: String.t()}
+
+  PR-M (Allen 2026-05-20): `:workspaces` inserted after `:overview` —
+  the `/workspaces` and `/workspaces/:name` routes now render inside
+  this drawer (workspace management is config, not workflow).
   """
   @spec sections() :: [%{key: atom(), label: String.t(), icon: String.t(), path: String.t()}]
   def sections do
     [
       %{key: :overview, label: "Overview", icon: "dashboard", path: "/admin"},
+      %{key: :workspaces, label: "Workspaces", icon: "folder", path: "/workspaces"},
       %{key: :logs, label: "Logs & Audit", icon: "bug", path: "/admin/logs"},
       %{key: :registry, label: "Registry", icon: "users", path: "/admin/registry"},
       %{key: :snapshots, label: "Snapshots", icon: "folder", path: "/admin/snapshots"}
@@ -198,6 +208,12 @@ defmodule EzagentDomainUi.AdminSettingsShell do
       iex> section_for_path("/admin/snapshots")
       :snapshots
 
+      iex> section_for_path("/workspaces")
+      :workspaces
+
+      iex> section_for_path("/workspaces/demo")
+      :workspaces
+
       iex> section_for_path("/sessions")
       :overview
   """
@@ -207,6 +223,7 @@ defmodule EzagentDomainUi.AdminSettingsShell do
       String.starts_with?(path, "/admin/logs") -> :logs
       String.starts_with?(path, "/admin/registry") -> :registry
       String.starts_with?(path, "/admin/snapshots") -> :snapshots
+      String.starts_with?(path, "/workspaces") -> :workspaces
       # /admin and any unknown path default to Overview (Allen's pivot
       # treats Overview as the "home" of the admin drawer).
       true -> :overview

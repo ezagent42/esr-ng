@@ -4,38 +4,55 @@ defmodule EzagentPluginEcho.Application do
 
   ## Boot sequence
 
-  1. Register `{Ezagent.Entity.Echo, :say} → Ezagent.Behavior.Echo` in the
-     core `Ezagent.BehaviorRegistry`. Idempotent (re-runs on hot-reload
-     overwrite cleanly).
-  2. Start the per-Kind DynamicSupervisor so future instances can be
-     spawned without restart of the whole plugin.
-  3. Spawn the default `entity://agent/echo_default` instance (PR #141
-     SPEC v2 — agent flavor lives in the name prefix) under that
-     supervisor.
+  1. Register `{Ezagent.Entity.Echo, :say|:receive} → Ezagent.Behavior.Echo`
+     in `Ezagent.BehaviorRegistry`. Idempotent on hot-reload.
+  2. Register the `echo` agent flavor in `SpawnRegistry`'s entity://
+     scheme via the chat plugin's three-step resolver (snapshot →
+     template → flavor-prefix). Echo's `kind_module_from_flavor("echo")`
+     hardcoded in `EzagentDomainChat.Application` already covers this —
+     this plugin's contribution is just behavior registration + the
+     DynamicSupervisor for spawned instances.
+  3. Start the per-Kind DynamicSupervisor so SpawnRegistry-driven
+     spawns have a place to live (the chat plugin's `spawn_agent/1`
+     routes echo Kinds under `EzagentDomainChat.AgentSupervisor`, not
+     this plugin's supervisor — so this DynamicSupervisor is currently
+     unused but kept for future per-plugin-supervisor migrations).
 
-  ## PR #149 (SPEC v2 §5.14)
+  ## PR-M (Allen 2026-05-20) — standardized creation
 
-  `Ezagent.AgentTypeRegistry` was deleted. This plugin no longer
-  registers an `"echo"` flavor → spawn fn pair. The default Echo
-  instance still spawns under this plugin's own `Supervisor` at boot
-  (direct `DynamicSupervisor.start_child/2`); the chat plugin's
-  `entity://` SpawnRegistry fn resolves the `echo` flavor for
-  CLI-driven / test-time spawns via its three-step lookup (snapshot →
-  template → flavor-prefix).
+  Previously this Application's `start/2` called
+  `DynamicSupervisor.start_child(__MODULE__.Supervisor, ...)` directly
+  to spawn the default echo agent at boot. That bypassed
+  `Ezagent.SpawnRegistry.spawn/1` — the same registry every other Kind
+  uses — and meant:
 
-  ## Why a DynamicSupervisor
+  - snapshot rehydration wouldn't reproduce echo_default on next boot
+    via the standard path
+  - the agent's URI wasn't routed through chat's `spawn_agent/1`
+    flavor-resolver (so the Kind landed in this plugin's supervisor
+    instead of `EzagentDomainChat.AgentSupervisor`)
+  - chat plugin's `entity://` spawn fn never saw the URI, breaking the
+    "one path to spawn Kinds" invariant
 
-  Phase 1 only has one Echo instance, but the supervisor pattern is
-  free here and makes Phase 2+ multi-instance spawning a one-liner
-  (`DynamicSupervisor.start_child/2`). Direct `start_link` from
-  Application.start/2 would force a plugin restart for each new
-  instance.
+  PR-M removes the direct spawn here. The chat plugin (last app to
+  boot) calls `EzagentPluginEcho.Application.default_uri/0` +
+  `Ezagent.SpawnRegistry.spawn/1` post-boot via
+  `EzagentDomainChat.Application.ensure_echo_default/0`. The result
+  goes through the standard path: chat's `entity://` fn → `spawn_agent/1`
+  → flavor-prefix resolver → `EzagentDomainChat.AgentSupervisor`.
+
+  This plugin's only remaining responsibilities:
+  - `register_behaviors/0` (the same as before)
+  - own the URI constant `@default_uri` (exported via `default_uri/0`)
+  - keep `__MODULE__.Supervisor` available as a DynamicSupervisor for
+    future per-plugin-supervisor migrations (currently unused at runtime
+    since chat owns AgentSupervisor)
 
   ## Why this app depends on `ezagent_core` via in_umbrella
 
   Plugin pattern: plugins live alongside `ezagent_core` in the umbrella
   but never reach into core internals — only via the public API
-  (`Ezagent.BehaviorRegistry.register`, `Ezagent.Kind.Server.start_link`).
+  (`Ezagent.BehaviorRegistry.register`, `Ezagent.SpawnRegistry.spawn`).
   This boundary is what lets future devs work on plugins without
   coordinating with the core team (the north-star feedback rule).
   """
@@ -55,14 +72,7 @@ defmodule EzagentPluginEcho.Application do
       {DynamicSupervisor, name: __MODULE__.Supervisor, strategy: :one_for_one}
     ]
 
-    case Supervisor.start_link(children, strategy: :one_for_one, name: __MODULE__) do
-      {:ok, sup_pid} ->
-        spawn_default_instance()
-        {:ok, sup_pid}
-
-      other ->
-        other
-    end
+    Supervisor.start_link(children, strategy: :one_for_one, name: __MODULE__)
   end
 
   defp register_behaviors do
@@ -76,21 +86,10 @@ defmodule EzagentPluginEcho.Application do
     :ok = Ezagent.BehaviorRegistry.register(Ezagent.Entity.Echo, :receive, Ezagent.Behavior.Echo)
   end
 
-  defp spawn_default_instance do
-    spec = {Ezagent.Kind.Server, {Ezagent.Entity.Echo, %{uri: @default_uri}}}
-
-    case DynamicSupervisor.start_child(__MODULE__.Supervisor, spec) do
-      {:ok, _pid} ->
-        :ok
-
-      # Already started — happens if the supervisor restarted the plugin
-      # but the prior instance was still alive (Phase 1 unlikely, kept
-      # for hot-reload safety).
-      {:error, {:already_started, _pid}} ->
-        :ok
-    end
-  end
-
-  @doc "URI of the default Echo instance spawned at boot."
+  @doc """
+  URI of the default Echo instance — spawned post-boot by the chat
+  plugin (PR-M, see moduledoc) via
+  `EzagentDomainChat.Application.ensure_echo_default/0`.
+  """
   def default_uri, do: @default_uri
 end

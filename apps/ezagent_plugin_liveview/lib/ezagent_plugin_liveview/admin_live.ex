@@ -408,7 +408,11 @@ defmodule EzagentPluginLiveview.AdminLive do
       |> assign_new(:workspace_name, fn ->
         workspace_name_for(assigns.current_session_uri)
       end)
-      |> assign_new(:workspaces, fn -> list_known_workspaces() end)
+      # PR-M (Allen 2026-05-20): `workspaces` + `is_admin?` are now
+      # set centrally by `EzagentWeb.LiveAuth.on_mount(:require_entity)`,
+      # which fires before this render. `assign_new` is kept as belt-
+      # and-suspenders for any test path that mounts this LV outside
+      # the `:require_entity` live_session.
       |> assign_new(:is_admin?, fn ->
         Ezagent.Identity.admin?(assigns.caller_uri_str)
       end)
@@ -820,32 +824,8 @@ defmodule EzagentPluginLiveview.AdminLive do
     end
   end
 
-  # Phase 8c PR-L (Allen 2026-05-20): list known workspaces for the
-  # top-left dropdown. Source is `Ezagent.Workspace.list_persisted/0`
-  # — the persisted set (what's declared to exist), not the live set.
-  # Same source as WorkspacesLive so the dropdown agrees with the
-  # management page. Returns `[%{name: ..., uri: ...}]` as
-  # IdeShell.top_command_bar/1 expects.
-  defp list_known_workspaces do
-    persisted =
-      Ezagent.Workspace.list_persisted()
-      |> Enum.map(fn ws -> %{name: ws.name, uri: ws.uri} end)
-
-    # Phase 8c follow-up (Allen 2026-05-20) — ensure the default
-    # workspace always shows in the dropdown even if it isn't
-    # persisted in the Store yet. session://main binds to
-    # workspace://default via WorkspaceRegistry post-boot but
-    # doesn't auto-create a Workspace row in the Store. Without
-    # this entry the dropdown falls back to plain text and the
-    # "Manage workspaces..." link is unreachable from the session
-    # surface — exactly the surface a user is on most often.
-    default = %{name: "default", uri: URI.parse("workspace://default")}
-
-    if Enum.any?(persisted, &(&1.name == "default")) do
-      persisted
-    else
-      [default | persisted]
-    end
-    |> Enum.sort_by(& &1.name)
-  end
+  # Phase 8c PR-L → PR-M (Allen 2026-05-20): the private
+  # `list_known_workspaces/0` helper that used to live here is now
+  # `EzagentWeb.LiveAuth.list_known_workspaces/0` (centralized so
+  # every LV in `:require_entity` sees `@workspaces`, not just admin_live).
 end

@@ -19,8 +19,9 @@ defmodule EzagentPluginLiveview.WorkspaceDetailLive do
   """
 
   use Phoenix.LiveView
-  alias EzagentDomainUi.IdeShell
+  alias EzagentDomainUi.AdminSettingsShell
   use EzagentDomainUi.Components
+  use EzagentDomainUi.Primitives
   import Phoenix.Component
 
   @impl true
@@ -271,28 +272,26 @@ defmodule EzagentPluginLiveview.WorkspaceDetailLive do
   end
 
   def render(assigns) do
-    # Phase 8 阶段 C: wrap in IdeShell.
+    # PR-M (Allen 2026-05-20) — wrap in AdminSettingsShell (drawer
+    # perspective). Workspace MANAGEMENT (templates / members / routing
+    # config) is a configuration surface, not a workflow surface.
     assigns =
       assign_new(assigns, :current_entity_uri_str, fn ->
         URI.to_string(assigns.current_entity_uri || URI.parse("entity://user/admin"))
       end)
 
     ~H"""
-    <IdeShell.ide_shell
+    <AdminSettingsShell.admin_settings_shell
       current_entity_uri={@current_entity_uri_str}
       current_path={"/workspaces/" <> @workspace.name}
-      status={%{agents_alive: 0, bridges: 0, debug_events: 0, version: "dev"}}
-      is_admin?={@is_admin?}
+      active_section={:workspaces}
     >
-      <:resource_panel>
-        <div class="p-3">
-          <div class="text-[10px] uppercase tracking-wide text-zinc-500 mb-2">Workspace</div>
-          <div class="px-2 py-1 text-xs bg-zinc-100 dark:bg-zinc-900 rounded font-mono">{@workspace.name}</div>
-          <a href="/workspaces" class="block mt-3 px-2 py-1 text-xs text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100">← All workspaces</a>
-        </div>
-      </:resource_panel>
-      <:main_window>
+      <:main>
         <div class="flex-1 overflow-auto px-6 py-6 text-zinc-900 dark:text-zinc-100">
+          <a href="/workspaces" class="inline-flex items-center gap-1 text-xs text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 mb-4">
+            <.icon name="chevron-left" size="xs" />
+            <span>All workspaces</span>
+          </a>
           <%!--
             Phase 8c PR-H: NOT using `<.page_header>` here because the page
             title contains a `<code>` child — a test (workspaces_live_test
@@ -524,8 +523,8 @@ defmodule EzagentPluginLiveview.WorkspaceDetailLive do
             >{Jason.encode!(@workspace.routing_rules, pretty: true)}</pre>
           </.card>
         </div>
-      </:main_window>
-    </IdeShell.ide_shell>
+      </:main>
+    </AdminSettingsShell.admin_settings_shell>
     """
   end
 end

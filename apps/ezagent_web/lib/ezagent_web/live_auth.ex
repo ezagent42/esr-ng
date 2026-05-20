@@ -59,7 +59,8 @@ defmodule EzagentWeb.LiveAuth do
             {:cont,
              socket
              |> assign(:current_entity_uri, uri)
-             |> assign(:is_admin?, admin?(uri))}
+             |> assign(:is_admin?, admin?(uri))
+             |> assign(:workspaces, list_known_workspaces())}
 
           :error ->
             # Malformed / non-entity URI → treat as unauthenticated.
@@ -83,6 +84,47 @@ defmodule EzagentWeb.LiveAuth do
     else
       false
     end
+  end
+
+  # PR-M (Allen 2026-05-20) — centralized workspaces assign. Previously
+  # only `admin_live.ex` computed `[%{name, uri}]` for the top-left
+  # `ezagent / <workspace> ▾` dropdown, so the dropdown appeared on
+  # `/sessions` but not on `/identities`, `/routing`, `/plugins`,
+  # `/profile`, `/preferences`. Now every LV in `:require_entity`
+  # sees `@workspaces`, IdeShell renders the dropdown consistently,
+  # and admin_live's private helper becomes redundant (removed in
+  # the same PR).
+  #
+  # Defensive load — DB unavailable at LV-mount (e.g. test sandbox
+  # not checked out) returns an empty list + default workspace stub.
+  # The dropdown still renders sensibly with just "default".
+  defp list_known_workspaces do
+    persisted =
+      try do
+        if Code.ensure_loaded?(Ezagent.Workspace) and
+             function_exported?(Ezagent.Workspace, :list_persisted, 0) do
+          Ezagent.Workspace.list_persisted()
+          |> Enum.map(fn ws -> %{name: ws.name, uri: ws.uri} end)
+        else
+          []
+        end
+      rescue
+        _ -> []
+      end
+
+    # Always include `default` in the dropdown even if not yet
+    # persisted in the Store (e.g. fresh DB before
+    # `ensure_default_workspace/0` has run, or DB unavailable). The
+    # `Manage workspaces…` link is the user's escape hatch to the
+    # admin drawer.
+    default = %{name: "default", uri: URI.parse("workspace://default")}
+
+    if Enum.any?(persisted, &(&1.name == "default")) do
+      persisted
+    else
+      [default | persisted]
+    end
+    |> Enum.sort_by(& &1.name)
   end
 
   # PR #149 (S-8): accept entity://user/* and entity://agent/* uniformly.
