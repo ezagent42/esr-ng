@@ -4,9 +4,9 @@ defmodule EzagentPluginLiveview.AutoDeriveLive do
   `EzagentDomainUi.AutoDerive`.
 
   Two modes (drive by URL):
-    /admin/auto/:kind          → list view (table of live URIs +
+    /plugins/auto/:kind          → list view (table of live URIs +
                                  slice keys + behaviors)
-    /admin/auto/:kind/:uri     → detail view (URI-decoded; slices
+    /plugins/auto/:kind/:uri     → detail view (URI-decoded; slices
                                  rendered as <pre>{inspect})
 
   Validates the auto-derive thesis: ANY Kind, including 3rd-party
@@ -75,7 +75,7 @@ defmodule EzagentPluginLiveview.AutoDeriveLive do
     ~H"""
     <IdeShell.ide_shell
       current_entity_uri={@current_entity_uri_str}
-      current_path="/admin/auto"
+      current_path="/plugins/auto"
       status={%{agents_alive: 0, bridges: 0, debug_events: 0, version: "dev"}}
     >
       <:main_window>
@@ -83,7 +83,7 @@ defmodule EzagentPluginLiveview.AutoDeriveLive do
       <.page_header title={"Auto-derived: " <> Atom.to_string(@kind)}>
         <:subtitle>
           Generic admin surface, no hand-written code per Kind.
-          <a href="/admin" class="text-zinc-600 underline hover:text-zinc-900 ml-1">← /admin</a>
+          <a href="/plugins" class="text-zinc-600 underline hover:text-zinc-900 ml-1">← Plugins</a>
         </:subtitle>
       </.page_header>
 
@@ -112,7 +112,7 @@ defmodule EzagentPluginLiveview.AutoDeriveLive do
                 </td>
                 <td class="py-2 text-right pr-2">
                   <a
-                    href={"/admin/auto/" <> Atom.to_string(@kind) <> "/" <> URI.encode_www_form(URI.to_string(inst.uri))}
+                    href={"/plugins/auto/" <> Atom.to_string(@kind) <> "/" <> URI.encode_www_form(URI.to_string(inst.uri))}
                     class="text-zinc-600 hover:text-zinc-900 text-xs"
                   >detail →</a>
                 </td>
@@ -160,7 +160,7 @@ defmodule EzagentPluginLiveview.AutoDeriveLive do
 
         <p class="mt-4">
           <a
-            href={"/admin/auto/" <> Atom.to_string(@kind)}
+            href={"/plugins/auto/" <> Atom.to_string(@kind)}
             class="text-zinc-600 hover:text-zinc-900 text-xs"
           >← back to list</a>
         </p>

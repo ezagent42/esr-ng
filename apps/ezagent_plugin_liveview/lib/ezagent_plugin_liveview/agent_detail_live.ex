@@ -1,6 +1,6 @@
 defmodule EzagentPluginLiveview.AgentDetailLive do
   @moduledoc """
-  Phase 5 PR 3: per-agent PTY status detail at `/admin/agents/:uri`.
+  Phase 5 PR 3: per-agent PTY status detail at `/identities/agents/:uri`.
 
   Path segment is URI-encoded `entity://agent/...`. Auto-refresh every 2s
   so operator sees stdout flowing without a manual reload.
@@ -92,14 +92,14 @@ defmodule EzagentPluginLiveview.AgentDetailLive do
     ~H"""
     <IdeShell.ide_shell
       current_entity_uri={@current_entity_uri_str}
-      current_path="/admin/agents"
+      current_path="/identities/agents"
       status={%{agents_alive: 0, bridges: 0, debug_events: 0, version: "dev"}}
     >
       <:main_window>
         <div class="flex-1 overflow-auto px-6 py-6 text-zinc-900">
       <h1>Agent URI invalid</h1>
       <p><code>{@bad_uri}</code></p>
-      <p><a href="/admin/agents" style="color: #0969da;">← Agents</a></p>
+      <p><a href="/identities/agents" style="color: #0969da;">← Agents</a></p>
         </div>
       </:main_window>
     </IdeShell.ide_shell>
@@ -115,7 +115,7 @@ defmodule EzagentPluginLiveview.AgentDetailLive do
     ~H"""
     <IdeShell.ide_shell
       current_entity_uri={@current_entity_uri_str}
-      current_path="/admin/agents"
+      current_path="/identities/agents"
       status={%{agents_alive: 0, bridges: 0, debug_events: 0, version: "dev"}}
     >
       <:main_window>
@@ -125,7 +125,7 @@ defmodule EzagentPluginLiveview.AgentDetailLive do
           Agent: <code>{URI.to_string(@agent_uri)}</code>
         </h1>
         <p style="font-size: 13px; color: #666;">
-          <a href="/admin/agents" style="color: #0969da;">← Agents</a>
+          <a href="/identities/agents" style="color: #0969da;">← Agents</a>
           <span style="margin-left: 16px;">auto-refresh every 2s</span>
         </p>
       </header>
@@ -168,7 +168,7 @@ defmodule EzagentPluginLiveview.AgentDetailLive do
 
             <div style="margin-top: 12px; display: flex; gap: 8px;">
               <a
-                href={"/admin/agents/#{URI.encode_www_form(URI.to_string(@agent_uri))}/terminal"}
+                href={"/identities/agents/#{URI.encode_www_form(URI.to_string(@agent_uri))}/terminal"}
                 style="padding: 6px 14px; background: #1f883d; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; text-decoration: none;"
               >📺 Open terminal (xterm)</a>
               <button

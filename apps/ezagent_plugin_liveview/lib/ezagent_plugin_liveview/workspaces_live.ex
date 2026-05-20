@@ -1,6 +1,6 @@
 defmodule EzagentPluginLiveview.WorkspacesLive do
   @moduledoc """
-  /admin/workspaces — list every persisted Workspace + form to create.
+  /workspaces — list every persisted Workspace + form to create.
 
   Reads `Ezagent.Workspace.list_persisted/0` (which hits SQLite via
   `Ezagent.Workspace.Store`) — the persisted set, not the live-Kind set.
@@ -75,7 +75,7 @@ defmodule EzagentPluginLiveview.WorkspacesLive do
     ~H"""
     <IdeShell.ide_shell
       current_entity_uri={@current_entity_uri_str}
-      current_path="/admin/workspaces"
+      current_path="/workspaces"
       status={%{agents_alive: 0, bridges: 0, debug_events: 0, version: "dev"}}
     >
       <:resource_panel>
@@ -83,7 +83,7 @@ defmodule EzagentPluginLiveview.WorkspacesLive do
           <div class="text-[10px] uppercase tracking-wide text-zinc-500 mb-2">Workspaces</div>
           <a
             :for={ws <- @workspaces}
-            href={"/admin/workspaces/#{ws.name}"}
+            href={"/workspaces/#{ws.name}"}
             class="block px-2 py-1 text-xs hover:bg-zinc-100 rounded font-mono text-zinc-700"
           >
             {ws.name}
@@ -144,7 +144,7 @@ defmodule EzagentPluginLiveview.WorkspacesLive do
                 </td>
                 <td class="py-2 pr-4 text-right">
                   <a
-                    href={"/admin/workspaces/#{ws.name}"}
+                    href={"/workspaces/#{ws.name}"}
                     class="text-zinc-600 hover:text-zinc-900 text-xs"
                   >detail →</a>
                 </td>

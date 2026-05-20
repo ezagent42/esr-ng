@@ -2,7 +2,7 @@ defmodule EzagentPluginLiveview.UserApiKeysLive do
   @moduledoc """
   PR #126 — per-user API key management UI.
 
-  Mount at `/admin/users/:uri/api-keys`. URI is URL-encoded
+  Mount at `/identities/users/:uri/api-keys`. URI is URL-encoded
   (`user%3A%2F%2Fadmin`).
 
   Lists registered providers (masked) + lets the user add / rotate /
@@ -156,7 +156,7 @@ defmodule EzagentPluginLiveview.UserApiKeysLive do
     ~H"""
     <IdeShell.ide_shell
       current_entity_uri={@current_entity_uri_str}
-      current_path="/admin/users"
+      current_path="/identities/users"
       status={%{agents_alive: 0, bridges: 0, debug_events: 0, version: "dev"}}
     >
       <:main_window>
@@ -166,7 +166,7 @@ defmodule EzagentPluginLiveview.UserApiKeysLive do
         <p style="font-size: 13px; color: #666;">
           Per-user secret storage for outbound LLM completion APIs (DeepSeek, OpenAI, etc.).
           The system itself holds no keys — every user supplies their own.
-          <a href="/admin" style="margin-left: 16px; color: #0969da;">← /admin</a>
+          <a href="/identities/users" style="margin-left: 16px; color: #0969da;">← Users</a>
         </p>
       </header>
 

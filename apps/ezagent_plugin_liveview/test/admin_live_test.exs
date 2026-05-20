@@ -22,8 +22,8 @@ defmodule EzagentPluginLiveview.AdminLiveTest do
     {:ok, conn: conn}
   end
 
-  test "GET /admin renders the page skeleton", %{conn: conn} do
-    {:ok, _lv, html} = live(conn, "/admin")
+  test "GET /sessions renders the page skeleton", %{conn: conn} do
+    {:ok, _lv, html} = live(conn, "/sessions")
     assert html =~ "Admin"
     assert html =~ "Echo 测试"
     assert html =~ "Manual Dispatch"
@@ -33,7 +33,7 @@ defmodule EzagentPluginLiveview.AdminLiveTest do
   end
 
   test "Echo button triggers dispatch and audit stream updates", %{conn: conn} do
-    {:ok, lv, _html} = live(conn, "/admin")
+    {:ok, lv, _html} = live(conn, "/sessions")
     lv |> element("#echo-test-btn") |> render_click()
 
     # Give the dispatch path + telemetry handler time to propagate.
@@ -47,7 +47,7 @@ defmodule EzagentPluginLiveview.AdminLiveTest do
   end
 
   test "Manual dispatch form runs an arbitrary invocation", %{conn: conn} do
-    {:ok, lv, _html} = live(conn, "/admin")
+    {:ok, lv, _html} = live(conn, "/sessions")
 
     form_data = %{
       "manual_dispatch" => %{
@@ -65,7 +65,7 @@ defmodule EzagentPluginLiveview.AdminLiveTest do
   end
 
   test "Session members section shows admin User as online (Phase 2 boot)", %{conn: conn} do
-    {:ok, _lv, html} = live(conn, "/admin")
+    {:ok, _lv, html} = live(conn, "/sessions")
 
     # Section header
     assert html =~ "session://main"
@@ -82,7 +82,7 @@ defmodule EzagentPluginLiveview.AdminLiveTest do
   end
 
   test "Chat compose dispatches send and message lands in stream", %{conn: conn} do
-    {:ok, lv, _html} = live(conn, "/admin")
+    {:ok, lv, _html} = live(conn, "/sessions")
 
     text = "lv chat compose test #{System.unique_integer([:positive])}"
 
@@ -102,7 +102,7 @@ defmodule EzagentPluginLiveview.AdminLiveTest do
     # Send a message from admin AND simulate an agent message landing
     # via broadcast (mimics what 2c agent flow produces) — assert both
     # render in the same #messages container with same DOM structure.
-    {:ok, lv, _html} = live(conn, "/admin")
+    {:ok, lv, _html} = live(conn, "/sessions")
 
     admin_text = "admin-says-#{System.unique_integer([:positive])}"
 
@@ -162,7 +162,7 @@ defmodule EzagentPluginLiveview.AdminLiveTest do
       {:ok, _} = Ezagent.MessageStore.write(msg, session_uri)
     end
 
-    {:ok, lv, html} = live(conn, "/admin")
+    {:ok, lv, html} = live(conn, "/sessions")
 
     # Match on the trailing newline-tag boundary in the rendered <div>
     # so "histmsg-1" doesn't substring-match "histmsg-100".
@@ -195,7 +195,7 @@ defmodule EzagentPluginLiveview.AdminLiveTest do
   end
 
   test "Manual dispatch with invalid URI shows error message", %{conn: conn} do
-    {:ok, lv, _html} = live(conn, "/admin")
+    {:ok, lv, _html} = live(conn, "/sessions")
 
     form_data = %{
       "manual_dispatch" => %{

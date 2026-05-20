@@ -17,15 +17,15 @@ defmodule EzagentPluginLiveview.WorkspacesLiveTest do
     {:ok, conn: conn}
   end
 
-  test "GET /admin/workspaces shows empty state when no workspaces", %{conn: conn} do
-    {:ok, _lv, html} = live(conn, "/admin/workspaces")
+  test "GET /workspaces shows empty state when no workspaces", %{conn: conn} do
+    {:ok, _lv, html} = live(conn, "/workspaces")
     assert html =~ "Workspaces"
     assert html =~ "+ New Workspace"
     assert html =~ "No workspaces yet"
   end
 
   test "create form spawns + persists a workspace", %{conn: conn} do
-    {:ok, lv, _html} = live(conn, "/admin/workspaces")
+    {:ok, lv, _html} = live(conn, "/workspaces")
 
     name = "lv-create-#{System.unique_integer([:positive])}"
 
@@ -43,7 +43,7 @@ defmodule EzagentPluginLiveview.WorkspacesLiveTest do
   end
 
   test "detail page for non-existent workspace shows 'not found'", %{conn: conn} do
-    {:ok, _lv, html} = live(conn, "/admin/workspaces/never-existed-#{System.unique_integer([:positive])}")
+    {:ok, _lv, html} = live(conn, "/workspaces/never-existed-#{System.unique_integer([:positive])}")
     assert html =~ "Workspace not found"
   end
 
@@ -51,7 +51,7 @@ defmodule EzagentPluginLiveview.WorkspacesLiveTest do
     name = "lv-detail-#{System.unique_integer([:positive])}"
     {:ok, _} = Ezagent.Workspace.create(name)
 
-    {:ok, _lv, html} = live(conn, "/admin/workspaces/#{name}")
+    {:ok, _lv, html} = live(conn, "/workspaces/#{name}")
     assert html =~ "Workspace: <code>#{name}</code>"
     assert html =~ "Members (0)"
     assert html =~ "No members"
@@ -61,7 +61,7 @@ defmodule EzagentPluginLiveview.WorkspacesLiveTest do
     name = "lv-add-#{System.unique_integer([:positive])}"
     {:ok, _} = Ezagent.Workspace.create(name)
 
-    {:ok, lv, _html} = live(conn, "/admin/workspaces/#{name}")
+    {:ok, lv, _html} = live(conn, "/workspaces/#{name}")
 
     lv
     |> form("#members form", add_member: %{member_uri: "entity://agent/test_test-add"})

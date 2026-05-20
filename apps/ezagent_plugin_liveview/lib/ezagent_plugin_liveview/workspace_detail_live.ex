@@ -1,6 +1,6 @@
 defmodule EzagentPluginLiveview.WorkspaceDetailLive do
   @moduledoc """
-  /admin/workspaces/:name — single Workspace view.
+  /workspaces/:name — single Workspace view.
 
   Sections:
   1. Header: name + URI + live status
@@ -251,7 +251,7 @@ defmodule EzagentPluginLiveview.WorkspaceDetailLive do
     <div style="max-width: 800px; margin: 0 auto; padding: 24px; font-family: -apple-system, sans-serif;">
       <h1 style="font-size: 22px;">Workspace not found</h1>
       <p>No persisted workspace named <code>{@name}</code>.</p>
-      <p><a href="/admin/workspaces" style="color: #0969da;">← Workspaces</a></p>
+      <p><a href="/workspaces" style="color: #0969da;">← Workspaces</a></p>
     </div>
     """
   end
@@ -266,14 +266,14 @@ defmodule EzagentPluginLiveview.WorkspaceDetailLive do
     ~H"""
     <IdeShell.ide_shell
       current_entity_uri={@current_entity_uri_str}
-      current_path={"/admin/workspaces/" <> @workspace.name}
+      current_path={"/workspaces/" <> @workspace.name}
       status={%{agents_alive: 0, bridges: 0, debug_events: 0, version: "dev"}}
     >
       <:resource_panel>
         <div class="p-3">
           <div class="text-[10px] uppercase tracking-wide text-zinc-500 mb-2">Workspace</div>
           <div class="px-2 py-1 text-xs bg-zinc-100 rounded font-mono">{@workspace.name}</div>
-          <a href="/admin/workspaces" class="block mt-3 px-2 py-1 text-xs text-zinc-600 hover:text-zinc-900">← All workspaces</a>
+          <a href="/workspaces" class="block mt-3 px-2 py-1 text-xs text-zinc-600 hover:text-zinc-900">← All workspaces</a>
         </div>
       </:resource_panel>
       <:main_window>
@@ -435,6 +435,16 @@ defmodule EzagentPluginLiveview.WorkspaceDetailLive do
                     >
                       <option :for={opt <- Map.get(field, :options, [])} value={opt}>{opt}</option>
                     </select>
+                  <% :path -> %>
+                    <div style="display: flex; flex-direction: column; gap: 2px;">
+                      <input
+                        type="text"
+                        name={"add_template[" <> field.name <> "]"}
+                        placeholder={Map.get(field, :placeholder, "/path/to/dir")}
+                        style={input_style_for(field.type)}
+                      />
+                      <span style="font-size: 10px; color: #57606a;">📁 Filesystem path (server-side)</span>
+                    </div>
                   <% _ -> %>
                     <input
                       type="text"

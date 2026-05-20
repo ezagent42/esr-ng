@@ -31,7 +31,7 @@ defmodule EzagentPluginLiveview.WorkspaceAddTemplateLiveTest do
 
     session_name = "test-#{System.unique_integer([:positive])}"
 
-    {:ok, lv, _html} = live(conn, "/admin/workspaces/#{ws_name}")
+    {:ok, lv, _html} = live(conn, "/workspaces/#{ws_name}")
 
     # Phase 5 PR 2: select_template_class drives which form_fields render.
     # Default is alphabetically first (cc.pty) so click session.generic.
@@ -73,7 +73,7 @@ defmodule EzagentPluginLiveview.WorkspaceAddTemplateLiveTest do
         "members" => []
       })
 
-    {:ok, lv, _html} = live(conn, "/admin/workspaces/#{ws_name}")
+    {:ok, lv, _html} = live(conn, "/workspaces/#{ws_name}")
 
     lv
     |> element("button[phx-click='remove_template'][phx-value-name='foo']")

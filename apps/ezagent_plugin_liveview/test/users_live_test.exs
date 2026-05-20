@@ -18,15 +18,15 @@ defmodule EzagentPluginLiveview.UsersLiveTest do
     {:ok, conn: conn}
   end
 
-  test "GET /admin/users renders existing admin row + create form", %{conn: conn} do
-    {:ok, _lv, html} = live(conn, "/admin/users")
+  test "GET /identities/users renders existing admin row + create form", %{conn: conn} do
+    {:ok, _lv, html} = live(conn, "/identities/users")
     assert html =~ "Users"
     assert html =~ "entity://user/admin"
     assert html =~ "Create user"
   end
 
   test "create_user persists + appears in list", %{conn: conn} do
-    {:ok, lv, _html} = live(conn, "/admin/users")
+    {:ok, lv, _html} = live(conn, "/identities/users")
     uri = "entity://user/lv-create-#{System.unique_integer([:positive])}"
 
     lv
@@ -45,7 +45,7 @@ defmodule EzagentPluginLiveview.UsersLiveTest do
   end
 
   test "create_user refuses '*' caps via UI (must use mix --allow-allcaps)", %{conn: conn} do
-    {:ok, lv, _html} = live(conn, "/admin/users")
+    {:ok, lv, _html} = live(conn, "/identities/users")
     uri = "entity://user/lv-allcaps-#{System.unique_integer([:positive])}"
 
     lv

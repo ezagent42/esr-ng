@@ -3,7 +3,7 @@ defmodule EzagentPluginLiveview.UserCapsLive do
   Phase 6 PR 6 — admin UI for granting/revoking caps on any User Kind
   (including users provisioned from Feishu adapter).
 
-  Mount at `/admin/users/:uri/caps`. URI is URL-encoded.
+  Mount at `/identities/users/:uri/caps`. URI is URL-encoded.
 
   Operations dispatch via `Invocation` → CapBAC step 5.5 enforces
   admin caps on the calling LV session.
@@ -154,7 +154,7 @@ defmodule EzagentPluginLiveview.UserCapsLive do
     ~H"""
     <IdeShell.ide_shell
       current_entity_uri={@current_entity_uri_str}
-      current_path="/admin/users"
+      current_path="/identities/users"
       status={%{agents_alive: 0, bridges: 0, debug_events: 0, version: "dev"}}
     >
       <:main_window>
@@ -162,7 +162,7 @@ defmodule EzagentPluginLiveview.UserCapsLive do
       <.page_header title={"Caps for " <> URI.to_string(@user_uri)}>
         <:subtitle>
           Live cap mutation via Identity Behavior. Admin caps required (CapBAC at dispatch step 5.5).
-          <a href="/admin/users" class="text-zinc-600 underline hover:text-zinc-900 ml-1">← /admin/users</a>
+          <a href="/identities/users" class="text-zinc-600 underline hover:text-zinc-900 ml-1">← /identities/users</a>
         </:subtitle>
       </.page_header>
 

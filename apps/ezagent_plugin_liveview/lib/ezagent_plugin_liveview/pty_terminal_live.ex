@@ -22,7 +22,7 @@ defmodule EzagentPluginLiveview.PtyTerminalLive do
 
   ## URL
 
-  `/admin/agents/:uri/terminal` — `:uri` is URI-encoded `entity://agent/...`
+  `/identities/agents/:uri/terminal` — `:uri` is URI-encoded `entity://agent/...`
   """
 
   use Phoenix.LiveView
@@ -176,14 +176,14 @@ defmodule EzagentPluginLiveview.PtyTerminalLive do
     ~H"""
     <IdeShell.ide_shell
       current_entity_uri={@current_entity_uri_str}
-      current_path="/admin/agents"
+      current_path="/identities/agents"
       status={%{agents_alive: 0, bridges: 0, debug_events: 0, version: "dev"}}
     >
       <:main_window>
         <div class="flex-1 overflow-auto px-6 py-6 text-zinc-900">
       <h1>Agent URI invalid</h1>
       <p><code>{@bad_uri}</code></p>
-      <p><a href="/admin/agents" style="color: #0969da;">← Agents</a></p>
+      <p><a href="/identities/agents" style="color: #0969da;">← Agents</a></p>
         </div>
       </:main_window>
     </IdeShell.ide_shell>
@@ -199,7 +199,7 @@ defmodule EzagentPluginLiveview.PtyTerminalLive do
     ~H"""
     <IdeShell.ide_shell
       current_entity_uri={@current_entity_uri_str}
-      current_path="/admin/agents"
+      current_path="/identities/agents"
       status={%{agents_alive: 0, bridges: 0, debug_events: 0, version: "dev"}}
     >
       <:main_window>
@@ -209,7 +209,7 @@ defmodule EzagentPluginLiveview.PtyTerminalLive do
           Pty-Web: <code>{URI.to_string(@agent_uri)}</code>
         </h1>
         <p style="font-size: 13px; color: #666;">
-          <a href={"/admin/agents/#{URI.encode_www_form(URI.to_string(@agent_uri))}"} style="color: #0969da;">← Agent status</a>
+          <a href={"/identities/agents/#{URI.encode_www_form(URI.to_string(@agent_uri))}"} style="color: #0969da;">← Agent status</a>
           <span style="margin-left: 16px;">
             Input → <code>Ezagent.Invocation.dispatch</code> → CapBAC → audit → PTY.
           </span>

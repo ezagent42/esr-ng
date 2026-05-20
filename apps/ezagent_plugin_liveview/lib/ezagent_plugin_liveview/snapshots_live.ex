@@ -104,7 +104,7 @@ defmodule EzagentPluginLiveview.SnapshotsLive do
         <p style="font-size: 13px; color: #666;">
           Per-Kind runtime state snapshots (Phase 4-completion PR 2,
           Decision #115). One row per `kind_snapshots.uri`.
-          <a href="/admin" style="margin-left: 16px; color: #0969da;">← /admin</a>
+          <a href="/admin" style="margin-left: 16px; color: #0969da;">← Dashboard</a>
         </p>
       </header>
 

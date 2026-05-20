@@ -11,7 +11,7 @@ defmodule EzagentPluginLiveview.EntitiesLive do
 
   Filter chips along the top let the operator narrow by scheme/host.
   Clicking an entity opens the per-Kind detail view at
-  `/admin/auto/<kind>/<encoded-uri>` (Phase 6 PR 10's auto-derive LV).
+  `/plugins/auto/<kind>/<encoded-uri>` (Phase 6 PR 10's auto-derive LV).
   """
 
   use Phoenix.LiveView
@@ -82,7 +82,7 @@ defmodule EzagentPluginLiveview.EntitiesLive do
     ~H"""
     <IdeShell.ide_shell
       current_entity_uri={@current_entity_uri_str}
-      current_path="/admin/entities"
+      current_path="/admin/registry"
       status={%{agents_alive: 0, bridges: 0, debug_events: 0, version: "dev"}}
     >
       <:resource_panel>
@@ -131,7 +131,7 @@ defmodule EzagentPluginLiveview.EntitiesLive do
               <td>
                 <a
                   :if={e.scheme}
-                  href={"/admin/auto/#{e.scheme}/#{URI.encode_www_form(e.uri_str)}"}
+                  href={"/plugins/auto/#{e.scheme}/#{URI.encode_www_form(e.uri_str)}"}
                   style="color: #0969da; font-size: 12px;"
                 >detail →</a>
               </td>
@@ -152,7 +152,7 @@ defmodule EzagentPluginLiveview.EntitiesLive do
   defp filter_chip(assigns) do
     ~H"""
     <a
-      href={"/admin/entities?filter=#{@value}"}
+      href={"/admin/registry?filter=#{@value}"}
       style={chip_style(@filter == @value)}
     >{@label}</a>
     """
