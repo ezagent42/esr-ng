@@ -70,6 +70,11 @@ defmodule EzagentWeb.Router do
       # Identities Activity (address book: users + agents are entity sub-types).
       live "/identities", IdentitiesLive
       live "/identities/users", UsersLive
+      # Phase 8c follow-up (Allen 2026-05-20) — parallel to /identities/users.
+      # /identities/agents was a dead link from agent_detail_live's "Back
+      # to agents" anchors. Reuses IdentitiesLive; the LV defaults the
+      # filter to "agents" when the URI path matches.
+      live "/identities/agents", IdentitiesLive
       # PR-G (Phase 8c): EntityCapsLive serves both user + agent caps
       # (generalized from the former UserCapsLive). Backend
       # `Ezagent.Behavior.Identity` always accepted any entity URI;

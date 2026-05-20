@@ -19,20 +19,39 @@ defmodule EzagentPluginLiveview.IdentitiesLive do
   use EzagentDomainUi.Primitives
 
   @impl true
-  def mount(params, _session, socket) do
+  def mount(_params, _session, socket) do
+    # `handle_params` always fires after mount and sets the real filter
+    # value; placeholder here is just to keep the assign defined for
+    # the initial render.
     {:ok,
      socket
-     |> assign(:filter, params["filter"] || "all")
+     |> assign(:filter, "all")
      |> assign_entities()}
   end
 
+  # Filter resolution order (Phase 8c follow-up Allen 2026-05-20):
+  #   1. explicit `?filter=` query param wins
+  #   2. else, default by URI path — `/identities/agents` → "agents",
+  #      `/identities/users` → "users", `/identities` → "all"
+  # This lets us reuse a single LV for the two sibling list routes
+  # without forking modules.
   @impl true
-  def handle_params(params, _uri, socket) do
+  def handle_params(params, uri, socket) do
     {:noreply,
      socket
-     |> assign(:filter, params["filter"] || "all")
+     |> assign(:filter, params["filter"] || default_filter_for_path(uri))
      |> assign_entities()}
   end
+
+  defp default_filter_for_path(uri) when is_binary(uri) do
+    cond do
+      String.contains?(uri, "/identities/agents") -> "agents"
+      String.contains?(uri, "/identities/users") -> "users"
+      true -> "all"
+    end
+  end
+
+  defp default_filter_for_path(_), do: "all"
 
   defp assign_entities(socket) do
     rows =
