@@ -350,18 +350,44 @@ socket
 
 LV scope（live_session :require_entity）自动继承两个。
 
-### 6.4 Workspace context switcher
+### 6.4 Workspace 选择器 = 登出 + 重新登录（Allen 纠正 2026-05-21）
 
-avatar 下拉里的 workspace 选择器（Phase 8c PR-L）变成真正的上下
-文切换器：
+**对原 SPEC 的修正。** Allen 的结构性纠正：如果 entity URI 是
+workspace-bound（3-segment），那么 `entity://user/default/admin` 和
+`entity://user/team-alpha/admin` 是**两个不同的 entity**。这个设计
+下没有"保持身份 + 换 workspace"的语义 —— 换 workspace 就**是**
+换 entity。
+
+avatar 下拉里的 workspace 选择器行为：
 
 - 点击另一个 workspace → POST `/workspaces/switch` 带 target ws。
-- Controller 检查 caller 的 caps 是否有 cross-workspace 权限。
-  没有则拒绝 + flash "You don't have access to <ws>"。
-- 有则重写 `:current_workspace_uri`（**不**改
-  `:current_entity_uri` —— user 身份不变；只改 operating workspace）。
-- LV 重新 mount，新的 workspace；routing/dispatch 从 socket
-  assigns 读到新 workspace。
+- Controller 同时清掉 `:current_entity_uri` 和
+  `:current_workspace_uri`。
+- 重定向到 `/login?workspace=<target_ws>`，登录表单里预填
+  workspace。
+- User 在该 workspace 下重新认证为对应 entity
+  （`<handle>` 通过 `SessionPrincipal.canonicalize/1` 路径解析为
+  `entity://user/<target_ws>/<handle>`，但带 workspace-override 选项）。
+
+为什么这是对的：
+
+- **URI 告诉你一切（Option A）** —— 如果 workspace 在 URI 里，
+  那么 "current entity" 已经钉住了 workspace。再单独维护一个
+  "current workspace" assign 可以和
+  `entity_workspace_uri(current_entity_uri)` 不一致 —— 这是结构性
+  不一致。
+- **Cross-workspace cap 是给 DISPATCH 用的，不是冒充** —— admin
+  在 `default` workspace 持 cross-workspace cap 可以**发送**消息
+  给 `team-alpha` 的 agent。但不能**变成** `team-alpha` 的
+  admin —— 那需要重新认证为那个不同的 entity。
+- **可审计性** —— 每个 action 的 `ctx.caller` 明确属于一个
+  workspace 的 entity。没有"环境 workspace"叠加层让你忘记。
+
+冗余 assign 说明: `:current_workspace_uri` 仍然由
+`SessionPrincipal.put/2`（§6.1）写入，因为 LV scope 直接读它，避免
+每次 render 都 re-parse entity URI —— 它是个 derived cache。但它
+**必须**始终等于 `entity_workspace_uri(current_entity_uri)`；一个
+invariant test 断言这一点。
 
 ### 6.5 SessionPrincipal codebase invariant 更新
 
@@ -370,7 +396,10 @@ avatar 下拉里的 workspace 选择器（Phase 8c PR-L）变成真正的上下
 扩展为：
 
 - `:current_workspace_uri` 也不允许在 `SessionPrincipal.put/2` 和
-  workspace-switch controller 之外直接 `put_session`。
+  workspace-switch controller 的 clear 路径之外直接 `put_session`。
+- 新 invariant test: 任何 session 同时设了两个 slot 时，
+  `:current_workspace_uri` ==
+  `entity_workspace_uri(:current_entity_uri)`。
 
 ## 7. 数据隔离 — 每租户表加列
 
@@ -480,10 +509,15 @@ PR-6 落地后，按 `feedback_completion_requires_invariant_test` 的
 
 - **Q1 — Bare-handle 登录行为（§6.2）**：A（默认 workspace 回退）
   还是 B（必须显式 workspace）？**推荐 A**。
-- **Q2 — Workspace-switch 时 session-slot 语义（§6.4）**：切换
-  workspace 时清掉 `:current_entity_uri` 吗？我的判断：**不**
-  —— 身份固定；workspace 只是行动范围。切换以后可以叠加 "在那个
-  workspace 创建一个 alt 身份" 流程，但 Phase 9 只发固定身份版本。
+- **Q2 — Workspace-switch 时 session-slot 语义（§6.4）**：~~我原本
+  判断：**不** —— 身份固定；workspace 只是行动范围。~~
+  **Allen 纠正 2026-05-21: 是，切换 workspace 同时清
+  `:current_entity_uri` 和 `:current_workspace_uri`。** 原因:
+  entity URI 是 workspace-bound（3-segment）；
+  `entity://user/default/admin` 和
+  `entity://user/team-alpha/admin` 是不同的 entity。没有"保持身份
+  + 换 workspace"的语义。切换跳转到
+  `/login?workspace=<target>`。详见 §6.4 修正后的流程。
 - **Q3 — 跨 workspace grant 时 granter 的 workspace 默认（§4.3）**：
   admin 授权时，cap 应该默认 granter 的 workspace 还是 grantee
   的？**推荐 grantee 的** —— grantee 是真正用 cap 的 principal。
