@@ -182,3 +182,93 @@ write a checkable done-condition, do not set a goal.
   run `/goal clear` after success — that command is only for abandoning a goal early.
 - If you discover the goal was mis-scoped mid-run, surface it to the user and propose a
   revised goal; do not silently work to a different target than the one they approved.
+
+## Phase transition — extension
+
+Same channel-driven rationale as `/goal`: when the user is on Feishu / their
+phone / any non-TUI surface, they cannot type the context-reset slash command
+themselves. After a long autonomous phase completes, transitioning to the
+next phase often benefits from a fresh context — the prior phase's
+back-and-forth is no longer load-bearing, and re-feeding hundreds of turns
+into the next phase wastes tokens and risks contaminating fresh thinking.
+
+The `send-slash submit` helper from Step 3 above already accepts any slash
+command (it gates only on the leading `/`), so no script change is needed
+to fire the context-reset command. Just the workflow discipline below.
+
+### When to use
+
+All four conditions must hold:
+
+1. The current phase's `/goal` done-condition is met (or no `/goal` was set
+   for this phase).
+2. The user has **explicitly approved the transition** in chat (a "yes" /
+   "go ahead" / "reset and start phase N" message — never assume).
+3. A handoff prompt for the next phase is ready (either you wrote one and
+   sent it to the user, or the user is about to paste their own).
+4. No in-flight subagents — `TaskList` shows nothing in_progress that
+   depends on this session's context.
+
+If any of these is false, do not reset. Send the user what's blocking and
+wait.
+
+### Sequence
+
+1. **Final summary to user (Feishu/channel)**: one message that names what's
+   ending and what's about to fire. Example:
+   > "Phase 8c done — PR-A through PR-O all merged/pushed. About to reset
+   > the TUI context to start Phase 9 fresh. Handoff prompt is at
+   > `/tmp/phase-9-handoff-prompt.md` (also sent earlier in Feishu)."
+2. **Send the handoff prompt file** via the channel BEFORE resetting — the
+   user needs the prompt content to paste back as the first post-reset
+   message. After the reset, you can no longer reference any local file
+   path you wrote before; if the user doesn't have it cached in chat, the
+   transition is lossy.
+3. **Fire the reset** via send-slash submit, using the same vim-mode submit
+   sequence the script provides. The argument is the built-in context-reset
+   slash command (the one Claude Code documents under "clear the
+   conversation").
+4. **End your turn.** The reset may take a moment to land in the TUI. The
+   next user message arrives in a fresh context — no prior conversation
+   history, no prior `/goal`, no carried-over assumptions.
+
+### Safety hard rules
+
+These mirror the `/goal` safety properties — the context reset is more
+destructive, so the rules are stricter:
+
+- **NEVER reset without explicit user approval.** A chat message that reads
+  "looks good, let's move on" is acceptable; ambiguous "ok" is not — ask
+  explicitly.
+- **NEVER reset while a subagent is running.** TaskList check first. If a
+  subagent has a Monitor armed, check that too; the subagent's completion
+  notification needs your session alive to be consumed.
+- **NEVER reset while `/goal` is still active.** The Stop hook is bound to
+  the `/goal` lifecycle; resetting mid-goal orphans the hook and the next
+  phase inherits a phantom directive.
+- **NEVER reset without sending the handoff prompt first.** After the
+  reset, you can't.
+- **NEVER reset as a way to skip an unfinished task.** If resetting feels
+  like "let me start over to avoid finishing this", it's wrong — finish
+  or escalate, don't wipe.
+
+### What the reset does not preserve
+
+This is the user's loss of context, not a hidden carry-over:
+
+- Conversation history (gone).
+- Loaded skills (must be re-`Skill:`'d in the new context).
+- Active `/goal` (must be re-pinned if needed for the new phase).
+- TaskList state (cleared — re-create the tasks you actually need).
+- Subagent results that landed mid-phase but weren't yet integrated.
+
+What DOES persist:
+
+- Files on disk (git working tree, branches, anything in `/tmp` or the repo).
+- Pushed commits (your work isn't lost — it's on the branch).
+- Auto-memory (`MEMORY.md` and the linked memory files).
+- The user's chat surface (Feishu still has every message that was sent).
+
+The handoff prompt's job is to bridge the rest: point the next-phase agent
+at the durable artifacts (memories, branch state, files on disk) so it can
+reconstruct enough context to start.
