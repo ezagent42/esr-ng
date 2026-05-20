@@ -49,6 +49,18 @@ defmodule EzagentPluginLiveview.AgentNewLive do
   # external-HTTP variant.
   @flavors ~w(cc echo curl)
 
+  # Phase 8c follow-up (Allen 2026-05-20) — cc agents need a PtyServer to
+  # actually exec claude-code. PtyServer is started when a workspace's
+  # `cc.agent` template references the agent_uri. Until this step exists,
+  # AgentNewLive only created an identity skeleton ("Not running" forever).
+  # We now also register the template inline as part of create_agent so a
+  # fresh cc agent boots ready-to-use.
+  #
+  # Workspace target: hardcoded "default" for now. Per the
+  # workspace=deployment-unit doc, current-workspace context is a Phase 9
+  # concern; once it's a server-side concept this code reads from socket.
+  @default_workspace_name "default"
+
   @impl true
   def mount(_params, _session, socket) do
     {:ok,
@@ -57,6 +69,7 @@ defmodule EzagentPluginLiveview.AgentNewLive do
      |> assign(:flavor, "cc")
      |> assign(:name, "")
      |> assign(:caps_str, "")
+     |> assign(:cwd, "")
      |> assign(:flash_error, nil)
      |> assign(:flash_info, nil)
      |> assign(:preview_uri, preview_uri("cc", ""))}
@@ -67,12 +80,14 @@ defmodule EzagentPluginLiveview.AgentNewLive do
     flavor = Map.get(params, "flavor", socket.assigns.flavor)
     name = Map.get(params, "name", socket.assigns.name)
     caps_str = Map.get(params, "caps", socket.assigns.caps_str)
+    cwd = Map.get(params, "cwd", socket.assigns.cwd)
 
     {:noreply,
      socket
      |> assign(:flavor, flavor)
      |> assign(:name, name)
      |> assign(:caps_str, caps_str)
+     |> assign(:cwd, cwd)
      |> assign(:preview_uri, preview_uri(flavor, name))}
   end
 
@@ -80,14 +95,17 @@ defmodule EzagentPluginLiveview.AgentNewLive do
     flavor = Map.get(params, "flavor", "") |> String.trim()
     name = Map.get(params, "name", "") |> String.trim()
     caps_str = Map.get(params, "caps", "") |> String.trim()
+    cwd = Map.get(params, "cwd", "") |> String.trim()
 
     with :ok <- validate_flavor(flavor),
          :ok <- validate_name(name),
+         :ok <- validate_cwd_for_flavor(flavor, cwd),
          {:ok, agent_uri} <- compose_uri(flavor, name),
          :ok <- refuse_if_exists(agent_uri),
          {:ok, caps} <- Capability.Parser.parse(caps_str, caller_uri(socket)),
          {:ok, _pid} <- Ezagent.SpawnRegistry.spawn(agent_uri),
-         :ok <- grant_all(agent_uri, caps, socket) do
+         :ok <- grant_all(agent_uri, caps, socket),
+         :ok <- maybe_register_cc_template(flavor, agent_uri, cwd) do
       encoded = URI.encode_www_form(URI.to_string(agent_uri))
       {:noreply, push_navigate(socket, to: "/identities/agents/#{encoded}")}
     else
@@ -99,6 +117,7 @@ defmodule EzagentPluginLiveview.AgentNewLive do
          |> assign(:flavor, flavor)
          |> assign(:name, name)
          |> assign(:caps_str, caps_str)
+         |> assign(:cwd, cwd)
          |> assign(:preview_uri, preview_uri(flavor, name))}
     end
   end
@@ -122,6 +141,41 @@ defmodule EzagentPluginLiveview.AgentNewLive do
       {:error, {:bad_name, name}}
     end
   end
+
+  # echo / curl flavors don't use a PtyServer; cwd is irrelevant.
+  defp validate_cwd_for_flavor(flavor, _cwd) when flavor in ["echo", "curl"], do: :ok
+  defp validate_cwd_for_flavor("cc", ""), do: {:error, :cwd_required_for_cc}
+
+  defp validate_cwd_for_flavor("cc", cwd) do
+    expanded = Path.expand(cwd)
+
+    cond do
+      not File.dir?(expanded) -> {:error, {:cwd_not_a_dir, cwd}}
+      true -> :ok
+    end
+  end
+
+  defp validate_cwd_for_flavor(_, _), do: :ok
+
+  defp maybe_register_cc_template("cc", agent_uri, cwd) do
+    tmpl_name = "cc.agent." <> agent_name(agent_uri)
+
+    tmpl = %{
+      "class" => "cc.agent",
+      "agent_uri" => URI.to_string(agent_uri),
+      "mode" => "local-pty",
+      "cwd" => Path.expand(cwd)
+    }
+
+    case Ezagent.Workspace.add_template(@default_workspace_name, tmpl_name, tmpl) do
+      :ok -> :ok
+      {:error, reason} -> {:error, {:template_register_failed, reason}}
+    end
+  end
+
+  defp maybe_register_cc_template(_other_flavor, _agent_uri, _cwd), do: :ok
+
+  defp agent_name(%URI{path: "/" <> rest}), do: rest
 
   defp compose_uri(flavor, name) do
     full = "entity://agent/#{flavor}_#{name}"
@@ -196,6 +250,15 @@ defmodule EzagentPluginLiveview.AgentNewLive do
   defp friendly_error({:grant_failed, cap, reason}),
     do: "Agent created but cap grant failed for #{inspect(cap)}: #{inspect(reason)}"
 
+  defp friendly_error(:cwd_required_for_cc),
+    do: "Working directory is required for cc agents (claude-code runs there)."
+
+  defp friendly_error({:cwd_not_a_dir, cwd}),
+    do: "Working directory #{inspect(cwd)} doesn't exist or isn't a directory."
+
+  defp friendly_error({:template_register_failed, reason}),
+    do: "Agent created but cc.agent template registration failed: #{inspect(reason)}"
+
   defp friendly_error(other), do: "Create failed: #{inspect(other)}"
 
   # ── render ─────────────────────────────────────────────────────────
@@ -262,6 +325,26 @@ defmodule EzagentPluginLiveview.AgentNewLive do
                 />
                 <span class="text-[11px] text-zinc-500">
                   Creates <code class="font-mono text-zinc-700 dark:text-zinc-300">{@preview_uri}</code>
+                </span>
+              </label>
+
+              <label :if={@flavor == "cc"} class="flex flex-col gap-1">
+                <span class="text-xs uppercase tracking-wide text-zinc-500">
+                  Working directory <span class="text-red-600 dark:text-red-400">*</span>
+                </span>
+                <input
+                  type="text"
+                  name="agent[cwd]"
+                  value={@cwd}
+                  placeholder="/Users/you/Workspace/my-project"
+                  autocomplete="off"
+                  class="block w-full px-3 py-2 text-sm rounded-md border border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 font-mono"
+                />
+                <span class="text-[11px] text-zinc-500">
+                  Where <code>claude-code</code> runs. Required for <code>cc</code> flavor
+                  — the PtyServer starts in this directory. Must exist on the host.
+                  Registers a <code>cc.agent</code> template in workspace
+                  <code>default</code> so the agent boots ready-to-use.
                 </span>
               </label>
 
