@@ -13,6 +13,12 @@ defmodule Ezagent.Invocation do
   Kind GenServer). Validation (step 2.5) moves to step 5.5 because
   it needs the Behavior's `@interface` which is found in step 5.
 
+  Phase 9 PR-4 (SPEC v3 §5) added step 5.6 — workspace isolation —
+  inside `Kind.Runtime` adjacent to step 5.5. Cross-workspace
+  dispatch now returns `{:error, :cross_workspace_denied}` instead
+  of silently succeeding when a cap matches structurally but the
+  caller's workspace differs from the target's.
+
   ## Reply table
 
   `reply/2` routes a result back to the caller per `ctx.reply` (7
@@ -72,6 +78,7 @@ defmodule Ezagent.Invocation do
           | {:error, {:invalid_args, list()}}
           | {:error, {:unknown_action, atom()}}
           | {:error, :unauthorized}
+          | {:error, :cross_workspace_denied}
           | {:ok, :duplicate_ignored}
   def dispatch(%__MODULE__{mode: mode}) when mode in [:subscribe, :introspect] do
     {:error, :unsupported_mode}

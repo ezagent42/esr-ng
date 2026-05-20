@@ -90,12 +90,46 @@ defmodule EzagentPluginFeishu.InboundDispatcher do
                 send_dispatch_error(
                   chat_id,
                   message_id,
-                  "❌ ESR: 没有权限发送到 #{URI.to_string(session_uri)} " <>
+                  "THUMBSDOWN",
+                  "🚫 ESR: 没有权限发送到 #{URI.to_string(session_uri)} " <>
                     "(missing cap: session.chat). " <>
                     "请联系管理员补一条 `kind=:session behavior=:chat` 的 cap。"
                 )
 
                 {:error, :unauthorized}
+
+              {:error, :cross_workspace_denied} ->
+                # Phase 9 PR-4 (SPEC v3 §5) — workspace isolation
+                # violation. Distinct from :unauthorized per invariant
+                # 9: the cap matched structurally, but the caller and
+                # target live in different workspaces and the caller
+                # doesn't hold a cross-workspace cap. Surface with a
+                # different reaction emoji and a workspace-specific
+                # failure message so the user understands the root
+                # cause is tenant boundary, not missing cap.
+                #
+                # Reaction emoji "NO" is on Feishu's curated reaction
+                # allowlist (https://open.feishu.cn/document/.../emojis);
+                # visually distinct from THUMBSDOWN (unauthorized) so
+                # operators can grep audit by react. The leading 🌐 in
+                # the text body carries the same semantic for the
+                # human reader.
+                Logger.info(
+                  "Feishu inbound: cross-workspace denied for #{URI.to_string(caller_uri)} → " <>
+                    "#{URI.to_string(session_uri)}/chat/send; sending text back"
+                )
+
+                send_dispatch_error(
+                  chat_id,
+                  message_id,
+                  "NO",
+                  "🌐 ESR: 跨 workspace dispatch 被拒绝。" <>
+                    "你的身份 (#{URI.to_string(caller_uri)}) 与目标 session " <>
+                    "(#{URI.to_string(session_uri)}) 不在同一 workspace。" <>
+                    "需要 admin 授予 cross-workspace cap 才能跨 workspace 发送。"
+                )
+
+                {:error, :cross_workspace_denied}
 
               {:error, reason} ->
                 Logger.warning(
@@ -105,6 +139,7 @@ defmodule EzagentPluginFeishu.InboundDispatcher do
                 send_dispatch_error(
                   chat_id,
                   message_id,
+                  "THUMBSDOWN",
                   "❌ ESR: dispatch 失败: #{inspect(reason)}"
                 )
 
@@ -170,10 +205,15 @@ defmodule EzagentPluginFeishu.InboundDispatcher do
 
   # Send a Feishu text back to the source chat when ESR dispatch
   # can't proceed, so the human sees the failure instead of
-  # waiting in silence. THUMBSDOWN react paired with the explanation
+  # waiting in silence. The react emoji paired with the explanation
   # text mirrors the existing :pending → THUMBSDOWN pattern: emoji
   # for at-a-glance status, text for the "why."
-  defp send_dispatch_error(chat_id, message_id, text) do
+  #
+  # Phase 9 PR-4: `react_emoji` argument made explicit so callers can
+  # surface different failure modes with different emojis (invariant
+  # 9 — :unauthorized vs :cross_workspace_denied vs generic error
+  # need to be visually distinguishable at the channel surface).
+  defp send_dispatch_error(chat_id, message_id, react_emoji, text) do
     Task.start(fn ->
       case Client.send_text(chat_id, text) do
         :ok ->
@@ -184,7 +224,7 @@ defmodule EzagentPluginFeishu.InboundDispatcher do
       end
     end)
 
-    react_safe(message_id, "THUMBSDOWN")
+    react_safe(message_id, react_emoji)
     :ok
   end
 

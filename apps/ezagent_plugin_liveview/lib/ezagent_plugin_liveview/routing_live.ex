@@ -174,6 +174,18 @@ defmodule EzagentPluginLiveview.RoutingLive do
              "Ask admin to grant via mix ezagent.user.create."
          )}
 
+      {:error, :cross_workspace_denied} ->
+        # Phase 9 PR-4 — workspace isolation. Routing rules on
+        # workspace://<X>?action=routing.add_rule against a workspace
+        # other than the caller's. Routing on system://routing/default
+        # bypasses isolation (system is :any-workspace) — this branch
+        # is for the workspace-scoped scope.
+        {:noreply,
+         assign(socket, :flash_error,
+           "Cross-workspace denied — you're trying to add a routing rule in a " <>
+             "different workspace. Ask admin for a cross-workspace cap."
+         )}
+
       {:error, reason} ->
         {:noreply, assign(socket, :flash_error, "add failed: #{inspect(reason)}")}
 
@@ -209,6 +221,13 @@ defmodule EzagentPluginLiveview.RoutingLive do
              assign(socket, :flash_error,
                "You don't have routing cap on the global system://routing/default " <>
                  "scope to perform this action."
+             )}
+
+          {:error, :cross_workspace_denied} ->
+            {:noreply,
+             assign(socket, :flash_error,
+               "Cross-workspace denied — this rule lives in a different workspace. " <>
+                 "Ask admin for a cross-workspace cap."
              )}
 
           {:error, reason} ->
