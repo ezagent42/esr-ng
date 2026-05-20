@@ -146,10 +146,13 @@ defmodule EzagentPluginLiveview.UsersLive do
   end
 
   # PR #141 + #145: entity:// scheme; user URIs are entity://user/<name>.
+  # Phase 9 PR-3 (SPEC v3 §3): now 3-segment
+  # entity://user/<workspace>/<name>. Accepts both shapes — 2-segment
+  # is auto-upgraded by normalize_handle_to_uri/1 above.
   defp parse_user_uri(s) do
     case URI.new(s) do
-      {:ok, %URI{scheme: "entity", host: "user", path: "/" <> name}}
-      when is_binary(name) and name != "" ->
+      {:ok, %URI{scheme: "entity", host: "user", path: "/" <> rest}}
+      when is_binary(rest) and rest != "" ->
         {:ok, URI.parse(s)}
 
       _ ->
@@ -170,14 +173,27 @@ defmodule EzagentPluginLiveview.UsersLive do
   # Task 3 — bare handle (`allen`) or full URI (`entity://user/default/allen`).
   # Anything else falls through and parse_user_uri rejects with a
   # helpful error.
+  #
+  # Phase 9 PR-3 (SPEC v3 §3): entity URIs are 3-segment
+  # `entity://user/<workspace>/<name>`. Bare handles default into
+  # the `default` workspace; legacy 2-segment full URIs are upgraded
+  # by injecting `default/`. Workspace selection UI lands in PR-5.
   defp normalize_handle_to_uri(""), do: ""
 
-  defp normalize_handle_to_uri("entity://user/" <> _rest = full), do: full
+  defp normalize_handle_to_uri("entity://user/" <> rest = full) do
+    if String.contains?(rest, "/") do
+      # Already has workspace segment.
+      full
+    else
+      # Legacy 2-segment shape — upgrade to 3-segment under `default`.
+      "entity://user/default/" <> rest
+    end
+  end
 
   defp normalize_handle_to_uri(handle) do
     # Strip leading "@" if user typed `@allen`. Slug whitespace is invalid.
     handle = String.trim_leading(handle, "@") |> String.trim()
-    "entity://user/" <> handle
+    "entity://user/default/" <> handle
   end
 
   # Task 1 + Task 2 — when create form supplies a display_name, persist

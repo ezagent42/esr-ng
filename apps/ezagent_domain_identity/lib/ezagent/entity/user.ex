@@ -49,6 +49,11 @@ defmodule Ezagent.Entity.User do
         kind: :any,
         behavior: :any,
         instance: :any,
+        # Phase 9 PR-3 (SPEC v3 §4.4): admin's structural cap is
+        # cross-workspace by design — the only cap with
+        # `workspace_uri: :any` outside of explicit
+        # `cross-workspace:dispatch` grants.
+        workspace_uri: :any,
         granted_by: @system_bootstrap_uri,
         granted_at: @admin_granted_at
       }
@@ -84,14 +89,22 @@ defmodule Ezagent.Entity.User do
   Prepended to user-supplied caps in `Ezagent.Domain.Identity.Users.create/3`.
   Idempotently re-granted by Feishu `BindingPolicy.apply/2` to handle
   pre-PR-27 users that were created without it.
+
+  ## Phase 9 PR-3 (SPEC v3 §4.5) — workspace dimension
+
+  The default cap is scoped to the user's own workspace via
+  `workspace_uri:`. Cross-workspace chat requires an explicit
+  cross-workspace cap (PR-4). Callers pass the workspace URI
+  derived from the user's URI (`Ezagent.URI.entity_workspace_uri/1`).
   """
-  @spec default_caps() :: [Ezagent.Capability.t()]
-  def default_caps do
+  @spec default_caps(URI.t()) :: [Ezagent.Capability.t()]
+  def default_caps(%URI{scheme: "workspace"} = workspace_uri) do
     [
       %Ezagent.Capability{
         kind: :session,
         behavior: :any,
         instance: :any,
+        workspace_uri: workspace_uri,
         granted_by: @system_bootstrap_uri,
         granted_at: @admin_granted_at
       }

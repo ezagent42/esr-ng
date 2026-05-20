@@ -38,7 +38,8 @@ defmodule Ezagent.Behavior.IdentityTest do
       needed = %{
         kind: :session,
         behavior: Ezagent.Behavior.Chat,
-        instance: URI.new!("session://main")
+        instance: URI.new!("session://main"),
+        workspace_uri: URI.new!("workspace://default")
       }
 
       assert {:ok, ^slice, %{has: true}} = Identity.invoke(:has_cap?, slice, %{cap: needed}, %{})
@@ -50,7 +51,8 @@ defmodule Ezagent.Behavior.IdentityTest do
       needed = %{
         kind: :session,
         behavior: Ezagent.Behavior.Chat,
-        instance: URI.new!("session://main")
+        instance: URI.new!("session://main"),
+        workspace_uri: URI.new!("workspace://default")
       }
 
       assert {:ok, ^slice, %{has: false}} = Identity.invoke(:has_cap?, slice, %{cap: needed}, %{})
@@ -84,7 +86,8 @@ defmodule Ezagent.Behavior.IdentityTest do
       assert Capability.matches?(admin_cap, %{
                kind: :anything,
                behavior: SomeMod,
-               instance: URI.new!("entity://agent/default/test_X")
+               instance: URI.new!("entity://agent/default/test_X"),
+               workspace_uri: URI.new!("workspace://default")
              })
     end
   end

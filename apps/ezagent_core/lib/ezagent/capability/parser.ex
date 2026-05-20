@@ -61,6 +61,11 @@ defmodule Ezagent.Capability.Parser do
        kind: :any,
        behavior: :any,
        instance: :any,
+       # `*` is the operator shorthand for "admin-equivalent" — cross-
+       # workspace by intent. SPEC v3 §4 still allows operators to
+       # mint such caps via `--allow-allcaps`; the workspace dimension
+       # follows the kind/behavior/instance wildcard pattern.
+       workspace_uri: :any,
        granted_by: granter,
        granted_at: now
      }}
@@ -78,6 +83,15 @@ defmodule Ezagent.Capability.Parser do
              kind: kind_atom,
              behavior: behavior,
              instance: instance_uri,
+             # Parsed caps default to cross-workspace (`:any`) so the
+             # CLI grammar stays backward-compatible for now. Phase 9
+             # PR-4 will add an explicit `@<workspace>` suffix to the
+             # grammar; PR-3 just plumbs the field. The granter
+             # (typically admin) is the only principal authorized to
+             # mint cross-workspace caps anyway, so `:any` here is
+             # not an escape hatch beyond what the operator already
+             # has.
+             workspace_uri: :any,
              granted_by: granter,
              granted_at: now
            }}

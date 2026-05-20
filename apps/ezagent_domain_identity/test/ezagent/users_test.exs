@@ -19,7 +19,7 @@ defmodule Ezagent.UsersTest do
       assert is_binary(decoded.password_hash)
       assert decoded.password_hash != "secret"
 
-      default = Ezagent.Entity.User.default_caps()
+      default = Ezagent.Entity.User.default_caps(URI.new!("workspace://default"))
       assert length(decoded.caps) == length(default)
 
       assert Enum.any?(decoded.caps, fn c ->
@@ -41,6 +41,8 @@ defmodule Ezagent.UsersTest do
         kind: :workspace,
         behavior: Ezagent.Behavior.Workspace,
         instance: :any,
+        # Phase 9 PR-3 (SPEC v3 §4): caps are now workspace-scoped.
+        workspace_uri: URI.new!("workspace://default"),
         granted_by: URI.parse("entity://user/default/admin"),
         granted_at: ~U[2026-05-16 00:00:00.000000Z]
       }

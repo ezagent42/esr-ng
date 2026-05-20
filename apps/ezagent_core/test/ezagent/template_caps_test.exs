@@ -24,46 +24,51 @@ defmodule Ezagent.TemplateCapsTest do
   semantics; if a future refactor flips, say, `:template` →
   `:tpl`, this test fails and the contract violation surfaces in
   CI rather than as a silent denial at runtime.
+
+  Phase 9 PR-3 (SPEC v3 §4): template-kind caps are workspace-
+  scoped same as session caps; the helper threads
+  `workspace_uri: workspace://default` through both sides.
   """
 
   use ExUnit.Case, async: true
 
   alias Ezagent.Capability
+  import Ezagent.Test.CapHelper
 
   defp template_cap(behavior_atom, instance) do
-    %Capability{
+    cap(
       kind: :template,
       behavior: behavior_atom,
       instance: instance,
       granted_by: URI.parse("entity://user/default/admin"),
       granted_at: ~U[2026-05-18 00:00:00Z]
-    }
+    )
   end
 
   defp needed_template_action(behavior_atom, instance_uri) do
-    %{
+    needed(
       kind: :template,
       behavior: behavior_atom,
       instance: instance_uri
-    }
+    )
   end
 
   describe "template:read cap" do
     test "matches when needed action is template:read on the granted instance" do
       template_uri = URI.parse("template://session/code-review@abc123")
-      cap = template_cap(:read, template_uri)
+      c = template_cap(:read, template_uri)
 
-      needed = needed_template_action(:read, template_uri)
-      assert Capability.matches?(cap, needed)
+      n = needed_template_action(:read, template_uri)
+      assert Capability.matches?(c, n)
     end
 
     test "does NOT match template:write needed (read is strictly narrower)" do
       template_uri = URI.parse("template://session/code-review@abc123")
-      cap = template_cap(:read, template_uri)
+      c = template_cap(:read, template_uri)
 
-      needed = needed_template_action(:write, template_uri)
+      n = needed_template_action(:write, template_uri)
 
-      refute Capability.matches?(cap, needed),
+      refute Capability.matches?(c, n),
              "template:read MUST NOT match template:write — orchestrator with read-only " <>
                "access must not be able to update_template (Decision #136)"
     end
@@ -72,20 +77,20 @@ defmodule Ezagent.TemplateCapsTest do
   describe "template:write cap" do
     test "matches when needed action is template:write on the granted instance" do
       template_uri = URI.parse("template://session/code-review@abc123")
-      cap = template_cap(:write, template_uri)
+      c = template_cap(:write, template_uri)
 
-      needed = needed_template_action(:write, template_uri)
-      assert Capability.matches?(cap, needed)
+      n = needed_template_action(:write, template_uri)
+      assert Capability.matches?(c, n)
     end
 
     test "does NOT match template:write on a different instance" do
       cap_uri = URI.parse("template://session/code-review@abc123")
       other_uri = URI.parse("template://session/other-team@xyz789")
-      cap = template_cap(:write, cap_uri)
+      c = template_cap(:write, cap_uri)
 
-      needed = needed_template_action(:write, other_uri)
+      n = needed_template_action(:write, other_uri)
 
-      refute Capability.matches?(cap, needed),
+      refute Capability.matches?(c, n),
              "template:write on instance X must not match template:write on instance Y " <>
                "— write authority is per-template-instance (per-name actually, but " <>
                "this test pins the per-URI-instance check first)"
@@ -95,19 +100,19 @@ defmodule Ezagent.TemplateCapsTest do
   describe "template:instantiate cap" do
     test "matches when needed action is template:instantiate on the granted instance" do
       template_uri = URI.parse("template://session/code-review@abc123")
-      cap = template_cap(:instantiate, template_uri)
+      c = template_cap(:instantiate, template_uri)
 
-      needed = needed_template_action(:instantiate, template_uri)
-      assert Capability.matches?(cap, needed)
+      n = needed_template_action(:instantiate, template_uri)
+      assert Capability.matches?(c, n)
     end
 
     test "does NOT match template:write needed (instantiate ≠ write)" do
       template_uri = URI.parse("template://session/code-review@abc123")
-      cap = template_cap(:instantiate, template_uri)
+      c = template_cap(:instantiate, template_uri)
 
-      needed = needed_template_action(:write, template_uri)
+      n = needed_template_action(:write, template_uri)
 
-      refute Capability.matches?(cap, needed),
+      refute Capability.matches?(c, n),
              "template:instantiate MUST NOT match template:write — users who can " <>
                "spin up a session from a template must not be able to modify the " <>
                "template itself (Decision #136 + #141 fork model)"
@@ -117,12 +122,12 @@ defmodule Ezagent.TemplateCapsTest do
   describe "template:any wildcard" do
     test "template:any matches all three actions on the granted instance" do
       template_uri = URI.parse("template://session/code-review@abc123")
-      cap = template_cap(:any, template_uri)
+      c = template_cap(:any, template_uri)
 
       for action <- [:read, :write, :instantiate] do
-        needed = needed_template_action(action, template_uri)
+        n = needed_template_action(action, template_uri)
 
-        assert Capability.matches?(cap, needed),
+        assert Capability.matches?(c, n),
                "template:any cap should match template:#{action} on the same instance"
       end
     end
@@ -131,15 +136,16 @@ defmodule Ezagent.TemplateCapsTest do
   describe "kind boundary" do
     test "template:read on instance X does NOT match action targeting :session kind" do
       template_uri = URI.parse("template://session/x@hash")
-      cap = template_cap(:read, template_uri)
+      c = template_cap(:read, template_uri)
 
-      needed = %{
-        kind: :session,
-        behavior: :read,
-        instance: URI.parse("session://x")
-      }
+      n =
+        needed(
+          kind: :session,
+          behavior: :read,
+          instance: URI.parse("session://x")
+        )
 
-      refute Capability.matches?(cap, needed),
+      refute Capability.matches?(c, n),
              "template cap must not leak into :session kind — kind boundary is strict"
     end
   end

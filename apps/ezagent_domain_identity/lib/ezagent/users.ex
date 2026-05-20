@@ -61,7 +61,11 @@ defmodule Ezagent.Users do
     # in chat. Caller-supplied caps follow, so an operator who
     # explicitly grants `session.chat` doesn't double-grant (the
     # Identity slice de-dupes via MapSet on load anyway).
-    final_caps = Ezagent.Entity.User.default_caps() ++ caps
+    #
+    # Phase 9 PR-3 (SPEC v3 §4.5): default caps are workspace-scoped
+    # — derive the user's workspace from their URI.
+    user_workspace = Ezagent.URI.entity_workspace_uri(URI.parse(uri_str))
+    final_caps = Ezagent.Entity.User.default_caps(user_workspace) ++ caps
 
     changeset =
       %__MODULE__{}

@@ -28,7 +28,9 @@ defmodule EzagentPluginLiveview.UsersLiveTest do
   test "create_user persists + appears in list", %{conn: conn} do
     {:ok, lv, _html} = live(conn, "/identities/users")
     handle = "lv-create-#{System.unique_integer([:positive])}"
-    uri = "entity://user/" <> handle
+    # Phase 9 PR-3 (SPEC v3 §3): bare handles upgrade to 3-segment
+    # `entity://user/default/<handle>`.
+    uri = "entity://user/default/" <> handle
 
     # Phase 8c PR-O — bare handle accepted; backend normalizes.
     lv
@@ -50,7 +52,9 @@ defmodule EzagentPluginLiveview.UsersLiveTest do
   test "create_user refuses '*' caps via UI (must use mix --allow-allcaps)", %{conn: conn} do
     {:ok, lv, _html} = live(conn, "/identities/users")
     handle = "lv-allcaps-#{System.unique_integer([:positive])}"
-    uri = "entity://user/" <> handle
+    # Phase 9 PR-3 (SPEC v3 §3): bare handles upgrade to 3-segment
+    # `entity://user/default/<handle>`.
+    uri = "entity://user/default/" <> handle
 
     lv
     |> form("#create-user form",
@@ -70,7 +74,9 @@ defmodule EzagentPluginLiveview.UsersLiveTest do
   test "create_user accepts bare handle (Task 3 — Phase 8c PR-O)", %{conn: conn} do
     {:ok, lv, _html} = live(conn, "/identities/users")
     handle = "lv-bare-#{System.unique_integer([:positive])}"
-    expected_uri = "entity://user/" <> handle
+    # Phase 9 PR-3 (SPEC v3 §3): bare handles upgrade to 3-segment
+    # `entity://user/default/<handle>`.
+    expected_uri = "entity://user/default/" <> handle
 
     lv
     |> form("#create-user form",
@@ -90,7 +96,9 @@ defmodule EzagentPluginLiveview.UsersLiveTest do
   test "create_user persists display_name when supplied (Task 1 — Phase 8c PR-O)", %{conn: conn} do
     {:ok, lv, _html} = live(conn, "/identities/users")
     handle = "lv-dn-#{System.unique_integer([:positive])}"
-    uri = "entity://user/" <> handle
+    # Phase 9 PR-3 (SPEC v3 §3): bare handles upgrade to 3-segment
+    # `entity://user/default/<handle>`.
+    uri = "entity://user/default/" <> handle
 
     lv
     |> form("#create-user form",
