@@ -38,6 +38,14 @@ defmodule EzagentCli.Formatter do
 
   def render({:error, :unauthorized}, _json?), do: {"error: unauthorized\n", 3}
 
+  # Phase 9 PR-4 (SPEC v3 §5) — workspace isolation denial. Distinct
+  # exit code (5) so CI / scripts can distinguish "missing cap" from
+  # "wrong workspace" without parsing stderr (invariant 9).
+  def render({:error, :cross_workspace_denied}, _json?),
+    do:
+      {"error: cross-workspace denied (caller workspace != target workspace; " <>
+         "need cross-workspace cap)\n", 5}
+
   def render({:error, :no_such_actor}, _json?),
     do: {"error: no such actor (did you spawn the instance?)\n", 4}
 

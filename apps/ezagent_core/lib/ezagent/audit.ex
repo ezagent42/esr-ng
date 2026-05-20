@@ -107,9 +107,14 @@ defmodule Ezagent.Audit do
 
     # Distinguish authz denied from other errors so the audit row's
     # authz column is meaningful for operators debugging permissions.
+    # Phase 9 PR-4 (SPEC v3 §5): cross-workspace denial is a separate
+    # bucket — operators debugging "my dispatch failed" need to see
+    # whether it was a missing cap (`denied`) or a workspace isolation
+    # violation (`cross_workspace_denied`).
     authz =
       case reason do
         :unauthorized -> "denied"
+        :cross_workspace_denied -> "cross_workspace_denied"
         _ -> "n/a"
       end
 

@@ -177,6 +177,79 @@ defmodule Ezagent.Capability do
   def admin_invariant?(%__MODULE__{}), do: false
 
   @doc """
+  Is `cap` a cross-workspace cap?
+
+  Phase 9 PR-4 (SPEC v3 §5.1) — returns true when the cap's
+  `workspace_uri` is `:any`, marking it as authorized across any
+  workspace. The structural admin invariant cap is the canonical
+  example; a non-admin cross-workspace cap (narrowed `kind` /
+  `behavior` / `instance`) keeps `workspace_uri: :any` and is the
+  same predicate.
+
+  Used by `Ezagent.Kind.Runtime` step 5.6 to decide whether to
+  override workspace isolation when caller and target are in
+  different workspaces.
+  """
+  @spec cross_workspace?(t()) :: boolean()
+  def cross_workspace?(%__MODULE__{workspace_uri: :any}), do: true
+  def cross_workspace?(%__MODULE__{}), do: false
+
+  @doc """
+  Derive the workspace scope of a target URI.
+
+  SPEC v3 §4.2 / §5.3. Promoted from private in Phase 9 PR-4 so
+  `Ezagent.Kind.Runtime` step 5.6 can reuse the same workspace
+  derivation that `cap_for_action/3` uses for the `needed` map —
+  keeping the two sides in lock-step structurally.
+
+  - `entity://<type>/<workspace>/<name>` →
+    `Ezagent.URI.entity_workspace_uri/1`
+  - `session://<template>/<name>` →
+    `Ezagent.WorkspaceRegistry.lookup/1` (raises if unbound —
+    invariant 4)
+  - `workspace://<name>` → the URI itself
+  - `system://`, `template://`, `resource://`, unknown schemes →
+    `:any` (cross-cutting; workspace boundary doesn't apply)
+
+  `:any` for a target means "cross-workspace by structural design"
+  — step 5.6 should skip the isolation check for these.
+  """
+  @spec workspace_of(URI.t()) :: URI.t() | :any
+  def workspace_of(%URI{scheme: "entity"} = uri) do
+    Ezagent.URI.entity_workspace_uri(%URI{uri | query: nil, fragment: nil})
+  end
+
+  def workspace_of(%URI{scheme: "session"} = uri) do
+    bare = %URI{uri | query: nil, fragment: nil}
+
+    case Ezagent.WorkspaceRegistry.lookup(bare) do
+      {:ok, ws} ->
+        ws
+
+      :error ->
+        raise "session #{URI.to_string(bare)} has no workspace binding " <>
+                "(invariant 4 violated — Template Class must call " <>
+                "Ezagent.WorkspaceRegistry.bind/2 after SpawnRegistry.spawn)"
+    end
+  end
+
+  def workspace_of(%URI{scheme: "workspace"} = uri),
+    do: %URI{uri | query: nil, fragment: nil}
+
+  def workspace_of(%URI{scheme: "system"}), do: :any
+  def workspace_of(%URI{scheme: "template"}), do: :any
+  def workspace_of(%URI{scheme: "resource"}), do: :any
+
+  # Catch-all for test-only schemes (e.g. `probecli://`, `test://`)
+  # and any future scheme not yet wired through workspace derivation.
+  # Defaults to `:any` (cross-workspace) so unknown schemes don't
+  # silently fail with FunctionClauseError — production paths are
+  # constrained by `Ezagent.URI.SchemeRegistry` ETS allowlist per
+  # SPEC v2 §5.8, so this only fires for test fixtures using
+  # unregistered schemes.
+  def workspace_of(%URI{}), do: :any
+
+  @doc """
   Serialize a Capability to a JSON-safe map (for `users.caps_json`
   storage per Phase 4-completion Spec 05 Part A).
 
@@ -299,41 +372,4 @@ defmodule Ezagent.Capability do
       workspace_uri: workspace_of(target_uri)
     }
   end
-
-  # SPEC v3 §4.2 / §5.3 — derive the workspace scope of a target URI.
-  #
-  # Targets carry a `?action=` query — strip it before workspace
-  # derivation so the lookup key matches the canonical identity URI
-  # (`Ezagent.URI.instance/1` does the same on the instance dimension).
-  defp workspace_of(%URI{scheme: "entity"} = uri) do
-    Ezagent.URI.entity_workspace_uri(%URI{uri | query: nil, fragment: nil})
-  end
-
-  defp workspace_of(%URI{scheme: "session"} = uri) do
-    bare = %URI{uri | query: nil, fragment: nil}
-
-    case Ezagent.WorkspaceRegistry.lookup(bare) do
-      {:ok, ws} ->
-        ws
-
-      :error ->
-        raise "session #{URI.to_string(bare)} has no workspace binding " <>
-                "(invariant 4 violated — Template Class must call " <>
-                "Ezagent.WorkspaceRegistry.bind/2 after SpawnRegistry.spawn)"
-    end
-  end
-
-  defp workspace_of(%URI{scheme: "workspace"} = uri), do: %URI{uri | query: nil, fragment: nil}
-  defp workspace_of(%URI{scheme: "system"}), do: :any
-  defp workspace_of(%URI{scheme: "template"}), do: :any
-  defp workspace_of(%URI{scheme: "resource"}), do: :any
-
-  # Catch-all for test-only schemes (e.g. `probecli://`, `test://`)
-  # and any future scheme not yet wired through workspace derivation.
-  # Defaults to `:any` (cross-workspace) so unknown schemes don't
-  # silently fail with FunctionClauseError — production paths are
-  # constrained by `Ezagent.URI.SchemeRegistry` ETS allowlist per
-  # SPEC v2 §5.8, so this only fires for test fixtures using
-  # unregistered schemes.
-  defp workspace_of(%URI{}), do: :any
 end

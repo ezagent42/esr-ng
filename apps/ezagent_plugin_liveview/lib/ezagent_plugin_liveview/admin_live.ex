@@ -367,6 +367,19 @@ defmodule EzagentPluginLiveview.AdminLive do
                    "Unauthorized — need agent.pty.write cap on this agent."
                  )}
 
+              {:error, :cross_workspace_denied} ->
+                # Phase 9 PR-4 — workspace isolation violation. The
+                # current user holds a matching cap structurally but
+                # their workspace differs from the target agent's
+                # workspace and they don't hold a cross-workspace cap.
+                {:noreply,
+                 assign(
+                   socket,
+                   :flash_error,
+                   "Cross-workspace denied — your workspace differs from this agent's " <>
+                     "workspace. Ask admin for a cross-workspace cap."
+                 )}
+
               {:error, reason} ->
                 {:noreply, assign(socket, :flash_error, "PTY input failed: #{inspect(reason)}")}
             end
@@ -917,6 +930,14 @@ defmodule EzagentPluginLiveview.AdminLive do
 
   defp friendly_error(_action, :unauthorized) do
     "You don't have permission for this action. Contact admin for cap grant."
+  end
+
+  # Phase 9 PR-4 (SPEC v3 §5) — distinct from :unauthorized so users
+  # see "wrong workspace" vs "missing cap" as separate failure modes
+  # (invariant 9).
+  defp friendly_error(_action, :cross_workspace_denied) do
+    "Cross-workspace denied — your workspace differs from the target's workspace. " <>
+      "Contact admin for a cross-workspace cap."
   end
 
   defp friendly_error(action, reason), do: "#{action} failed: #{inspect(reason)}"

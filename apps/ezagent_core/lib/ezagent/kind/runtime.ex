@@ -11,6 +11,16 @@ defmodule Ezagent.Kind.Runtime do
     or `[:ezagent, :authz, :denied]`. The Phase 1-2 permissive stub
     (emit `:stub_grant` + always grant) is GONE; check_invariants #9
     enforces the atom no longer appears in code.
+  - **5.6**: workspace isolation — caller and target must share a
+    workspace, OR caller must hold a cross-workspace cap
+    (`workspace_uri: :any`). Phase 9 PR-4 (SPEC v3 §5). Bypass
+    conditions: caller is `:system` (no entity URI), target is a
+    cross-cutting scheme (`system://`, `template://`, `resource://`
+    — workspace_of returns `:any`), or caller already holds a
+    cross-workspace cap. Returns `{:error, :cross_workspace_denied}`
+    on isolation violation — distinct from `:unauthorized` per
+    invariant 9, so inbound transports can surface a different
+    failure message + reaction emoji.
   - **5.7**: validate args against `behavior.interface()[action].args`
   - **6**: extract slice = `state[behavior.state_slice()]`
   - **7**: `behavior.invoke(action, slice, args, ctx)`
@@ -65,6 +75,7 @@ defmodule Ezagent.Kind.Runtime do
     with {:ok, {behavior_name_atom, action}} <- Ezagent.URI.behavior_action(target),
          {:ok, behavior_module} <- lookup_behavior(kind_module, action),
          :ok <- authz_check(kind_module, action, target, enriched_ctx),
+         :ok <- workspace_isolation_check(target, enriched_ctx),
          :ok <- validate_args(behavior_module, action, args),
          slice_key <- behavior_module.state_slice(),
          slice <- Map.get(state, slice_key, %{}),
@@ -140,6 +151,96 @@ defmodule Ezagent.Kind.Runtime do
       :telemetry.execute([:ezagent, :authz, :denied], %{}, meta)
       {:error, :unauthorized}
     end
+  end
+
+  # Phase 9 PR-4 (SPEC v3 §5) step 5.6 — workspace isolation.
+  #
+  # Caller's workspace must equal target's workspace, OR caller must
+  # hold a cross-workspace cap (`workspace_uri: :any`). Bypass
+  # conditions:
+  #
+  # - Caller is `:system` (no entity URI — bootstrap / internal paths
+  #   like Workspace.create dispatch_mutation use `:system` as caller).
+  #   Returning :ok here matches the existing CapBAC-bypass posture
+  #   for `:system` callers historically — they're trusted.
+  # - Target's workspace is `:any` (cross-cutting schemes like
+  #   `system://routing/default`, `template://`, `resource://` — these
+  #   are not workspace-scoped by design).
+  # - Caller and target share a workspace (the common intra-workspace
+  #   case — every PR-3-and-prior test path).
+  # - Caller's caps include at least one cross-workspace cap. NOTE:
+  #   the authz step (5.5) has already passed — the cross-workspace
+  #   cap is the one that authorized the action. We re-scan the caps
+  #   here because we only need to know "does ANY cap have
+  #   workspace_uri: :any" — a cheap MapSet enum.
+  #
+  # Returns `:ok` on bypass / match, `{:error, :cross_workspace_denied}`
+  # otherwise. The atom is distinct from `:unauthorized` (invariant 9
+  # — inbound transports must surface this with a different message +
+  # reaction so users see why dispatch failed).
+  defp workspace_isolation_check(target, ctx) do
+    caller_ws = workspace_of_caller(Map.get(ctx, :caller))
+    target_ws = Ezagent.Capability.workspace_of(target)
+
+    meta = %{
+      target: target,
+      caller: Map.get(ctx, :caller),
+      caller_workspace: caller_ws,
+      target_workspace: target_ws
+    }
+
+    cond do
+      caller_ws == :any ->
+        :ok
+
+      target_ws == :any ->
+        :ok
+
+      ws_equal?(caller_ws, target_ws) ->
+        :ok
+
+      caps_have_cross_workspace?(ctx) ->
+        :ok
+
+      true ->
+        :telemetry.execute([:ezagent, :workspace, :denied], %{}, meta)
+        {:error, :cross_workspace_denied}
+    end
+  end
+
+  # Caller workspace derivation:
+  #
+  # - `:system` (atom) → `:any` (bypass — bootstrap path)
+  # - `entity://<type>/<workspace>/<name>` → workspace URI
+  # - `session://<template>/<name>` → WorkspaceRegistry lookup
+  # - `workspace://<name>` → the URI itself
+  # - `system://...` callers → `:any`
+  # - nil or unknown → `:any` (degraded; the authz step would have
+  #   denied without a real principal)
+  defp workspace_of_caller(:system), do: :any
+  defp workspace_of_caller(nil), do: :any
+
+  defp workspace_of_caller(%URI{} = uri) do
+    try do
+      Ezagent.Capability.workspace_of(uri)
+    rescue
+      _ -> :any
+    end
+  end
+
+  defp workspace_of_caller(_), do: :any
+
+  defp ws_equal?(:any, _), do: true
+  defp ws_equal?(_, :any), do: true
+
+  defp ws_equal?(%URI{} = a, %URI{} = b),
+    do: URI.to_string(a) == URI.to_string(b)
+
+  defp ws_equal?(_, _), do: false
+
+  defp caps_have_cross_workspace?(ctx) do
+    caps = Map.get(ctx, :caps, MapSet.new())
+    Enum.any?(caps, &Ezagent.Capability.cross_workspace?/1)
   end
 
   defp validate_args(behavior_module, action, args) do
