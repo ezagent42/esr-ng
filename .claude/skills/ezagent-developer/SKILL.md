@@ -431,6 +431,90 @@ The durable record. When you (or a future contributor) need authoritative answer
 
 ---
 
+## UI / Frontend Contract
+
+The UI obeys a **3-layer architecture** so changing one atom propagates to every page and changing one page touches only that page. Style replacements (font / accent / dark palette) hit a small, well-known set of files. **Never write inline `style=""` in `.heex` files** outside the auth boundary pages (see below) — it bypasses the boundary and breaks theme-toggle infrastructure.
+
+### 3-layer UI architecture
+
+- **Layer 1 — atoms** (`apps/ezagent_domain_ui/lib/ezagent_domain_ui/`): stateless `Phoenix.Component`s. Zero LV deps. Files: `primitives.ex` (low-level: button, badge, status_dot, avatar, modal, tabs, toast, tree_list, empty_state, form_field, uri_chip, toolbar, tooltip, icon), `components.ex` (page_header, breadcrumb, card, stat), `ide_shell.ex` (workspace shell wrapping Activity Bar + Resource Panel + Main + Right Sidebar + Status Bar). **The style-replacement boundary lives here.**
+- **Layer 2 — plugin component compositions** (`apps/ezagent_plugin_liveview/lib/ezagent_plugin_liveview/admin/`): `Phoenix.Component` modules that compose Layer 1 atoms into plugin-level pieces (e.g. `member_panel.ex`, `session_editor.ex`). Still no LV state — just structure + slots.
+- **Layer 3 — LV containers** (`apps/ezagent_plugin_liveview/lib/ezagent_plugin_liveview/*_live.ex`): the LiveView modules with `mount`, `handle_event`, socket assigns. Each `render/1` wraps content in a shell atom — `<IdeShell.ide_shell>` for workspace surfaces; admin pages follow the same pattern via the page_header + breadcrumb + card composition.
+
+### DO list
+
+- Wrap workspace-surface LV `render/1` in `<IdeShell.ide_shell>`.
+- Use `<.page_header title="...">...<:subtitle>...</:subtitle></.page_header>` for every page title.
+- Use `<.breadcrumb items={[{"Admin", "/admin"}, {"This page", nil}]} />` for nested pages.
+- Use `<.card class="...">` to wrap content blocks.
+- Use `<.button variant="primary|secondary|ghost|danger">` for action buttons.
+- Use `<.badge variant="success|warning|danger|info|primary">` for status pills.
+- Use `<.empty_state title="..." description="...">` for "no items yet" screens.
+- Use `<.icon name="..." size="xs|sm|md">` for iconography (Heroicons 24/outline).
+- **Always pair `bg-*` / `text-*` / `border-*` with `dark:` variants.** Substitution table:
+
+  | Light | Dark |
+  |---|---|
+  | `bg-white` | `dark:bg-zinc-900` |
+  | `bg-zinc-50` | `dark:bg-zinc-950` |
+  | `text-zinc-900` | `dark:text-zinc-100` |
+  | `border-zinc-200` | `dark:border-zinc-800` |
+  | `bg-blue-50` | `dark:bg-blue-950` (apply same -50 → -950 pattern across colors) |
+  | `text-emerald-700` | `dark:text-emerald-300` (apply same -700 → -300 pattern across colors) |
+
+- Use `font-mono` for URI / entity id / command palette display (JetBrains Mono via `--font-mono` CSS var).
+- Use `text-orange-600` (signature accent) **sparingly** — only for the active Activity Bar rail or equivalent "this is selected" indicator.
+
+### DON'T list (concrete violations from PR-A through PR-H audit)
+
+- DON'T write `<h1 style="font-size: 22px; font-weight: 600;">` — use `<.page_header>` or `<h1 class="text-xl font-semibold text-zinc-900 dark:text-zinc-100">`.
+- DON'T write `<a style="color: #0969da;">` — use `<a class="text-blue-600 dark:text-blue-400 hover:text-blue-700">`.
+- DON'T write `<section style="margin-top: 24px; padding: 16px; border: 1px solid #d1d5da; border-radius: 6px;">` — use `<.card class="mt-6">`.
+- DON'T add raw `bg-white` / `text-zinc-900` etc without their `dark:` sibling — dark-mode toggle silently breaks for that subtree.
+- DON'T hard-code hex colors (`#1f883d`, `#cf222e`) — use Tailwind tokens (`bg-emerald-600`, `text-rose-600`).
+- DON'T introduce new fonts. Geist + JetBrains Mono are the only two; both loaded via Google Fonts in `root.html.heex`.
+- DON'T write inline `<style>` blocks in `.heex` files **except** in the controller-rendered auth boundary pages (login, custom 404) — they don't load `app.css` so they need self-contained `<style>` to brand themselves.
+- DON'T link to a route that doesn't exist. If a feature was deleted, REMOVE the link rather than leaving a dead button. Memory `feedback_ui_no_misleading_buttons`.
+
+### Style-replacement safety checklist
+
+When changing the visual design:
+
+- **Swap fonts**: edit `app.css` (`--font-sans` / `--font-mono`) + `root.html.heex` (Google Fonts link) + `session_controller.ex` (login boundary inline style) + `404.html.heex` (404 boundary inline style). 4 files total.
+- **Swap signature accent color**: search-replace `orange-600` / `orange-700` across `apps/ezagent_domain_ui/lib/` — should be ~3 occurrences (active Activity Bar rail).
+- **Swap dark mode palette**: edit `app.css` `@plugin "../vendor/daisyui-theme" { name: "dark"; ... }` block. Components inherit via `dark:` Tailwind tokens — no per-atom edits needed.
+- **Atoms vs LVs**: changing an atom (e.g. `<.card>`) propagates to every LV automatically. Changing a single LV touches only that file. The 3-layer architecture is what makes this work — don't fork atom logic into an LV "just for this page."
+
+### Adding a new component to Layer 1
+
+- File: pick the matching tier — `primitives.ex` (low-level atoms), `components.ex` (composite page-level atoms like header / breadcrumb / card / stat), or `ide_shell.ex` (layout shells).
+- Pattern:
+
+  ```elixir
+  attr :foo, :string, required: true
+  attr :class, :string, default: nil
+  slot :inner_block, required: true
+
+  def my_component(assigns) do
+    ~H"""
+    <div class={["base-classes dark:base-classes-dark", @class]}>
+      {render_slot(@inner_block)}
+    </div>
+    """
+  end
+  ```
+
+- Tests: add to `apps/ezagent_domain_ui/test/ezagent_domain_ui/...`.
+- Reference example: `breadcrumb/1` in `components.ex` (added in PR-E, commit `bfa74ba`).
+
+### Architecture invariants enforced by tests
+
+- `apps/ezagent_domain_ui/test/ezagent_domain_ui/ide_shell_test.exs` — Activity Bar item count + path mappings.
+- `apps/ezagent_core/test/invariants/sessions_have_workspace_test.exs` — every session has a WorkspaceRegistry binding (Allen 2026-05-20).
+- `apps/ezagent_web/test/ezagent_web/controllers/error_html_test.exs` — branded 404 renders with Activity Bar fallbacks.
+
+---
+
 ## Current state awareness (Phase 8 / Phase 9)
 
 - **v1 release shipped 2026-05-18** (Phase 7 closeout — Decision #144 captures the cross-PR invariant set; `docs/notes/phase-7-handoff.md` is the release note).
