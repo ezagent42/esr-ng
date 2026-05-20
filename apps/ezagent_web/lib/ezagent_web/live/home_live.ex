@@ -183,6 +183,25 @@ defmodule EzagentWeb.HomeLive do
               </p>
             </div>
 
+            <%!-- Phase 8c PR-J follow-up (Allen 2026-05-20) — opt-in
+                  echo demo seed so the first "send → see reply" flow
+                  works end-to-end on a fresh DB. --%>
+            <label class="flex items-start gap-2 cursor-pointer">
+              <input
+                type="checkbox"
+                name="wizard[with_echo]"
+                value="true"
+                checked={@form[:with_echo].value in ["true", "on", true]}
+                class="mt-0.5 rounded border-zinc-300 dark:border-zinc-700"
+              />
+              <span class="text-xs text-zinc-700 dark:text-zinc-300">
+                Include echo demo agent
+                <span class="block text-zinc-500">
+                  Adds <span class="font-mono">entity://agent/echo_default</span> as a session member so you can verify the chat round-trip works.
+                </span>
+              </span>
+            </label>
+
             <div :if={@flash_error} class="text-sm text-red-600 dark:text-red-400">
               {@flash_error}
             </div>
