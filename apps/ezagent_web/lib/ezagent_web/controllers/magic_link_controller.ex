@@ -15,6 +15,7 @@ defmodule EzagentWeb.MagicLinkController do
 
   alias Ezagent.Entity.MagicLinkToken
   alias Ezagent.Registration
+  alias EzagentWeb.SessionPrincipal
 
   def consume(conn, %{"token" => token}) do
     case MagicLinkToken.consume(token) do
@@ -32,13 +33,13 @@ defmodule EzagentWeb.MagicLinkController do
     case Registration.principal_for_email(email) do
       {:ok, uri} ->
         # Existing principal -> log in. Ensure the Kind is alive with
-        # hydrated caps, renew the session (fixation defence), land /admin.
+        # hydrated caps, then store via the validating principal funnel
+        # (also rotates the session — fixation defence).
         :ok = Ezagent.Entity.spawn_principal(uri)
 
         conn
-        |> configure_session(renew: true)
-        |> put_session(:current_entity_uri, URI.to_string(uri))
-        |> redirect(to: "/admin")
+        |> SessionPrincipal.put(URI.to_string(uri))
+        |> redirect(to: "/sessions")
 
       :none ->
         # New email -> carry the verified email into a short-lived

@@ -1,0 +1,144 @@
+defmodule Mix.Tasks.Ezagent.Demo.SeedCcAgent do
+  @shortdoc "Seed a demo cc agent into session://main"
+  @moduledoc """
+  Operator-friendly seed task — spawns `entity://agent/cc_demo` and
+  joins it to `session://main`. Idempotent.
+
+  Allen 2026-05-20: "session://main 中帮我加入 cc agent demo".
+
+  This task replaces the implicit "you have a cc agent in main because
+  Phase 1 created it for you" boot-time behavior. With Phase 8c PR-J the
+  session://main hardcoded boot child is removed (wizard creates it on
+  first login); demo data lives outside the boot path so production
+  deployments don't get injected with demo agents on every cold start.
+
+  ## Usage
+
+      mix ezagent.demo.seed_cc_agent
+
+  ## What it does
+
+  1. Ensures `entity://agent/cc_demo` is spawned in KindRegistry. If
+     already alive, no-op (idempotent).
+  2. Dispatches `chat.join` to `session://main` with the cc_demo agent
+     as the member to add. Session must exist (created via the first-
+     login wizard at `/`); if not, the task prints a friendly note + exit.
+  3. Prints a short confirmation summary.
+
+  ## Why not auto-seed at boot
+
+  See `EzagentDomainChat.Application` moduledoc. Auto-injecting demo
+  agents into every boot would pollute production deployments with
+  fixture data and make the workspace feel "started by someone else"
+  to the first real user. Seed-on-demand respects the deployment as
+  the operator configured it.
+
+  ## Re-running
+
+  Safe: spawn + join are both idempotent (KindRegistry rejects
+  already-started; chat.join updates members map without duplicating).
+  """
+  use Mix.Task
+
+  @agent_uri_str "entity://agent/cc_demo"
+  @session_uri_str "session://main"
+
+  @impl Mix.Task
+  def run(_args) do
+    {:ok, _} = Application.ensure_all_started(:ezagent_core)
+    {:ok, _} = Application.ensure_all_started(:ezagent_domain_chat)
+    {:ok, _} = Application.ensure_all_started(:ezagent_plugin_cc)
+
+    agent_uri = URI.new!(@agent_uri_str)
+    session_uri = URI.new!(@session_uri_str)
+
+    with :ok <- spawn_agent_if_absent(agent_uri),
+         :ok <- ensure_session_alive(session_uri),
+         :ok <- join_agent_to_session(agent_uri, session_uri) do
+      Mix.shell().info("""
+
+      ✓ cc demo agent seeded.
+
+        agent:   #{@agent_uri_str}
+        session: #{@session_uri_str}
+
+      The cc_demo agent now appears in session://main members. Open the
+      web UI and visit /sessions to interact.
+      """)
+    else
+      {:error, {:session_missing, _uri}} ->
+        Mix.shell().info("""
+
+        session://main has not been created yet.
+
+        Visit `/` in the web UI and complete the first-login wizard to
+        create the default session, then re-run `mix ezagent.demo.seed_cc_agent`.
+        """)
+
+      {:error, reason} ->
+        Mix.raise("seed failed: #{inspect(reason)}")
+    end
+  end
+
+  defp spawn_agent_if_absent(%URI{} = agent_uri) do
+    case Ezagent.KindRegistry.lookup(agent_uri) do
+      {:ok, _pid} ->
+        Mix.shell().info("  agent already alive: #{URI.to_string(agent_uri)}")
+        :ok
+
+      :error ->
+        case Ezagent.SpawnRegistry.spawn(agent_uri) do
+          {:ok, _pid} ->
+            Mix.shell().info("  spawned: #{URI.to_string(agent_uri)}")
+            :ok
+
+          {:error, {:already_started, _pid}} ->
+            :ok
+
+          {:error, reason} ->
+            {:error, {:spawn_failed, reason}}
+        end
+    end
+  end
+
+  defp ensure_session_alive(%URI{} = session_uri) do
+    case Ezagent.KindRegistry.lookup(session_uri) do
+      {:ok, _pid} ->
+        :ok
+
+      :error ->
+        # Try a rehydrate-on-reference spawn — snapshot may exist from
+        # the previous static-child boot. If still missing, surface the
+        # error so the caller prints the friendly wizard hint.
+        case Ezagent.SpawnRegistry.spawn(session_uri) do
+          {:ok, _pid} ->
+            # Re-bind to default workspace — same invariant as the
+            # wizard's create path.
+            {:ok, workspace_uri} = Ezagent.WorkspaceRegistry.default_workspace_uri()
+            :ok = Ezagent.WorkspaceRegistry.bind(session_uri, workspace_uri)
+            :ok
+
+          {:error, _} ->
+            {:error, {:session_missing, URI.to_string(session_uri)}}
+        end
+    end
+  end
+
+  defp join_agent_to_session(%URI{} = agent_uri, %URI{} = session_uri) do
+    admin_uri = Ezagent.Entity.User.admin_uri()
+    target = URI.new!("#{URI.to_string(session_uri)}?action=chat.join")
+
+    Ezagent.Invocation.dispatch(%Ezagent.Invocation{
+      target: target,
+      mode: :cast,
+      args: %{member: agent_uri},
+      ctx: %{
+        caller: admin_uri,
+        caps: Ezagent.Entity.User.admin_caps(),
+        reply: :ignore
+      }
+    })
+
+    :ok
+  end
+end

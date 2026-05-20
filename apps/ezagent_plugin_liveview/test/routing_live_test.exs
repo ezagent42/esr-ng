@@ -18,8 +18,8 @@ defmodule EzagentPluginLiveview.RoutingLiveTest do
     {:ok, conn: conn}
   end
 
-  test "GET /admin/routing renders tabs + form", %{conn: conn} do
-    {:ok, _lv, html} = live(conn, "/admin/routing")
+  test "GET /routing renders tabs + form", %{conn: conn} do
+    {:ok, _lv, html} = live(conn, "/routing")
     assert html =~ "Routing Rules"
     assert html =~ "MentionRouting"
     assert html =~ "SessionRouting"
@@ -29,7 +29,7 @@ defmodule EzagentPluginLiveview.RoutingLiveTest do
   end
 
   test "add_rule via form-mode mention persists + appears in list", %{conn: conn} do
-    {:ok, lv, _html} = live(conn, "/admin/routing")
+    {:ok, lv, _html} = live(conn, "/routing")
 
     lv
     |> form("#add-rule form",
@@ -48,10 +48,15 @@ defmodule EzagentPluginLiveview.RoutingLiveTest do
   end
 
   test "switch_table changes view", %{conn: conn} do
-    {:ok, lv, _html} = live(conn, "/admin/routing")
+    {:ok, lv, _html} = live(conn, "/routing")
 
+    # Phase 8 polish added a sidebar tablist; scope to the main body's
+    # tab strip so the click hits a single button (the body table-tabs
+    # section).
     lv
-    |> element("button[phx-value-table='Elixir.EzagentDomainChat.Routing.SessionRouting']")
+    |> element(
+      "#table-tabs button[phx-value-table='Elixir.EzagentDomainChat.Routing.SessionRouting']"
+    )
     |> render_click()
 
     html = render(lv)
@@ -60,7 +65,7 @@ defmodule EzagentPluginLiveview.RoutingLiveTest do
   end
 
   test "add_rule via JSON mode supports combinators", %{conn: conn} do
-    {:ok, lv, _html} = live(conn, "/admin/routing")
+    {:ok, lv, _html} = live(conn, "/routing")
 
     lv |> element("button[phx-value-mode='json']") |> render_click()
 
@@ -88,7 +93,7 @@ defmodule EzagentPluginLiveview.RoutingLiveTest do
   end
 
   test "add_rule rejects empty receivers", %{conn: conn} do
-    {:ok, lv, _html} = live(conn, "/admin/routing")
+    {:ok, lv, _html} = live(conn, "/routing")
 
     lv
     |> form("#add-rule form",

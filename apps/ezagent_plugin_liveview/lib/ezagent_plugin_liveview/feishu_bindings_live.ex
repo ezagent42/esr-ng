@@ -1,6 +1,6 @@
 defmodule EzagentPluginLiveview.FeishuBindingsLive do
   @moduledoc """
-  Phase 6 PR 15 — /admin/feishu/bindings.
+  Phase 6 PR 15 — /plugins/feishu/bindings.
 
   Lists all `feishu_user_bindings` rows + a bind form. The unbind
   button on each row deletes via `EzagentPluginFeishu.UserBinding.unbind/1`.
@@ -10,6 +10,7 @@ defmodule EzagentPluginLiveview.FeishuBindingsLive do
   """
 
   use Phoenix.LiveView
+  alias EzagentDomainUi.IdeShell
   use EzagentDomainUi.Components
   import Phoenix.Component
 
@@ -75,20 +76,33 @@ defmodule EzagentPluginLiveview.FeishuBindingsLive do
 
   @impl true
   def render(assigns) do
+    assigns =
+      assign_new(assigns, :current_entity_uri_str, fn ->
+        URI.to_string(Map.get(assigns, :current_entity_uri) || URI.parse("entity://user/admin"))
+      end)
+
     ~H"""
-    <div class="max-w-5xl mx-auto px-6 py-8 font-sans text-zinc-900">
+    <IdeShell.ide_shell
+      current_entity_uri={@current_entity_uri_str}
+      current_path="/plugins/feishu/bindings"
+      status={%{agents_alive: 0, bridges: 0, debug_events: 0, version: "dev"}}
+      is_admin?={@is_admin?}
+      workspaces={@workspaces}
+    >
+      <:main_window>
+        <div class="flex-1 overflow-auto px-6 py-6 text-zinc-900 dark:text-zinc-100">
       <.page_header title="Feishu user bindings">
         <:subtitle>
           Map a Feishu open_id to a local ESR user URI. The bound user
           gets the default session-participation caps via BindingPolicy.
           (chat_id ↔ session bindings live in a separate table — manage
           them with `mix ezagent.feishu.chat.bind`.)
-          <a href="/admin" class="text-zinc-600 underline hover:text-zinc-900 ml-1">← /admin</a>
+          <a href="/plugins" class="text-zinc-600 dark:text-zinc-400 underline hover:text-zinc-900 dark:hover:text-zinc-100 ml-1">← Plugins</a>
         </:subtitle>
       </.page_header>
 
-      <p :if={@flash_info} class="text-emerald-700 text-sm mb-3">{@flash_info}</p>
-      <p :if={@flash_error} class="text-red-700 text-sm mb-3">{@flash_error}</p>
+      <p :if={@flash_info} class="text-emerald-700 dark:text-emerald-300 text-sm mb-3">{@flash_info}</p>
+      <p :if={@flash_error} class="text-red-700 dark:text-red-300 text-sm mb-3">{@flash_error}</p>
 
       <.card class="mb-6">
         <:header>Bind</:header>
@@ -99,7 +113,7 @@ defmodule EzagentPluginLiveview.FeishuBindingsLive do
               type="text"
               name="bind[open_id]"
               placeholder="ou_6b11faf8e9..."
-              class="block w-full px-2 py-1 text-sm border border-zinc-300 rounded-md font-mono"
+              class="block w-full px-2 py-1 text-sm border border-zinc-300 dark:border-zinc-700 rounded-md font-mono"
             />
           </label>
           <label class="text-xs">
@@ -108,7 +122,7 @@ defmodule EzagentPluginLiveview.FeishuBindingsLive do
               type="text"
               name="bind[user_uri]"
               value="entity://user/"
-              class="block w-full px-2 py-1 text-sm border border-zinc-300 rounded-md font-mono"
+              class="block w-full px-2 py-1 text-sm border border-zinc-300 dark:border-zinc-700 rounded-md font-mono"
             />
           </label>
           <div class="col-span-2 flex justify-end">
@@ -123,7 +137,7 @@ defmodule EzagentPluginLiveview.FeishuBindingsLive do
           No bindings yet. Unbound Feishu users see the bot react with EYES — bind them above to enable chat.
         </p>
         <table :if={@bindings != []} class="w-full text-sm">
-          <thead class="bg-zinc-50 border-b border-zinc-200">
+          <thead class="bg-zinc-50 dark:bg-zinc-950 border-b border-zinc-200 dark:border-zinc-800">
             <tr class="text-left text-xs uppercase tracking-wide text-zinc-500">
               <th class="px-2 py-2">open_id</th>
               <th class="py-2">user_uri</th>
@@ -133,7 +147,7 @@ defmodule EzagentPluginLiveview.FeishuBindingsLive do
             </tr>
           </thead>
           <tbody>
-            <tr :for={b <- @bindings} class="border-b border-zinc-100 last:border-0">
+            <tr :for={b <- @bindings} class="border-b border-zinc-100 dark:border-zinc-900 last:border-0">
               <td class="px-2 py-2 font-mono text-xs">{b.open_id}</td>
               <td class="py-2 font-mono text-xs">{b.user_uri}</td>
               <td class="py-2 font-mono text-xs text-zinc-500">{b.bound_by}</td>
@@ -147,7 +161,9 @@ defmodule EzagentPluginLiveview.FeishuBindingsLive do
           </tbody>
         </table>
       </.card>
-    </div>
+        </div>
+      </:main_window>
+    </IdeShell.ide_shell>
     """
   end
 end

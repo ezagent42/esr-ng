@@ -64,6 +64,7 @@ defmodule EzagentPluginCc.Application do
       {:ok, sup_pid} ->
         :ok = register_template_classes()
         :ok = register_pty_behavior_on_agent()
+        :ok = register_session_views()
 
         # Boot-ordering fix: chat plugin's Application.start calls
         # Ezagent.Workspace.Loader.load_all/0 BEFORE this plugin
@@ -76,6 +77,15 @@ defmodule EzagentPluginCc.Application do
       other ->
         other
     end
+  end
+
+  # Phase 8b — register the PTY SessionView (admin_live calls
+  # `Ezagent.UI.SessionViewRegistry.applicable_views/1` to decide
+  # which view-switcher buttons show up).
+  defp register_session_views do
+    :ok = Ezagent.UI.SessionViewRegistry.init()
+    :ok = Ezagent.UI.SessionViewRegistry.register(EzagentPluginCc.Views.PtyView)
+    :ok
   end
 
   defp register_template_classes do

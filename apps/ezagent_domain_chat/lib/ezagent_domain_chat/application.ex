@@ -2,7 +2,7 @@ defmodule EzagentDomainChat.Application do
   @moduledoc """
   Chat plugin OTP application.
 
-  ## Phase 2b boot sequence
+  ## Boot sequence (Phase 8c PR-J)
 
   1. **Register Chat Behaviors per-Kind subset** (BehaviorRegistry) —
      before spawning any Kind so dispatch routes correctly on first
@@ -20,28 +20,20 @@ defmodule EzagentDomainChat.Application do
      Per Decision P2-D2 K-path: one Behavior module, multiple Kinds
      each picking the subset of actions it consumes.
 
-  2. **Children supervisor** —
-     - `EzagentDomainChat.AgentSupervisor` — DynamicSupervisor for Agent
-       Kinds, 0 children at boot (Agents materialize when a bridge
-       announces; 2c-step 1 wires the controller).
-     - `Ezagent.Kind.Server` for `session://default/main` — the default Session.
-     - `Ezagent.Kind.Server` for `entity://user/admin` — Phase 2 promotes the
-       admin User from a never-spawned stub to a live participant.
+  2. **Children supervisor** — DynamicSupervisors for Agent / Session /
+     AgentTemplate / SessionTemplate Kinds. All start with zero
+     children; Kinds materialize on demand (snapshot restore on
+     reference, CLI spawn, or — for the default session — the
+     first-login wizard at `/`).
 
-  3. **Post-boot admin join** — once Session and admin User are both
-     alive, dispatch `session://main?action=chat.join` with
-     `member: entity://user/admin`. Using `:cast` so this is non-blocking;
-     PendingDelivery absorbs the still-becoming-ready window (memory
-     `feedback_let_it_crash_no_workarounds`: no defensive sleeps).
-
-  ## Why post-boot dispatch (not Kind.Server.handle_continue)
-
-  The /goal text suggested `handle_continue(:announce_ready)` as the
-  dispatch site. Equivalent in effect for a single dispatch — but
-  doing it from the Application keeps `Ezagent.Kind.Server` generic
-  (it doesn't have to know about Chat or admin User's specific
-  joining behavior). Application-level orchestration is the right
-  layer for "after these processes are up, fire X" wiring.
+  3. **No hardcoded default session** — PR-J removed the static
+     `session://main` supervisor child. The wizard
+     (`EzagentWeb.HomeLive`) creates the default session via
+     `EzagentDomainChat.create_session/2` (which spawns + binds the
+     default workspace + joins admin). In the `:test` environment,
+     `maybe_seed_main_session_for_tests/0` calls the same facade at
+     boot so the ~10 test suites asserting against boot-time
+     `session://main` continue to pass without per-setup migration.
 
   ## Why use Ezagent.Entity.User from ezagent_core (not move it here)
 
@@ -57,7 +49,7 @@ defmodule EzagentDomainChat.Application do
 
   use Application
 
-  alias Ezagent.{BehaviorRegistry, Invocation, RoutingRegistry}
+  alias Ezagent.{BehaviorRegistry, RoutingRegistry}
   alias Ezagent.Entity.{Agent, AgentTemplate, Session, SessionTemplate, User}
   alias Ezagent.Behavior.Chat
   alias EzagentDomainChat.Routing.{MentionRouting, SessionRouting}
@@ -67,6 +59,15 @@ defmodule EzagentDomainChat.Application do
     :ok = register_chat_behaviors()
     :ok = declare_routing_tables()
 
+    # Phase 8c PR-J (Allen 2026-05-20) — `session://main` is no longer
+    # a static supervisor child. The first-login wizard at `/` creates
+    # the default session via the canonical `EzagentDomainChat.create_session/2`
+    # facade (which binds workspace + joins admin). In `:test`
+    # environment the previous boot behavior is preserved via
+    # `seed_main_session_for_tests/0` below — too many tests (~10) hard-
+    # coded `session://main` alive at boot to require setup migration in
+    # a single PR. Dev / prod boot WITHOUT session://main; the wizard
+    # populates it on first user visit.
     children = [
       {DynamicSupervisor, name: EzagentDomainChat.AgentSupervisor, strategy: :one_for_one},
       {DynamicSupervisor, name: EzagentDomainChat.SessionSupervisor, strategy: :one_for_one},
@@ -76,16 +77,14 @@ defmodule EzagentDomainChat.Application do
       {DynamicSupervisor, name: EzagentDomainChat.AgentTemplateSupervisor, strategy: :one_for_one},
       # Phase 7 PR 38: supervisor for SessionTemplate Kinds. Same shape
       # as AgentTemplateSupervisor — 0 children at boot, lazy spawn.
-      {DynamicSupervisor, name: EzagentDomainChat.SessionTemplateSupervisor, strategy: :one_for_one},
-      kind_server_spec(:session_main, Session, Session.default_uri())
+      {DynamicSupervisor, name: EzagentDomainChat.SessionTemplateSupervisor, strategy: :one_for_one}
       # Phase 6 PR 2: admin User spawn moved to EzagentDomainIdentity.Application
       # (User Kind belongs to identity domain). Chat's start callback below
-      # still dispatches admin → join default Session.
+      # still dispatches admin → join default Session in test env only.
     ]
 
     case Supervisor.start_link(children, strategy: :one_for_one, name: __MODULE__) do
       {:ok, sup_pid} ->
-        :ok = admin_user_joins_default_session()
         :ok = EzagentDomainChat.DefaultRules.bootstrap()
 
         # PR #141 (SPEC v2): chat plugin now owns the unified `entity://`
@@ -102,11 +101,43 @@ defmodule EzagentDomainChat.Application do
         # PR 12 closeout: replace with an explicit registry-ready gate.
         :ok = EzagentDomainWorkspace.Application.boot_complete()
 
+        # PR-M (Allen 2026-05-20) — idempotently persist
+        # `workspace://default` so it shows up in `/workspaces` listing
+        # and `/workspaces/default` detail loads. Previously the
+        # default workspace existed only as a `WorkspaceRegistry.bind/2`
+        # ETS entry (session→workspace), bypassing
+        # `Ezagent.Workspace.create/2` (the canonical "persist + spawn"
+        # API). Now goes through the same path every operator-created
+        # workspace uses. Test-env skip — see helper docstring.
+        :ok = ensure_default_workspace()
+
+        # PR-M (Allen 2026-05-20) — idempotently spawn the default Echo
+        # agent via SpawnRegistry. Previously the echo plugin used
+        # `DynamicSupervisor.start_child` directly at its own boot,
+        # bypassing `SpawnRegistry.spawn/1`. The echo plugin boots
+        # before chat (no chat dep), so the `entity://` spawn fn isn't
+        # registered yet at echo's boot time — chat (the last app)
+        # invokes the standardized spawn here.
+        :ok = ensure_echo_default()
+
         # Phase 7 PR 45: install the cc-orchestrator AgentTemplate seed
         # so SessionTemplate-instantiation paths (PR 41 Generator) can
         # reference `template://agent/cc-orchestrator` without operator
         # setup. Idempotent: re-install on existing template is a no-op.
         :ok = seed_cc_orchestrator_template()
+
+        # Phase 8c PR-J — test-only main session seed. See moduledoc.
+        :ok = maybe_seed_main_session_for_tests()
+
+        # PR-M (Allen 2026-05-20) — admin User Kind is NOT auto-spawned
+        # at boot. The static `kind_server_spec(:user_admin, ...)` child
+        # in `EzagentDomainIdentity.Application` was removed; admin now
+        # spawns lazily via SpawnRegistry on first dispatch reference
+        # (login, session join, cap lookup). Tests that need the admin
+        # Kind alive at boot must call
+        # `Ezagent.SpawnRegistry.spawn(Ezagent.Entity.User.admin_uri())`
+        # in setup — `EzagentDomainChat.ApplicationTest` is the
+        # canonical example.
 
         {:ok, sup_pid}
 
@@ -115,9 +146,157 @@ defmodule EzagentDomainChat.Application do
     end
   end
 
+  # Test-environment seed: many existing test suites (~10 across
+  # apps/ezagent_*) assert against `session://main` alive at boot. Until
+  # those setups are migrated to per-test seeding, the chat Application
+  # creates the default session in `:test` env via the same canonical
+  # `EzagentDomainChat.create_session/2` facade the wizard uses. In
+  # `:dev` and `:prod` this is a no-op — the wizard at `/` creates main
+  # on the operator's first login.
+  defp maybe_seed_main_session_for_tests do
+    if test_env?() do
+      # PR-M (2026-05-20) — `create_session/2` now demand-spawns the
+      # creator via SpawnRegistry before dispatching `chat.join` (see
+      # `join_creator/2`). Admin User Kind is no longer a static child;
+      # the demand-spawn covers the gap so admin appears in
+      # session://main's members map post-seed.
+      case EzagentDomainChat.create_session("main", User.admin_uri()) do
+        {:ok, _uri} -> :ok
+        # Identity domain may not have spawned admin User yet on first
+        # boot — surface as a warning, not a crash. Tests that depend
+        # on this seed will set their own setup-time seeding if needed.
+        {:error, reason} ->
+          require Logger
+
+          Logger.warning(
+            "test seed of session://main failed: #{inspect(reason)}; tests asserting on boot-time main may fail"
+          )
+
+          :ok
+      end
+    else
+      :ok
+    end
+  end
+
+  defp test_env? do
+    Code.ensure_loaded?(Mix) and Mix.env() == :test
+  rescue
+    _ -> false
+  end
+
   defp register_template_classes do
     :ok = Ezagent.TemplateRegistry.register(Ezagent.Template.GenericSession)
     :ok
+  end
+
+  # PR-M (Allen 2026-05-20) — idempotently persist the default workspace
+  # via the standard `Ezagent.Workspace.create/2` API. Previously the
+  # default existed only as a session→workspace ETS binding via
+  # `Ezagent.WorkspaceRegistry.bind/2`; the Workspace row was never
+  # created in SQLite, so `/workspaces` listed nothing and
+  # `/workspaces/default` returned "not found".
+  #
+  # Idempotency: skip if the row exists. DB-unavailable at boot is
+  # logged and tolerated — next boot retries (same pattern as workspace
+  # loader).
+  #
+  # Test-env skip: boot-time DB writes interact poorly with Ecto SQL
+  # Sandbox checkout in tests that don't use DataCase (the Audit.Writer
+  # GenServer mid-flush blocks Sandbox.checkout). Tests that need the
+  # row can call `Ezagent.Workspace.create("default", %{})` explicitly
+  # in setup; the UI verification path is dev/prod-only.
+  defp ensure_default_workspace do
+    if test_env?() do
+      :ok
+    else
+      do_ensure_default_workspace()
+    end
+  end
+
+  defp do_ensure_default_workspace do
+    try do
+      case Ezagent.Workspace.Store.get_by_name("default") do
+        nil ->
+          case Ezagent.Workspace.create("default", %{}) do
+            {:ok, _pid} ->
+              :ok
+
+            {:error, {:already_started, _pid}} ->
+              # Kind already alive but no Store row — happens if a
+              # prior boot bound via WorkspaceRegistry without
+              # persisting. Re-attempt just the Store row.
+              case Ezagent.Workspace.Store.create("default", %{}) do
+                {:ok, _} -> :ok
+                {:error, _} -> :ok
+              end
+
+            {:error, reason} ->
+              require Logger
+
+              Logger.warning(
+                "ensure_default_workspace: create failed (#{inspect(reason)}); " <>
+                  "/workspaces listing will be incomplete until next boot"
+              )
+
+              :ok
+          end
+
+        _existing ->
+          :ok
+      end
+    rescue
+      e in [DBConnection.ConnectionError, DBConnection.OwnershipError] ->
+        require Logger
+
+        Logger.warning(
+          "ensure_default_workspace: DB unavailable at boot (#{inspect(e.__struct__)}); " <>
+            "default Workspace provisioning deferred to next boot"
+        )
+
+        :ok
+    end
+  end
+
+  # PR-M (Allen 2026-05-20) — idempotently spawn the default Echo agent
+  # via the standardized `Ezagent.SpawnRegistry.spawn/1` API. Previously
+  # the echo plugin's own Application.start/2 called
+  # `DynamicSupervisor.start_child/2` directly, bypassing the registry.
+  # The echo plugin boots before chat (no chat dep), so the `entity://`
+  # spawn fn isn't registered yet at echo's boot — this post-boot hook
+  # in the last app to start (chat) does the spawn properly.
+  #
+  # `Code.ensure_loaded?` guards against test contexts where the echo
+  # plugin isn't loaded. `{:already_started, _}` from SpawnRegistry is
+  # treated as :ok (the echo plugin may have spawned via snapshot
+  # rehydration before this hook runs).
+  defp ensure_echo_default do
+    if Code.ensure_loaded?(EzagentPluginEcho.Application) and
+         function_exported?(EzagentPluginEcho.Application, :default_uri, 0) do
+      do_ensure_echo_default(EzagentPluginEcho.Application.default_uri())
+    else
+      :ok
+    end
+  end
+
+  defp do_ensure_echo_default(uri) do
+    case Ezagent.SpawnRegistry.spawn(uri) do
+      {:ok, _pid} ->
+        :ok
+
+      {:error, {:already_started, _pid}} ->
+        :ok
+
+      {:error, reason} ->
+        require Logger
+
+        Logger.warning(
+          "ensure_echo_default: spawn failed (#{inspect(reason)}); " <>
+            "F1 echo round-trip tests will fail until echo agent is available"
+        )
+
+        :ok
+    end
   end
 
   # Phase 7 PR 45 — seed cc-orchestrator AgentTemplate at boot.
@@ -180,9 +359,23 @@ defmodule EzagentDomainChat.Application do
       Ezagent.SpawnRegistry.register("entity", fn uri ->
         case uri.host do
           "user" ->
+            # PR-M (2026-05-20): special-case admin URI to seed
+            # `initial_caps: User.admin_caps()`. Non-admin users have
+            # caps_json hydrated via the login path's
+            # `Ezagent.Entity.ensure_spawned/1` (see ezagent/entity.ex);
+            # admin has no login path (password is nil until operator
+            # sets it), so demand-spawn from a `chat.join` dispatch
+            # (caller=admin) needs the bootstrap caps inline.
+            initial_caps =
+              if uri == User.admin_uri() do
+                User.admin_caps()
+              else
+                MapSet.new()
+              end
+
             DynamicSupervisor.start_child(
               EzagentDomainIdentity.Application.UserSupervisor,
-              {Ezagent.Kind.Server, {User, %{uri: uri, initial_caps: MapSet.new()}}}
+              {Ezagent.Kind.Server, {User, %{uri: uri, initial_caps: initial_caps}}}
             )
 
           "agent" ->
@@ -264,36 +457,12 @@ defmodule EzagentDomainChat.Application do
     :ok
   end
 
-  # Phase 3d (#B1): accept extra_args map so callers can pass keys like
-  # `:initial_caps` for Identity init_slice. Merges into `%{uri: uri}`.
-  defp kind_server_spec(child_id, kind_module, uri, extra_args \\ %{}) do
-    args = Map.merge(%{uri: uri}, extra_args)
-
-    Supervisor.child_spec(
-      {Ezagent.Kind.Server, {kind_module, args}},
-      id: child_id
-    )
-  end
-
-  defp admin_user_joins_default_session do
-    admin_uri = User.admin_uri()
-    session_uri = Session.default_uri()
-    target = URI.new!("#{URI.to_string(session_uri)}?action=chat.join")
-
-    _ =
-      Invocation.dispatch(%Invocation{
-        target: target,
-        mode: :cast,
-        args: %{member: admin_uri},
-        ctx: %{
-          caller: admin_uri,
-          caps: User.admin_caps(),
-          reply: :ignore
-        }
-      })
-
-    :ok
-  end
+  # Phase 8c PR-J — `kind_server_spec/4`, `bind_default_session_to_default_workspace/0`,
+  # and `admin_user_joins_default_session/0` removed. All three were
+  # workarounds for the static-child `session://main` bypass. The
+  # wizard's call to `EzagentDomainChat.create_session/2` does the
+  # bind + admin join in one place — same code path for every session,
+  # including the default.
 
   # PR #149 (SPEC v2 §5.14) — agent flavor resolution without
   # `Ezagent.AgentTypeRegistry`. Three-step lookup:

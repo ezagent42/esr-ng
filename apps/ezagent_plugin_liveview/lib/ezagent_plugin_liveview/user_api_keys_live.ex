@@ -2,7 +2,7 @@ defmodule EzagentPluginLiveview.UserApiKeysLive do
   @moduledoc """
   PR #126 — per-user API key management UI.
 
-  Mount at `/admin/users/:uri/api-keys`. URI is URL-encoded
+  Mount at `/identities/users/:uri/api-keys`. URI is URL-encoded
   (`user%3A%2F%2Fadmin`).
 
   Lists registered providers (masked) + lets the user add / rotate /
@@ -27,6 +27,7 @@ defmodule EzagentPluginLiveview.UserApiKeysLive do
   """
 
   use Phoenix.LiveView
+  alias EzagentDomainUi.IdeShell
   import Phoenix.Component
 
   alias Ezagent.{Invocation, KindRegistry}
@@ -147,14 +148,27 @@ defmodule EzagentPluginLiveview.UserApiKeysLive do
 
   @impl true
   def render(assigns) do
+    assigns =
+      assign_new(assigns, :current_entity_uri_str, fn ->
+        URI.to_string(Map.get(assigns, :current_entity_uri) || URI.parse("entity://user/admin"))
+      end)
+
     ~H"""
-    <div style="max-width: 900px; margin: 0 auto; padding: 24px; font-family: -apple-system, sans-serif;">
+    <IdeShell.ide_shell
+      current_entity_uri={@current_entity_uri_str}
+      current_path="/identities/users"
+      status={%{agents_alive: 0, bridges: 0, debug_events: 0, version: "dev"}}
+      is_admin?={@is_admin?}
+      workspaces={@workspaces}
+    >
+      <:main_window>
+        <div class="flex-1 overflow-auto px-6 py-6 text-zinc-900 dark:text-zinc-100">
       <header>
         <h1 style="font-size: 22px; font-weight: 600;">API Keys for <code>{URI.to_string(@user_uri)}</code></h1>
         <p style="font-size: 13px; color: #666;">
           Per-user secret storage for outbound LLM completion APIs (DeepSeek, OpenAI, etc.).
           The system itself holds no keys — every user supplies their own.
-          <a href="/admin" style="margin-left: 16px; color: #0969da;">← /admin</a>
+          <a href="/identities/users" style="margin-left: 16px; color: #0969da;">← Users</a>
         </p>
       </header>
 
@@ -240,7 +254,9 @@ defmodule EzagentPluginLiveview.UserApiKeysLive do
           </p>
         </.form>
       </section>
-    </div>
+        </div>
+      </:main_window>
+    </IdeShell.ide_shell>
     """
   end
 end

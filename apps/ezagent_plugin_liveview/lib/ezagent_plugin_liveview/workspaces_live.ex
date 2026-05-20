@@ -1,6 +1,6 @@
 defmodule EzagentPluginLiveview.WorkspacesLive do
   @moduledoc """
-  /admin/workspaces — list every persisted Workspace + form to create.
+  /workspaces — list every persisted Workspace + form to create.
 
   Reads `Ezagent.Workspace.list_persisted/0` (which hits SQLite via
   `Ezagent.Workspace.Store`) — the persisted set, not the live-Kind set.
@@ -9,14 +9,21 @@ defmodule EzagentPluginLiveview.WorkspacesLive do
   but during transient errors the Store row exists even when the live
   Kind crashed.
 
-  ## Why a separate LV (not a tab inside admin_live)
+  ## PR-M (Allen 2026-05-20) — admin drawer surface
 
-  Per Phase 4d split — Workspace UI is a different surface (admin_live
-  is per-session chat; workspaces_live is cluster-shape config). Each
-  is on its own URL, no shared assigns. They navigate via plain links.
+  Workspace management (templates / members / routing config) is a
+  configuration surface, not a workflow surface. Renders inside
+  `EzagentDomainUi.AdminSettingsShell` (drawer perspective: top bar +
+  left sidebar, no Activity Bar, no Status Bar) per the "no two header
+  types" UX rule. Reachable from:
+
+  - avatar dropdown → "Admin" → sidebar → "Workspaces"
+  - workspace top-left dropdown (on any IdeShell surface) → "Manage
+    workspaces..." link → /workspaces (opens the same drawer)
   """
 
   use Phoenix.LiveView
+  alias EzagentDomainUi.AdminSettingsShell
   use EzagentDomainUi.Components
   import Phoenix.Component
 
@@ -64,71 +71,86 @@ defmodule EzagentPluginLiveview.WorkspacesLive do
 
   @impl true
   def render(assigns) do
+    # PR-M (Allen 2026-05-20) — render inside AdminSettingsShell (drawer
+    # perspective), NOT IdeShell. No Activity Bar, no Status Bar — the
+    # "no two header types" rule.
+    assigns =
+      assign_new(assigns, :current_entity_uri_str, fn ->
+        URI.to_string(assigns.current_entity_uri || URI.parse("entity://user/admin"))
+      end)
+
     ~H"""
-    <div class="max-w-5xl mx-auto px-6 py-8 font-sans text-zinc-900">
-      <.page_header title="Workspaces">
-        <:subtitle>
-          Persisted cluster configurations — members + session templates + routing rules.
-          <a href="/admin" class="text-zinc-600 underline hover:text-zinc-900 ml-1">← /admin</a>
-        </:subtitle>
-      </.page_header>
+    <AdminSettingsShell.admin_settings_shell
+      current_entity_uri={@current_entity_uri_str}
+      current_path="/workspaces"
+      active_section={:workspaces}
+    >
+      <:main>
+        <div class="flex-1 overflow-auto px-6 py-6 text-zinc-900 dark:text-zinc-100">
+          <.page_header title="Workspaces">
+            <:subtitle>
+              Persisted cluster configurations — members + session templates + routing rules.
+            </:subtitle>
+          </.page_header>
 
-      <.card id="create-workspace" class="mb-6">
-        <:header>+ New Workspace</:header>
-        <.form for={@new_form} phx-submit="create_workspace" class="flex gap-2 items-center">
-          <input
-            type="text"
-            name="new_workspace[name]"
-            id="new_workspace_name"
-            placeholder="architect-review"
-            class="flex-1 px-3 py-1.5 text-sm border border-zinc-300 rounded-md focus:outline-none focus:ring-2 focus:ring-zinc-500"
-          />
-          <.button type="submit" variant="primary" size="sm">Create</.button>
-        </.form>
-        <p :if={@flash_error} class="text-red-700 text-xs mt-2">{@flash_error}</p>
-      </.card>
+          <.card id="create-workspace" class="mb-6">
+            <:header>+ New Workspace</:header>
+            <.form for={@new_form} phx-submit="create_workspace" class="flex gap-2 items-center">
+              <input
+                type="text"
+                name="new_workspace[name]"
+                id="new_workspace_name"
+                placeholder="architect-review"
+                class="flex-1 px-3 py-1.5 text-sm border border-zinc-300 dark:border-zinc-700 rounded-md bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 focus:outline-none focus:ring-2 focus:ring-zinc-500"
+              />
+              <.button type="submit" variant="primary" size="sm">Create</.button>
+            </.form>
+            <p :if={@flash_error} class="text-rose-600 dark:text-rose-400 text-xs mt-2">{@flash_error}</p>
+          </.card>
 
-      <section id="workspaces-list">
-        <p :if={@workspaces == []} id="empty" class="text-zinc-500 italic text-sm">
-          No workspaces yet. Use the form above to create the first one.
-        </p>
+          <section id="workspaces-list">
+            <p :if={@workspaces == []} id="empty" class="text-zinc-500 italic text-sm">
+              No workspaces yet. Use the form above to create the first one.
+            </p>
 
-        <.card :if={@workspaces != []} class="p-0">
-          <table id="workspaces-table" class="w-full text-sm">
-            <thead class="bg-zinc-50 border-b border-zinc-200">
-              <tr class="text-left text-xs uppercase tracking-wide text-zinc-500">
-                <th class="px-4 py-2">Name</th>
-                <th class="py-2">URI</th>
-                <th class="py-2">Members</th>
-                <th class="py-2">Templates</th>
-                <th class="py-2">Rules</th>
-                <th class="py-2">Live</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr :for={ws <- @workspaces} class="border-b border-zinc-100 last:border-0">
-                <td class="px-4 py-2 font-medium">{ws.name}</td>
-                <td class="py-2 font-mono text-xs text-zinc-500">{URI.to_string(ws.uri)}</td>
-                <td class="py-2 tabular-nums">{length(ws.members)}</td>
-                <td class="py-2 tabular-nums">{map_size(ws.session_templates)}</td>
-                <td class="py-2 tabular-nums">{length(ws.routing_rules)}</td>
-                <td class="py-2">
-                  <.badge :if={ws.live_pid} variant="success">live</.badge>
-                  <.badge :if={!ws.live_pid} variant="danger">down</.badge>
-                </td>
-                <td class="py-2 pr-4 text-right">
-                  <a
-                    href={"/admin/workspaces/#{ws.name}"}
-                    class="text-zinc-600 hover:text-zinc-900 text-xs"
-                  >detail →</a>
-                </td>
-              </tr>
-            </tbody>
-          </table>
-        </.card>
-      </section>
-    </div>
+            <.card :if={@workspaces != []} class="p-0">
+              <table id="workspaces-table" class="w-full text-sm">
+                <thead class="bg-zinc-50 dark:bg-zinc-950 border-b border-zinc-200 dark:border-zinc-800">
+                  <tr class="text-left text-xs uppercase tracking-wide text-zinc-500">
+                    <th class="px-4 py-2">Name</th>
+                    <th class="py-2">URI</th>
+                    <th class="py-2">Members</th>
+                    <th class="py-2">Templates</th>
+                    <th class="py-2">Rules</th>
+                    <th class="py-2">Live</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  <tr :for={ws <- @workspaces} class="border-b border-zinc-100 dark:border-zinc-900 last:border-0">
+                    <td class="px-4 py-2 font-medium">{ws.name}</td>
+                    <td class="py-2 font-mono text-xs text-zinc-500">{URI.to_string(ws.uri)}</td>
+                    <td class="py-2 tabular-nums">{length(ws.members)}</td>
+                    <td class="py-2 tabular-nums">{map_size(ws.session_templates)}</td>
+                    <td class="py-2 tabular-nums">{length(ws.routing_rules)}</td>
+                    <td class="py-2">
+                      <.badge :if={ws.live_pid} variant="success">live</.badge>
+                      <.badge :if={!ws.live_pid} variant="danger">down</.badge>
+                    </td>
+                    <td class="py-2 pr-4 text-right">
+                      <a
+                        href={"/workspaces/#{ws.name}"}
+                        class="text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 text-xs"
+                      >detail →</a>
+                    </td>
+                  </tr>
+                </tbody>
+              </table>
+            </.card>
+          </section>
+        </div>
+      </:main>
+    </AdminSettingsShell.admin_settings_shell>
     """
   end
 end

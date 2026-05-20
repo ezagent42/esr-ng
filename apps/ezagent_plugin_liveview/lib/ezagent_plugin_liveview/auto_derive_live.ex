@@ -4,9 +4,9 @@ defmodule EzagentPluginLiveview.AutoDeriveLive do
   `EzagentDomainUi.AutoDerive`.
 
   Two modes (drive by URL):
-    /admin/auto/:kind          → list view (table of live URIs +
+    /plugins/auto/:kind          → list view (table of live URIs +
                                  slice keys + behaviors)
-    /admin/auto/:kind/:uri     → detail view (URI-decoded; slices
+    /plugins/auto/:kind/:uri     → detail view (URI-decoded; slices
                                  rendered as <pre>{inspect})
 
   Validates the auto-derive thesis: ANY Kind, including 3rd-party
@@ -15,6 +15,7 @@ defmodule EzagentPluginLiveview.AutoDeriveLive do
   """
 
   use Phoenix.LiveView
+  alias EzagentDomainUi.IdeShell
   use EzagentDomainUi.Components
   import Phoenix.Component
 
@@ -66,12 +67,25 @@ defmodule EzagentPluginLiveview.AutoDeriveLive do
 
   @impl true
   def render(assigns) do
+    assigns =
+      assign_new(assigns, :current_entity_uri_str, fn ->
+        URI.to_string(Map.get(assigns, :current_entity_uri) || URI.parse("entity://user/admin"))
+      end)
+
     ~H"""
-    <div class="max-w-6xl mx-auto px-6 py-8 font-sans text-zinc-900">
+    <IdeShell.ide_shell
+      current_entity_uri={@current_entity_uri_str}
+      current_path="/plugins/auto"
+      status={%{agents_alive: 0, bridges: 0, debug_events: 0, version: "dev"}}
+      is_admin?={@is_admin?}
+      workspaces={@workspaces}
+    >
+      <:main_window>
+        <div class="flex-1 overflow-auto px-6 py-6 text-zinc-900 dark:text-zinc-100">
       <.page_header title={"Auto-derived: " <> Atom.to_string(@kind)}>
         <:subtitle>
           Generic admin surface, no hand-written code per Kind.
-          <a href="/admin" class="text-zinc-600 underline hover:text-zinc-900 ml-1">← /admin</a>
+          <a href="/plugins" class="text-zinc-600 dark:text-zinc-400 underline hover:text-zinc-900 dark:hover:text-zinc-100 ml-1">← Plugins</a>
         </:subtitle>
       </.page_header>
 
@@ -83,7 +97,7 @@ defmodule EzagentPluginLiveview.AutoDeriveLive do
           </p>
 
           <table :if={@instances != []} class="w-full text-sm">
-            <thead class="bg-zinc-50 border-b border-zinc-200">
+            <thead class="bg-zinc-50 dark:bg-zinc-950 border-b border-zinc-200 dark:border-zinc-800">
               <tr class="text-left text-xs uppercase tracking-wide text-zinc-500">
                 <th class="px-2 py-2">URI</th>
                 <th class="py-2">Slice keys</th>
@@ -91,7 +105,7 @@ defmodule EzagentPluginLiveview.AutoDeriveLive do
               </tr>
             </thead>
             <tbody>
-              <tr :for={inst <- @instances} class="border-b border-zinc-100 last:border-0">
+              <tr :for={inst <- @instances} class="border-b border-zinc-100 dark:border-zinc-900 last:border-0">
                 <td class="px-2 py-2 font-mono text-xs">{URI.to_string(inst.uri)}</td>
                 <td class="py-2">
                   <.badge :for={k <- inst.slice_keys} variant="info" class="mr-1">
@@ -100,8 +114,8 @@ defmodule EzagentPluginLiveview.AutoDeriveLive do
                 </td>
                 <td class="py-2 text-right pr-2">
                   <a
-                    href={"/admin/auto/" <> Atom.to_string(@kind) <> "/" <> URI.encode_www_form(URI.to_string(inst.uri))}
-                    class="text-zinc-600 hover:text-zinc-900 text-xs"
+                    href={"/plugins/auto/" <> Atom.to_string(@kind) <> "/" <> URI.encode_www_form(URI.to_string(inst.uri))}
+                    class="text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 text-xs"
                   >detail →</a>
                 </td>
               </tr>
@@ -117,7 +131,7 @@ defmodule EzagentPluginLiveview.AutoDeriveLive do
             <% nil -> %>
               <p class="text-zinc-500 italic text-sm">Loading…</p>
             <% {:error, reason} -> %>
-              <p class="text-red-700 text-sm">Error: {inspect(reason)}</p>
+              <p class="text-red-700 dark:text-red-300 text-sm">Error: {inspect(reason)}</p>
             <% detail when is_map(detail) -> %>
               <div class="space-y-2">
                 <div>
@@ -141,19 +155,21 @@ defmodule EzagentPluginLiveview.AutoDeriveLive do
           <%= for {slice_key, slice_val} <- (@detail && @detail[:slices]) || %{} do %>
             <div class="mb-3">
               <div class="text-xs uppercase text-zinc-500 mb-1">{slice_key}</div>
-              <pre class="text-xs bg-zinc-50 border border-zinc-200 rounded p-2 overflow-x-auto"><%= inspect(slice_val, pretty: true) %></pre>
+              <pre class="text-xs bg-zinc-50 dark:bg-zinc-950 border border-zinc-200 dark:border-zinc-800 rounded p-2 overflow-x-auto"><%= inspect(slice_val, pretty: true) %></pre>
             </div>
           <% end %>
         </.card>
 
         <p class="mt-4">
           <a
-            href={"/admin/auto/" <> Atom.to_string(@kind)}
-            class="text-zinc-600 hover:text-zinc-900 text-xs"
+            href={"/plugins/auto/" <> Atom.to_string(@kind)}
+            class="text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 text-xs"
           >← back to list</a>
         </p>
       </div>
-    </div>
+        </div>
+      </:main_window>
+    </IdeShell.ide_shell>
     """
   end
 end

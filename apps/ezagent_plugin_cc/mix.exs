@@ -31,6 +31,9 @@ defmodule EzagentPluginCc.MixProject do
       {:ezagent_core, in_umbrella: true},
       {:ezagent_domain_identity, in_umbrella: true},
       {:ezagent_domain_workspace, in_umbrella: true},
+      # Phase 8b — PtyView implements Ezagent.UI.SessionView. domain_ui
+      # is a library (no Application); only contributes module references.
+      {:ezagent_domain_ui, in_umbrella: true},
       # Deliberately NOT depending on ezagent_domain_chat: chat depends
       # on us (Chat.invoke(:receive) calls EzagentPluginCc.BridgeRegistry.lookup),
       # so a reverse dep would cycle. The Channel module references

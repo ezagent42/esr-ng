@@ -10,7 +10,16 @@ defmodule Ezagent.IdentityTest do
     end
 
     test "returns admin's all-cap MapSet for live admin Kind" do
-      # Admin User is spawned at chat plugin Application.start with admin_caps
+      # PR-M (2026-05-20): admin User Kind is no longer a static
+      # supervisor child — it spawns lazily on first reference. The
+      # production login path (`Ezagent.Entity.authenticate/2`) calls
+      # `ensure_spawned/1` which hydrates caps from the `users` DB row
+      # (populated by `EzagentDomainIdentity.Application.ensure_admin_user/0`
+      # at boot). For this direct-read test, spawn explicitly via
+      # SpawnRegistry; the boot-time DB hydration is what makes the
+      # slice reflect admin_caps.
+      {:ok, _pid} = Ezagent.SpawnRegistry.spawn(Ezagent.Entity.User.admin_uri())
+
       caps = Ezagent.Identity.list_caps_for(Ezagent.Entity.User.admin_uri())
 
       assert MapSet.size(caps) >= 1
@@ -18,6 +27,39 @@ defmodule Ezagent.IdentityTest do
       assert Enum.any?(caps, fn cap ->
                cap.kind == :any and cap.behavior == :any and cap.instance == :any
              end)
+    end
+  end
+
+  describe "admin?/1 (Phase 8c PR-F)" do
+    test "returns true for the seeded admin URI (struct form)" do
+      assert Ezagent.Identity.admin?(Ezagent.Entity.User.admin_uri())
+    end
+
+    test "returns true for the seeded admin URI (string form)" do
+      assert Ezagent.Identity.admin?("entity://user/admin")
+    end
+
+    test "returns false for a non-admin user URI" do
+      refute Ezagent.Identity.admin?("entity://user/alice")
+      refute Ezagent.Identity.admin?(URI.parse("entity://user/bob"))
+    end
+
+    test "returns false for an agent URI" do
+      refute Ezagent.Identity.admin?("entity://agent/claude-1")
+    end
+
+    test "returns false for nil" do
+      refute Ezagent.Identity.admin?(nil)
+    end
+
+    test "returns false for a malformed URI string" do
+      refute Ezagent.Identity.admin?("not a uri")
+      refute Ezagent.Identity.admin?("")
+    end
+
+    test "returns false for any other input type" do
+      refute Ezagent.Identity.admin?(:admin)
+      refute Ezagent.Identity.admin?(42)
     end
   end
 end
