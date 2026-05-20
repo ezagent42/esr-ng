@@ -197,17 +197,23 @@ defmodule EzagentPluginLiveview.Admin.SessionEditor do
     <div class="relative">
       <button
         type="button"
-        phx-click={JS.toggle(to: "#session-setting-menu")}
+        phx-click={
+          JS.toggle(
+            to: "#session-setting-menu",
+            in: {"ease-out duration-150", "opacity-0 -translate-y-1", "opacity-100 translate-y-0"},
+            out: {"ease-in duration-100", "opacity-100 translate-y-0", "opacity-0 -translate-y-1"}
+          )
+        }
         title="Session settings"
         aria-label="Session settings"
-        class="p-1 text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100 rounded"
+        class="p-1 text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100 rounded transition-colors"
       >
         <.icon name="settings" size="sm" />
       </button>
 
       <div
         id="session-setting-menu"
-        class="hidden absolute right-0 top-full mt-1 w-80 bg-white border border-zinc-200 rounded-md shadow-lg z-40 text-xs"
+        class="hidden absolute right-0 top-full mt-1 w-80 bg-white border border-zinc-200 rounded-md shadow-lg z-40 text-xs transition transform"
       >
         <div class="px-3 py-2 border-b border-zinc-200">
           <div class="text-[10px] uppercase tracking-wide text-zinc-500">Session</div>

@@ -28,6 +28,20 @@ defmodule EzagentPluginLiveview.Views.ConversationView do
 
   @impl true
   def render(assigns) do
+    # Phase 8c PR-B (Allen 2026-05-20) — empty-state aware. When the
+    # session has zero messages, the main area is otherwise a blank
+    # white expanse; replace it with a subtle dot-grid + minimal
+    # affordance so it reads as "this is where messages will appear",
+    # not "is this page broken?". Inferred from `@empty_state?` which
+    # admin_live computes from the stream (stays nil during render
+    # while stream hasn't been touched).
+    assigns =
+      assigns
+      |> assign_new(:empty_state?, fn ->
+        # default: assume non-empty (admin_live overrides when known)
+        false
+      end)
+
     ~H"""
     <div class="flex-1 flex flex-col min-h-0">
       <div :if={@oldest_cursor} class="text-center py-1 bg-zinc-50 border-b border-zinc-200 shrink-0">
@@ -41,7 +55,26 @@ defmodule EzagentPluginLiveview.Views.ConversationView do
         </button>
       </div>
 
+      <%!-- Empty state — refined minimalism: subtle dot-grid background,
+            no clip art, a small monospace caption that names what this
+            surface IS. Disappears the moment a real message lands. --%>
       <div
+        :if={@empty_state?}
+        class="flex-1 flex items-center justify-center"
+        style="background-image: radial-gradient(circle, #e4e4e7 1px, transparent 1px); background-size: 16px 16px;"
+      >
+        <div class="text-center">
+          <div class="font-mono text-xs uppercase tracking-widest text-zinc-400">
+            empty session
+          </div>
+          <div class="mt-2 text-sm text-zinc-500">
+            Type a message below to begin.
+          </div>
+        </div>
+      </div>
+
+      <div
+        :if={not @empty_state?}
         id="messages"
         phx-update="stream"
         phx-hook="ScrollOnUpdate"

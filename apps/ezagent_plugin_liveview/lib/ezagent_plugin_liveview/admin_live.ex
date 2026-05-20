@@ -82,6 +82,10 @@ defmodule EzagentPluginLiveview.AdminLive do
       socket
       |> stream(:messages, initial_messages)
       |> assign(:oldest_cursor, oldest_cursor(initial_messages))
+      # Phase 8c PR-B — empty-state flag for ConversationView. Tracks
+      # whether any message has been rendered yet so the view can show a
+      # dot-grid placeholder instead of a blank white panel.
+      |> assign(:messages_empty?, initial_messages == [])
       |> assign(:caller_uri, caller_uri)
       |> assign(:caller_caps, caller_caps)
       |> assign(:caller_uri_str, URI.to_string(caller_uri))
@@ -136,14 +140,20 @@ defmodule EzagentPluginLiveview.AdminLive do
 
   def handle_info({:chat_message, source_session_uri, %Ezagent.Message{} = msg}, socket) do
     if URI.to_string(source_session_uri) == URI.to_string(socket.assigns.current_session_uri) do
-      {:noreply, stream_insert(socket, :messages, message_to_row(msg), at: -1)}
+      {:noreply,
+       socket
+       |> assign(:messages_empty?, false)
+       |> stream_insert(:messages, message_to_row(msg), at: -1)}
     else
       {:noreply, socket}
     end
   end
 
   def handle_info({:chat_message, %Ezagent.Message{} = msg}, socket) do
-    {:noreply, stream_insert(socket, :messages, message_to_row(msg), at: -1)}
+    {:noreply,
+     socket
+     |> assign(:messages_empty?, false)
+     |> stream_insert(:messages, message_to_row(msg), at: -1)}
   end
 
   # --- User actions -----------------------------------------------------
@@ -210,6 +220,7 @@ defmodule EzagentPluginLiveview.AdminLive do
          # agent as a member.
          |> assign(:active_pty_agent_uri, nil)
          |> assign(:oldest_cursor, oldest_cursor(new_messages))
+         |> assign(:messages_empty?, new_messages == [])
          |> stream(:messages, new_messages, reset: true)}
 
       _ ->
@@ -380,6 +391,7 @@ defmodule EzagentPluginLiveview.AdminLive do
               messages_stream={@streams.messages}
               oldest_cursor={@oldest_cursor}
               active_pty_agent_uri={@active_pty_agent_uri}
+              empty_state?={@messages_empty?}
             />
           </:main_view>
         </SessionEditor.session_editor>
@@ -420,6 +432,7 @@ defmodule EzagentPluginLiveview.AdminLive do
   attr :messages_stream, :any, required: true
   attr :oldest_cursor, :any, default: nil
   attr :active_pty_agent_uri, :any, default: nil
+  attr :empty_state?, :boolean, default: false
 
   defp render_active_view(assigns) do
     case assigns.view_module do

@@ -284,6 +284,23 @@ defmodule EzagentDomainUi.IdeShell do
   attr :status, :map, default: %{}
 
   def status_bar(assigns) do
+    # Phase 8c PR-B (Allen 2026-05-20) — state-aware signal lights.
+    # The bar should communicate health at a glance: green when something
+    # is alive and OK, gray when zero (the resting state), amber when
+    # something needs attention.
+    agents = Map.get(assigns.status, :agents_alive, 0)
+    bridges = Map.get(assigns.status, :bridges, 0)
+    events = Map.get(assigns.status, :debug_events, 0)
+
+    assigns =
+      assigns
+      |> assign(:agents_count, agents)
+      |> assign(:bridges_count, bridges)
+      |> assign(:events_count, events)
+      |> assign(:agents_color, if(agents > 0, do: "green", else: "gray"))
+      |> assign(:bridges_color, if(bridges > 0, do: "green", else: "gray"))
+      |> assign(:events_color, if(events > 0, do: "amber", else: "gray"))
+
     ~H"""
     <footer class="h-6 border-t border-zinc-200 bg-zinc-50 px-3 flex items-center gap-4 text-[11px] text-zinc-600 shrink-0">
       <span class="flex items-center gap-1">
@@ -295,18 +312,20 @@ defmodule EzagentDomainUi.IdeShell do
         <span class="font-mono">{format_uri_for_status(@status.session_uri)}</span>
       </span>
       <span class="flex items-center gap-1">
-        <.status_dot color="green" />
-        <span>{Map.get(@status, :agents_alive, 0)} agents</span>
+        <.status_dot color={@agents_color} />
+        <span>{@agents_count} agents</span>
       </span>
       <span class="flex items-center gap-1">
-        <.status_dot color={(Map.get(@status, :bridges, 0) > 0) && "green" || "gray"} />
-        <span>{Map.get(@status, :bridges, 0)} bridges</span>
+        <.status_dot color={@bridges_color} />
+        <span>{@bridges_count} bridges</span>
       </span>
       <a href="/admin/logs" class="flex items-center gap-1 hover:text-zinc-900 ml-auto">
         <.icon name="bug" size="xs" />
-        <span>{Map.get(@status, :debug_events, 0)} events</span>
+        <span class={@events_color == "amber" && "text-amber-700" || ""}>
+          {@events_count} events
+        </span>
       </a>
-      <span class="text-zinc-400">v{Map.get(@status, :version, "dev")}</span>
+      <span class="font-mono text-zinc-400">v{Map.get(@status, :version, "dev")}</span>
     </footer>
     """
   end
