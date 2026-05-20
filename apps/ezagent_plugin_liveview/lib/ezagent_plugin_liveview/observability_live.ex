@@ -85,6 +85,7 @@ defmodule EzagentPluginLiveview.ObservabilityLive do
       </:resource_panel>
       <:main_window>
         <div class="flex-1 overflow-auto px-6 py-6">
+          <.breadcrumb items={[{"Admin", "/admin"}, {"Logs & Audit", nil}]} />
           {render_tab(assigns, @tab)}
         </div>
       </:main_window>

@@ -16,6 +16,7 @@ defmodule EzagentPluginLiveview.EntitiesLive do
 
   use Phoenix.LiveView
   alias EzagentDomainUi.IdeShell
+  use EzagentDomainUi.Components
   import Phoenix.Component
 
   @impl true
@@ -99,6 +100,7 @@ defmodule EzagentPluginLiveview.EntitiesLive do
       </:resource_panel>
       <:main_window>
         <div class="flex-1 overflow-auto px-6 py-6 text-zinc-900 dark:text-zinc-100">
+        <.breadcrumb items={[{"Admin", "/admin"}, {"Registry", nil}]} />
         <header>
         <h1 style="font-size: 22px; font-weight: 600;">Entities (live registry)</h1>
         <p style="font-size: 13px; color: #666;">

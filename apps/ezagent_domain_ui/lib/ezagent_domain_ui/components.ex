@@ -157,6 +157,41 @@ defmodule EzagentDomainUi.Components do
   end
 
   @doc """
+  Breadcrumb — comma-separated trail with chevrons + final non-link label.
+
+  Used on /admin sub-pages so users always have a one-click path back to
+  the parent surface (Allen 2026-05-20: every sub-page on /admin/* was
+  reachable only by browser back).
+
+      <.breadcrumb items={[{"Admin", "/admin"}, {"Logs & Audit", nil}]} />
+
+  Items are `{label, href_or_nil}` tuples. The last item is expected to
+  have `nil` href (it's the current page; don't link to self).
+  """
+  attr :items, :list, required: true
+  attr :class, :string, default: ""
+
+  def breadcrumb(assigns) do
+    ~H"""
+    <nav class={["flex items-center gap-1 text-xs text-zinc-500 mb-3", @class]} aria-label="Breadcrumb">
+      <%= for {{label, href}, idx} <- Enum.with_index(@items) do %>
+        <span :if={idx > 0} class="text-zinc-300 dark:text-zinc-600 select-none">/</span>
+        <a
+          :if={href}
+          href={href}
+          class="hover:text-zinc-900 dark:hover:text-zinc-100 transition-colors"
+        >{label}</a>
+        <span
+          :if={is_nil(href)}
+          class="text-zinc-700 dark:text-zinc-300"
+          aria-current="page"
+        >{label}</span>
+      <% end %>
+    </nav>
+    """
+  end
+
+  @doc """
   Stat — single key/value pair used in summary rows.
 
       <.stat label="Sessions" value={5} />

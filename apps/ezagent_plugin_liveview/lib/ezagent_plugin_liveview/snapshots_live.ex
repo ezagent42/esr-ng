@@ -10,6 +10,7 @@ defmodule EzagentPluginLiveview.SnapshotsLive do
 
   use Phoenix.LiveView
   alias EzagentDomainUi.IdeShell
+  use EzagentDomainUi.Components
   import Phoenix.Component
 
   alias Ezagent.Ecto.KindSnapshot
@@ -99,12 +100,12 @@ defmodule EzagentPluginLiveview.SnapshotsLive do
     >
       <:main_window>
         <div class="flex-1 overflow-auto px-6 py-6 text-zinc-900 dark:text-zinc-100">
+      <.breadcrumb items={[{"Admin", "/admin"}, {"Snapshots", nil}]} />
       <header>
         <h1 style="font-size: 22px; font-weight: 600;">Snapshots</h1>
         <p style="font-size: 13px; color: #666;">
           Per-Kind runtime state snapshots (Phase 4-completion PR 2,
           Decision #115). One row per `kind_snapshots.uri`.
-          <a href="/admin" style="margin-left: 16px; color: #0969da;">← Dashboard</a>
         </p>
       </header>
 
