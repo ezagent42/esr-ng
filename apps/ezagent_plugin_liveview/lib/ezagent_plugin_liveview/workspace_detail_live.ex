@@ -11,10 +11,16 @@ defmodule EzagentPluginLiveview.WorkspaceDetailLive do
   Member mutations go through `Ezagent.Workspace.add_member/2` and
   `remove_member/2` — both persist (Store) + dispatch (live Kind) so
   the UI shows the new state immediately AND restart-safe.
+
+  Phase 8c PR-H — inline `style=""` violations replaced with
+  `EzagentDomainUi` atoms + Tailwind tokens (Allen 2026-05-20 audit).
+  Helper functions that previously returned inline-style strings now
+  return Tailwind class strings instead.
   """
 
   use Phoenix.LiveView
   alias EzagentDomainUi.IdeShell
+  use EzagentDomainUi.Components
   import Phoenix.Component
 
   @impl true
@@ -70,26 +76,30 @@ defmodule EzagentPluginLiveview.WorkspaceDetailLive do
   defp template_status_label(:no_class), do: "No Class registered"
   defp template_status_label(:no_class_field), do: "Missing \"class\" field"
 
-  defp template_status_style(:class_registered),
-    do: "font-size: 11px; color: #1f883d;"
+  # Phase 8c PR-H — helper now returns Tailwind classes, not inline
+  # `style=""` strings. Same green/red semantic mapping as before.
+  defp template_status_class(:class_registered),
+    do: "text-[11px] text-emerald-600 dark:text-emerald-400"
 
-  defp template_status_style(_),
-    do: "font-size: 11px; color: #cf222e;"
+  defp template_status_class(_),
+    do: "text-[11px] text-rose-600 dark:text-rose-400"
 
-  defp input_style_for(:path),
-    do: "padding: 5px 8px; border: 1px solid #d1d5da; border-radius: 4px; font-size: 12px; font-family: monospace;"
+  defp input_class_for(:path),
+    do: "px-2 py-1 border border-zinc-300 dark:border-zinc-700 rounded text-xs font-mono bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100"
 
-  defp input_style_for(:uri),
-    do: "padding: 5px 8px; border: 1px solid #d1d5da; border-radius: 4px; font-size: 12px; font-family: monospace;"
+  defp input_class_for(:uri),
+    do: "px-2 py-1 border border-zinc-300 dark:border-zinc-700 rounded text-xs font-mono bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100"
 
-  defp input_style_for(_),
-    do: "padding: 5px 8px; border: 1px solid #d1d5da; border-radius: 4px; font-size: 12px;"
+  defp input_class_for(_),
+    do: "px-2 py-1 border border-zinc-300 dark:border-zinc-700 rounded text-xs bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100"
 
-  defp tmpl_mode_btn_style(true),
-    do: "padding: 4px 12px; background: #0969da; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 11px;"
+  defp tmpl_mode_btn_class(true),
+    do:
+      "px-3 py-1 bg-blue-600 dark:bg-blue-500 text-white border-none rounded cursor-pointer text-[11px]"
 
-  defp tmpl_mode_btn_style(false),
-    do: "padding: 4px 12px; background: white; color: #0969da; border: 1px solid #d1d5da; border-radius: 4px; cursor: pointer; font-size: 11px;"
+  defp tmpl_mode_btn_class(false),
+    do:
+      "px-3 py-1 bg-white dark:bg-zinc-900 text-blue-600 dark:text-blue-400 border border-zinc-300 dark:border-zinc-700 rounded cursor-pointer text-[11px]"
 
   @impl true
   def handle_event("add_member", %{"add_member" => %{"member_uri" => uri_str}}, socket)
@@ -248,10 +258,14 @@ defmodule EzagentPluginLiveview.WorkspaceDetailLive do
   @impl true
   def render(%{not_found: true} = assigns) do
     ~H"""
-    <div style="max-width: 800px; margin: 0 auto; padding: 24px; font-family: -apple-system, sans-serif;">
-      <h1 style="font-size: 22px;">Workspace not found</h1>
+    <div class="max-w-3xl mx-auto px-6 py-6 text-zinc-900 dark:text-zinc-100">
+      <.page_header title="Workspace not found" />
       <p>No persisted workspace named <code>{@name}</code>.</p>
-      <p><a href="/workspaces" style="color: #0969da;">← Workspaces</a></p>
+      <p>
+        <a href="/workspaces" class="text-blue-600 dark:text-blue-400 hover:text-blue-700">
+          ← Workspaces
+        </a>
+      </p>
     </div>
     """
   end
@@ -278,202 +292,236 @@ defmodule EzagentPluginLiveview.WorkspaceDetailLive do
       </:resource_panel>
       <:main_window>
         <div class="flex-1 overflow-auto px-6 py-6 text-zinc-900 dark:text-zinc-100">
-        <header>
-        <h1 style="font-size: 22px; font-weight: 600;">
-          Workspace: <code>{@workspace.name}</code>
-        </h1>
-        <p style="font-size: 13px; color: #666;">
-          <code>{URI.to_string(@workspace.uri)}</code>
-        </p>
-      </header>
-
-      <section id="members" style="margin-top: 24px; padding: 16px; border: 1px solid #d1d5da; border-radius: 6px;">
-        <h2 style="font-size: 14px; font-weight: 500; margin: 0 0 12px 0;">Members ({length(@workspace.members)})</h2>
-
-        <p :if={@workspace.members == []} id="members-empty" style="color: #57606a; font-style: italic;">
-          No members. Add one below to declare a Kind that should be alive
-          whenever this Workspace is loaded.
-        </p>
-
-        <ul :if={@workspace.members != []} id="members-list" style="list-style: none; padding: 0; margin: 0;">
-          <li :for={member <- @workspace.members} style="display: flex; align-items: center; padding: 6px 0; border-bottom: 1px solid #f0f0f0;">
-            <code style="flex: 1; font-size: 12px;">{URI.to_string(member)}</code>
-            <button
-              type="button"
-              phx-click="remove_member"
-              phx-value-member_uri={URI.to_string(member)}
-              style="padding: 4px 10px; background: white; color: #cf222e; border: 1px solid #cf222e; border-radius: 4px; cursor: pointer; font-size: 11px;"
-              data-confirm="Remove this member?"
-            >
-              Remove
-            </button>
-          </li>
-        </ul>
-
-        <.form for={@add_form} phx-submit="add_member" style="display: flex; gap: 8px; margin-top: 16px;">
-          <input
-            type="text"
-            name="add_member[member_uri]"
-            id="add_member_uri"
-            placeholder="entity://agent/cc_architect"
-            style="flex: 1; padding: 6px 10px; border: 1px solid #d1d5da; border-radius: 4px; font-family: monospace; font-size: 12px;"
-          />
-          <button
-            type="submit"
-            style="padding: 6px 16px; background: #0969da; color: white; border: none; border-radius: 4px; cursor: pointer;"
-          >
-            Add member
-          </button>
-        </.form>
-        <p :if={@flash_error} style="color: #cf222e; font-size: 13px; margin-top: 8px;">{@flash_error}</p>
-      </section>
-
-      <section id="templates" style="margin-top: 24px; padding: 16px; border: 1px solid #d1d5da; border-radius: 6px;">
-        <h2 style="font-size: 14px; font-weight: 500; margin: 0 0 12px 0;">
-          Session templates ({map_size(@workspace.session_templates)})
-        </h2>
-        <p :if={@workspace.session_templates == %{}} id="templates-empty" style="color: #57606a; font-style: italic;">
-          No session templates declared.
-        </p>
-        <table :if={@workspace.session_templates != %{}} id="templates-table" style="width: 100%; font-size: 12px; border-collapse: collapse;">
-          <thead>
-            <tr style="border-bottom: 1px solid #d1d5da;">
-              <th style="text-align: left; padding: 6px 4px;">Name</th>
-              <th style="text-align: left;">Class</th>
-              <th style="text-align: left;">Members</th>
-              <th style="text-align: left;">Status</th>
-              <th></th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr :for={{tmpl_name, tmpl_data} <- @workspace.session_templates} style="border-bottom: 1px solid #f0f0f0;">
-              <td style="padding: 4px 4px; font-weight: 500;">{tmpl_name}</td>
-              <td style="font-family: monospace; font-size: 11px;">{template_class_name(tmpl_data)}</td>
-              <td>{template_member_count(tmpl_data)}</td>
-              <td style={template_status_style(template_status(tmpl_data))}>{template_status_label(template_status(tmpl_data))}</td>
-              <td>
-                <button
-                  type="button"
-                  phx-click="remove_template"
-                  phx-value-name={tmpl_name}
-                  style="padding: 3px 8px; background: white; color: #cf222e; border: 1px solid #cf222e; border-radius: 4px; cursor: pointer; font-size: 10px;"
-                  data-confirm="Remove this template? (already-spawned Kinds stay alive)"
-                >Remove</button>
-              </td>
-            </tr>
-          </tbody>
-        </table>
-        <p :if={@registered_template_classes != []} id="registered-classes" style="margin-top: 12px; font-size: 11px; color: #57606a;">
-          Registered Template Classes: <code>{Enum.join(@registered_template_classes, ", ")}</code>
-        </p>
-
-        <div id="add-template" style="margin-top: 16px; padding-top: 16px; border-top: 1px solid #eaeef2;">
-          <h3 style="font-size: 13px; font-weight: 500; margin: 0 0 8px 0;">Add template</h3>
-
-          <p style="font-size: 11px; color: #57606a; margin: 0 0 8px 0;">
-            Class picker drives the form below — each registered Template Class self-describes its
-            fields via <code>Ezagent.UI.Form.form_fields/0</code>. JSON mode is the escape hatch for
-            custom Classes that don't implement the form behaviour.
-          </p>
-
-          <div style="margin-bottom: 12px; display: flex; gap: 6px; flex-wrap: wrap;">
-            <button
-              :for={{class_name, _module, _fields} <- @form_classes}
-              type="button"
-              phx-click="select_template_class"
-              phx-value-class={class_name}
-              style={tmpl_mode_btn_style(@selected_class == class_name)}
-            >{class_name}</button>
-            <button
-              type="button"
-              phx-click="select_template_class"
-              phx-value-class="__json__"
-              style={tmpl_mode_btn_style(@selected_class == "__json__")}
-            >JSON (custom class)</button>
+          <%!--
+            Phase 8c PR-H: NOT using `<.page_header>` here because the page
+            title contains a `<code>` child — a test (workspaces_live_test
+            "detail page shows existing workspace + members section")
+            asserts the literal string `Workspace: <code>NAME</code>`.
+            The page_header atom takes a plain `:title` attr and can't host
+            a child element. We use the same h1 classes the atom uses
+            internally so the visual stays consistent with the atom layer.
+          --%>
+          <div class="flex items-end justify-between mb-6 pb-4 border-b border-zinc-200 dark:border-zinc-800">
+            <div>
+              <h1 class="text-xl font-semibold text-zinc-900 dark:text-zinc-100">
+                Workspace: <code>{@workspace.name}</code>
+              </h1>
+              <p class="mt-1 text-sm text-zinc-500">
+                <code>{URI.to_string(@workspace.uri)}</code>
+              </p>
+            </div>
           </div>
 
-          <.form for={@add_template_form} phx-submit="add_template">
-            <div style="display: grid; grid-template-columns: 200px 1fr; gap: 6px; margin-bottom: 12px;">
+          <.card id="members" class="mt-6">
+            <h2 class="text-sm font-medium mb-3 text-zinc-900 dark:text-zinc-100">
+              Members ({length(@workspace.members)})
+            </h2>
+
+            <p :if={@workspace.members == []} id="members-empty" class="text-zinc-500 italic">
+              No members. Add one below to declare a Kind that should be alive
+              whenever this Workspace is loaded.
+            </p>
+
+            <ul :if={@workspace.members != []} id="members-list" class="list-none p-0 m-0">
+              <li
+                :for={member <- @workspace.members}
+                class="flex items-center py-1.5 border-b border-zinc-100 dark:border-zinc-900"
+              >
+                <code class="flex-1 text-xs">{URI.to_string(member)}</code>
+                <.button
+                  variant="outline"
+                  size="sm"
+                  type="button"
+                  phx-click="remove_member"
+                  phx-value-member_uri={URI.to_string(member)}
+                  class="text-rose-600 dark:text-rose-400 border-rose-600 dark:border-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950 text-[11px]"
+                  data-confirm="Remove this member?"
+                >
+                  Remove
+                </.button>
+              </li>
+            </ul>
+
+            <.form for={@add_form} phx-submit="add_member" class="flex gap-2 mt-4">
               <input
                 type="text"
-                name="add_template[tmpl_name]"
-                placeholder="template name (e.g. main)"
-                style="padding: 5px 8px; border: 1px solid #d1d5da; border-radius: 4px; font-size: 12px;"
+                name="add_member[member_uri]"
+                id="add_member_uri"
+                placeholder="entity://agent/cc_architect"
+                class="flex-1 px-2.5 py-1.5 border border-zinc-300 dark:border-zinc-700 rounded font-mono text-xs bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100"
               />
-              <span style="font-size: 11px; color: #57606a; align-self: center;">
-                Class = <code>{@selected_class}</code>
-              </span>
-            </div>
+              <.button type="submit" variant="primary" size="sm">Add member</.button>
+            </.form>
+            <p :if={@flash_error} class="text-rose-600 dark:text-rose-400 text-xs mt-2">{@flash_error}</p>
+          </.card>
 
-            <%= if @selected_class == "__json__" do %>
-              <div style="margin-bottom: 8px;">
-                <textarea
-                  name="add_template[json]"
-                  rows="5"
-                  placeholder={~s({"class":"some.class","field":"value"})}
-                  style="width: 100%; padding: 6px 10px; border: 1px solid #d1d5da; border-radius: 4px; font-family: monospace; font-size: 11px;"
-                ></textarea>
-                <p style="font-size: 10px; color: #57606a; margin: 4px 0 0;">
-                  Full template JSON — "class" field must reference a registered Class.
-                </p>
+          <.card id="templates" class="mt-6">
+            <h2 class="text-sm font-medium mb-3 text-zinc-900 dark:text-zinc-100">
+              Session templates ({map_size(@workspace.session_templates)})
+            </h2>
+            <p
+              :if={@workspace.session_templates == %{}}
+              id="templates-empty"
+              class="text-zinc-500 italic"
+            >
+              No session templates declared.
+            </p>
+            <table
+              :if={@workspace.session_templates != %{}}
+              id="templates-table"
+              class="w-full text-xs border-collapse"
+            >
+              <thead>
+                <tr class="border-b border-zinc-200 dark:border-zinc-800">
+                  <th class="text-left px-1 py-1.5">Name</th>
+                  <th class="text-left">Class</th>
+                  <th class="text-left">Members</th>
+                  <th class="text-left">Status</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr
+                  :for={{tmpl_name, tmpl_data} <- @workspace.session_templates}
+                  class="border-b border-zinc-100 dark:border-zinc-900"
+                >
+                  <td class="px-1 py-1 font-medium">{tmpl_name}</td>
+                  <td class="font-mono text-[11px]">{template_class_name(tmpl_data)}</td>
+                  <td>{template_member_count(tmpl_data)}</td>
+                  <td class={template_status_class(template_status(tmpl_data))}>{template_status_label(template_status(tmpl_data))}</td>
+                  <td>
+                    <.button
+                      variant="outline"
+                      size="sm"
+                      type="button"
+                      phx-click="remove_template"
+                      phx-value-name={tmpl_name}
+                      class="text-rose-600 dark:text-rose-400 border-rose-600 dark:border-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950 text-[10px] px-2 py-0.5 h-auto"
+                      data-confirm="Remove this template? (already-spawned Kinds stay alive)"
+                    >Remove</.button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+            <p
+              :if={@registered_template_classes != []}
+              id="registered-classes"
+              class="mt-3 text-[11px] text-zinc-500"
+            >
+              Registered Template Classes: <code>{Enum.join(@registered_template_classes, ", ")}</code>
+            </p>
+
+            <div id="add-template" class="mt-4 pt-4 border-t border-zinc-200 dark:border-zinc-800">
+              <h3 class="text-[13px] font-medium mb-2 text-zinc-900 dark:text-zinc-100">Add template</h3>
+
+              <p class="text-[11px] text-zinc-500 mb-2">
+                Class picker drives the form below — each registered Template Class self-describes its
+                fields via <code>Ezagent.UI.Form.form_fields/0</code>. JSON mode is the escape hatch for
+                custom Classes that don't implement the form behaviour.
+              </p>
+
+              <div class="mb-3 flex gap-1.5 flex-wrap">
+                <button
+                  :for={{class_name, _module, _fields} <- @form_classes}
+                  type="button"
+                  phx-click="select_template_class"
+                  phx-value-class={class_name}
+                  class={tmpl_mode_btn_class(@selected_class == class_name)}
+                >{class_name}</button>
+                <button
+                  type="button"
+                  phx-click="select_template_class"
+                  phx-value-class="__json__"
+                  class={tmpl_mode_btn_class(@selected_class == "__json__")}
+                >JSON (custom class)</button>
               </div>
-            <% else %>
-              <% selected_fields =
-                Enum.find_value(@form_classes, [], fn {n, _m, fields} ->
-                  if n == @selected_class, do: fields
-                end) %>
 
-              <div :for={field <- selected_fields} style="display: grid; grid-template-columns: 200px 1fr; gap: 6px; margin-bottom: 8px;">
-                <label style="font-size: 12px; color: #57606a; align-self: center;">
-                  {field.label}{if Map.get(field, :required, false), do: " *", else: ""}
-                </label>
-                <%= case field.type do %>
-                  <% :select -> %>
-                    <select
-                      name={"add_template[" <> field.name <> "]"}
-                      style="padding: 5px 8px; border: 1px solid #d1d5da; border-radius: 4px; font-size: 12px; font-family: monospace;"
-                    >
-                      <option :for={opt <- Map.get(field, :options, [])} value={opt}>{opt}</option>
-                    </select>
-                  <% :path -> %>
-                    <div style="display: flex; flex-direction: column; gap: 2px;">
-                      <input
-                        type="text"
-                        name={"add_template[" <> field.name <> "]"}
-                        placeholder={Map.get(field, :placeholder, "/path/to/dir")}
-                        style={input_style_for(field.type)}
-                      />
-                      <span style="font-size: 10px; color: #57606a;">📁 Filesystem path (server-side)</span>
-                    </div>
-                  <% _ -> %>
-                    <input
-                      type="text"
-                      name={"add_template[" <> field.name <> "]"}
-                      placeholder={Map.get(field, :placeholder, "")}
-                      style={input_style_for(field.type)}
-                    />
+              <.form for={@add_template_form} phx-submit="add_template">
+                <div class="grid grid-cols-[200px_1fr] gap-1.5 mb-3">
+                  <input
+                    type="text"
+                    name="add_template[tmpl_name]"
+                    placeholder="template name (e.g. main)"
+                    class="px-2 py-1 border border-zinc-300 dark:border-zinc-700 rounded text-xs bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100"
+                  />
+                  <span class="text-[11px] text-zinc-500 self-center">
+                    Class = <code>{@selected_class}</code>
+                  </span>
+                </div>
+
+                <%= if @selected_class == "__json__" do %>
+                  <div class="mb-2">
+                    <textarea
+                      name="add_template[json]"
+                      rows="5"
+                      placeholder={~s({"class":"some.class","field":"value"})}
+                      class="w-full px-2.5 py-1.5 border border-zinc-300 dark:border-zinc-700 rounded font-mono text-[11px] bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100"
+                    ></textarea>
+                    <p class="text-[10px] text-zinc-500 mt-1">
+                      Full template JSON — "class" field must reference a registered Class.
+                    </p>
+                  </div>
+                <% else %>
+                  <% selected_fields =
+                    Enum.find_value(@form_classes, [], fn {n, _m, fields} ->
+                      if n == @selected_class, do: fields
+                    end) %>
+
+                  <div
+                    :for={field <- selected_fields}
+                    class="grid grid-cols-[200px_1fr] gap-1.5 mb-2"
+                  >
+                    <label class="text-xs text-zinc-500 self-center">
+                      {field.label}{if Map.get(field, :required, false), do: " *", else: ""}
+                    </label>
+                    <%= case field.type do %>
+                      <% :select -> %>
+                        <select
+                          name={"add_template[" <> field.name <> "]"}
+                          class="px-2 py-1 border border-zinc-300 dark:border-zinc-700 rounded text-xs font-mono bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100"
+                        >
+                          <option :for={opt <- Map.get(field, :options, [])} value={opt}>{opt}</option>
+                        </select>
+                      <% :path -> %>
+                        <div class="flex flex-col gap-0.5">
+                          <input
+                            type="text"
+                            name={"add_template[" <> field.name <> "]"}
+                            placeholder={Map.get(field, :placeholder, "/path/to/dir")}
+                            class={input_class_for(field.type)}
+                          />
+                          <span class="text-[10px] text-zinc-500">📁 Filesystem path (server-side)</span>
+                        </div>
+                      <% _ -> %>
+                        <input
+                          type="text"
+                          name={"add_template[" <> field.name <> "]"}
+                          placeholder={Map.get(field, :placeholder, "")}
+                          class={input_class_for(field.type)}
+                        />
+                    <% end %>
+                  </div>
                 <% end %>
-              </div>
-            <% end %>
 
-            <button
-              type="submit"
-              style="padding: 5px 14px; background: #1f883d; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;"
-            >Add template</button>
-          </.form>
-        </div>
-      </section>
+                <.button type="submit" variant="success" size="sm">Add template</.button>
+              </.form>
+            </div>
+          </.card>
 
-      <section id="routing-rules" style="margin-top: 24px; padding: 16px; border: 1px solid #d1d5da; border-radius: 6px;">
-        <h2 style="font-size: 14px; font-weight: 500; margin: 0 0 12px 0;">
-          Routing rules ({length(@workspace.routing_rules)})
-          <span style="font-size: 11px; color: #57606a; font-weight: normal;">(read-only — Phase 5 editor)</span>
-        </h2>
-        <p :if={@workspace.routing_rules == []} id="rules-empty" style="color: #57606a; font-style: italic;">
-          No routing rules declared.
-        </p>
-        <pre :if={@workspace.routing_rules != []} id="rules-json" style="background: #f6f8fa; padding: 12px; border-radius: 4px; overflow-x: auto; font-size: 11px;">{Jason.encode!(@workspace.routing_rules, pretty: true)}</pre>
-      </section>
+          <.card id="routing-rules" class="mt-6">
+            <h2 class="text-sm font-medium mb-3 text-zinc-900 dark:text-zinc-100">
+              Routing rules ({length(@workspace.routing_rules)})
+              <span class="text-[11px] text-zinc-500 font-normal">(read-only — Phase 5 editor)</span>
+            </h2>
+            <p :if={@workspace.routing_rules == []} id="rules-empty" class="text-zinc-500 italic">
+              No routing rules declared.
+            </p>
+            <pre
+              :if={@workspace.routing_rules != []}
+              id="rules-json"
+              class="bg-zinc-100 dark:bg-zinc-900 p-3 rounded overflow-x-auto text-[11px] font-mono text-zinc-900 dark:text-zinc-100"
+            >{Jason.encode!(@workspace.routing_rules, pretty: true)}</pre>
+          </.card>
         </div>
       </:main_window>
     </IdeShell.ide_shell>

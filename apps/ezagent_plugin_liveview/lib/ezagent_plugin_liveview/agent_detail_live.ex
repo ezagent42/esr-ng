@@ -7,9 +7,14 @@ defmodule EzagentPluginLiveview.AgentDetailLive do
 
   Restart button stops the PtyServer; DynamicSupervisor restarts it
   per `:permanent` restart spec.
+
+  Phase 8c PR-H — inline `style=""` violations replaced with
+  `EzagentDomainUi` atoms + Tailwind tokens so a future Tailwind theme
+  swap can't break this page.
   """
   use Phoenix.LiveView
   alias EzagentDomainUi.IdeShell
+  use EzagentDomainUi.Components
   import Phoenix.Component
 
   @impl true
@@ -121,9 +126,15 @@ defmodule EzagentPluginLiveview.AgentDetailLive do
     >
       <:main_window>
         <div class="flex-1 overflow-auto px-6 py-6 text-zinc-900 dark:text-zinc-100">
-      <h1>Agent URI invalid</h1>
-      <p><code>{@bad_uri}</code></p>
-      <p><a href="/identities/agents" style="color: #0969da;">← Agents</a></p>
+          <.page_header title="Agent URI invalid" />
+          <p>
+            <code>{@bad_uri}</code>
+          </p>
+          <p>
+            <a href="/identities/agents" class="text-blue-600 dark:text-blue-400 hover:text-blue-700">
+              ← Agents
+            </a>
+          </p>
         </div>
       </:main_window>
     </IdeShell.ide_shell>
@@ -144,101 +155,124 @@ defmodule EzagentPluginLiveview.AgentDetailLive do
     >
       <:main_window>
         <div class="flex-1 overflow-auto px-6 py-6 text-zinc-900 dark:text-zinc-100">
-      <header>
-        <h1 style="font-size: 22px; font-weight: 600;">
-          Agent: <code>{URI.to_string(@agent_uri)}</code>
-        </h1>
-        <p style="font-size: 13px; color: #666;">
-          <a href="/identities/agents" style="color: #0969da;">← Agents</a>
-          <span style="margin-left: 16px;">auto-refresh every 2s</span>
-        </p>
-      </header>
+          <.page_header title={"Agent: " <> URI.to_string(@agent_uri)}>
+            <:subtitle>
+              <a href="/identities/agents" class="text-blue-600 dark:text-blue-400 hover:text-blue-700">
+                ← Agents
+              </a>
+              <span class="ml-4 text-zinc-500">auto-refresh every 2s</span>
+            </:subtitle>
+          </.page_header>
 
-      <p :if={@flash_error} style="color: #cf222e; font-size: 13px; margin-top: 12px;">
-        {@flash_error}
-      </p>
+          <p :if={@flash_error} class="text-rose-600 dark:text-rose-400 text-xs mt-3">
+            {@flash_error}
+          </p>
 
-      <%= case @status do %>
-        <% :not_found -> %>
-          <section style="margin-top: 24px; padding: 16px; border: 1px solid #d1d5da; border-radius: 6px;">
-            <h2 style="font-size: 14px; color: #cf222e;">Not running</h2>
-            <p style="font-size: 13px;">
-              No live PtyServer for this URI. If you just clicked Restart, wait a moment.
-              Otherwise, add a cc.pty template for this agent_uri in a Workspace.
-            </p>
-          </section>
-        <% {:alive, s} -> %>
-          <section style="margin-top: 24px; padding: 16px; border: 1px solid #d1d5da; border-radius: 6px;">
-            <h2 style="font-size: 14px; font-weight: 500; margin: 0 0 12px 0;">Status</h2>
-            <table style="width: 100%; font-size: 13px;">
-              <tbody>
-                <tr><td style="padding: 3px 0; width: 200px; color: #57606a;">os_pid</td><td style="font-family: monospace;">{s.os_pid || "—"}</td></tr>
-                <tr><td style="padding: 3px 0; color: #57606a;">cwd</td><td style="font-family: monospace; font-size: 11px;">{s.cwd}</td></tr>
-                <tr><td style="padding: 3px 0; color: #57606a;">running</td><td style={if s.running, do: "color: #1f883d; font-weight: 600;", else: "color: #cf222e;"}>{if s.running, do: "yes", else: "no"}</td></tr>
-                <tr><td style="padding: 3px 0; color: #57606a;">test_mode</td><td>{s.test_mode}</td></tr>
-                <tr>
-                  <td style="padding: 3px 0; color: #57606a;">auto_prompts</td>
-                  <td>
-                    <%= for p <- s.auto_prompts || [] do %>
-                      <span style={if p.fired?, do: "color: #1f883d; margin-right: 8px;", else: "color: #57606a; margin-right: 8px;"}>
-                        {p.name}: {if p.fired?, do: "fired", else: "waiting"}
-                      </span>
-                    <% end %>
-                  </td>
-                </tr>
-                <tr><td style="padding: 3px 0; color: #57606a;">buffer_bytes</td><td>{s.buffer_bytes}</td></tr>
-              </tbody>
-            </table>
+          <%= case @status do %>
+            <% :not_found -> %>
+              <.card class="mt-6">
+                <h2 class="text-sm text-rose-600 dark:text-rose-400 font-medium mb-2">Not running</h2>
+                <p class="text-xs">
+                  No live PtyServer for this URI. If you just clicked Restart, wait a moment.
+                  Otherwise, add a cc.pty template for this agent_uri in a Workspace.
+                </p>
+              </.card>
+            <% {:alive, s} -> %>
+              <.card class="mt-6">
+                <h2 class="text-sm font-medium mb-3 text-zinc-900 dark:text-zinc-100">Status</h2>
+                <table class="w-full text-xs">
+                  <tbody>
+                    <tr>
+                      <td class="py-0.5 w-52 text-zinc-500">os_pid</td>
+                      <td class="font-mono">{s.os_pid || "—"}</td>
+                    </tr>
+                    <tr>
+                      <td class="py-0.5 text-zinc-500">cwd</td>
+                      <td class="font-mono text-[11px]">{s.cwd}</td>
+                    </tr>
+                    <tr>
+                      <td class="py-0.5 text-zinc-500">running</td>
+                      <td class={
+                        if s.running,
+                          do: "text-emerald-600 dark:text-emerald-400 font-semibold",
+                          else: "text-rose-600 dark:text-rose-400"
+                      }>
+                        {if s.running, do: "yes", else: "no"}
+                      </td>
+                    </tr>
+                    <tr>
+                      <td class="py-0.5 text-zinc-500">test_mode</td>
+                      <td>{s.test_mode}</td>
+                    </tr>
+                    <tr>
+                      <td class="py-0.5 text-zinc-500">auto_prompts</td>
+                      <td>
+                        <%= for p <- s.auto_prompts || [] do %>
+                          <span class={
+                            if p.fired?,
+                              do: "text-emerald-600 dark:text-emerald-400 mr-2",
+                              else: "text-zinc-500 mr-2"
+                          }>
+                            {p.name}: {if p.fired?, do: "fired", else: "waiting"}
+                          </span>
+                        <% end %>
+                      </td>
+                    </tr>
+                    <tr>
+                      <td class="py-0.5 text-zinc-500">buffer_bytes</td>
+                      <td>{s.buffer_bytes}</td>
+                    </tr>
+                  </tbody>
+                </table>
 
-            <div style="margin-top: 12px; display: flex; gap: 8px;">
-              <a
-                href="/sessions"
-                style="padding: 6px 14px; background: #1f883d; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 12px; text-decoration: none;"
-              >📺 Open terminal (in Sessions)</a>
-              <button
-                type="button"
-                phx-click="restart"
-                id="restart-btn"
-                style="padding: 6px 14px; background: white; color: #cf222e; border: 1px solid #cf222e; border-radius: 4px; cursor: pointer; font-size: 12px;"
-                data-confirm="Restart PtyServer for this agent? (supervisor will respawn)"
-              >Restart</button>
-            </div>
-          </section>
+                <div class="mt-3 flex gap-2">
+                  <a
+                    href="/sessions"
+                    class="inline-flex items-center justify-center px-3.5 py-1.5 rounded-md text-xs font-medium bg-emerald-600 text-emerald-50 hover:bg-emerald-700 dark:hover:bg-emerald-500 shadow-sm no-underline"
+                  >📺 Open terminal (in Sessions)</a>
+                  <.button
+                    variant="outline"
+                    size="sm"
+                    type="button"
+                    phx-click="restart"
+                    id="restart-btn"
+                    class="text-rose-600 dark:text-rose-400 border-rose-600 dark:border-rose-400 hover:bg-rose-50 dark:hover:bg-rose-950"
+                    data-confirm="Restart PtyServer for this agent? (supervisor will respawn)"
+                  >Restart</.button>
+                </div>
+              </.card>
 
-          <%!-- Phase 8b §1.10 — CC Bridges (v2) panel relocated from admin_live --%>
-          <section
-            id="cc-bridge-panel"
-            style="margin-top: 24px; padding: 16px; border: 1px solid #d1d5da; border-radius: 6px;"
-          >
-            <h2 style="font-size: 14px; font-weight: 500; margin: 0 0 12px 0;">CC Bridge (v2)</h2>
-            <p :if={is_nil(@bridge_entry)} style="font-size: 13px; color: #57606a;">
-              No WS bridge connected for this agent. Local-pty agents only need a bridge if
-              the Python sidecar is configured to mount <code>/cc_socket</code>.
-            </p>
-            <table :if={@bridge_entry} style="width: 100%; font-size: 13px;">
-              <tbody>
-                <tr>
-                  <td style="padding: 3px 0; width: 200px; color: #57606a;">status</td>
-                  <td style="color: #1f883d; font-weight: 600;">connected</td>
-                </tr>
-                <tr>
-                  <td style="padding: 3px 0; color: #57606a;">connected_at</td>
-                  <td style="color: #57606a;">{DateTime.to_iso8601(@bridge_entry.connected_at)}</td>
-                </tr>
-                <tr>
-                  <td style="padding: 3px 0; color: #57606a;">client</td>
-                  <td style="font-family: monospace; font-size: 11px;">{client_label(@bridge_entry)}</td>
-                </tr>
-              </tbody>
-            </table>
-          </section>
+              <%!-- Phase 8b §1.10 — CC Bridges (v2) panel relocated from admin_live --%>
+              <.card id="cc-bridge-panel" class="mt-6">
+                <h2 class="text-sm font-medium mb-3 text-zinc-900 dark:text-zinc-100">CC Bridge (v2)</h2>
+                <p :if={is_nil(@bridge_entry)} class="text-xs text-zinc-500">
+                  No WS bridge connected for this agent. Local-pty agents only need a bridge if
+                  the Python sidecar is configured to mount <code>/cc_socket</code>.
+                </p>
+                <table :if={@bridge_entry} class="w-full text-xs">
+                  <tbody>
+                    <tr>
+                      <td class="py-0.5 w-52 text-zinc-500">status</td>
+                      <td class="text-emerald-600 dark:text-emerald-400 font-semibold">connected</td>
+                    </tr>
+                    <tr>
+                      <td class="py-0.5 text-zinc-500">connected_at</td>
+                      <td class="text-zinc-500">{DateTime.to_iso8601(@bridge_entry.connected_at)}</td>
+                    </tr>
+                    <tr>
+                      <td class="py-0.5 text-zinc-500">client</td>
+                      <td class="font-mono text-[11px]">{client_label(@bridge_entry)}</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </.card>
 
-          <section :if={s.recent_output != []} style="margin-top: 24px; padding: 16px; border: 1px solid #d1d5da; border-radius: 6px; background: #1e1e1e; color: #d4d4d4;">
-            <h2 style="font-size: 14px; font-weight: 500; margin: 0 0 8px 0; color: #d4d4d4;">Recent PTY output (last 50 lines)</h2>
-            <pre style="font-family: 'SF Mono', Menlo, monospace; font-size: 11px; white-space: pre-wrap; margin: 0; max-height: 360px; overflow-y: auto;"><%= for line <- s.recent_output do %>{line}
+              <.card :if={s.recent_output != []} class="mt-6 bg-zinc-900 dark:bg-zinc-950 border-zinc-700 dark:border-zinc-800">
+                <h2 class="text-sm font-medium mb-2 text-zinc-200">Recent PTY output (last 50 lines)</h2>
+                <pre class="font-mono text-[11px] whitespace-pre-wrap m-0 max-h-[360px] overflow-y-auto text-zinc-200"><%= for line <- s.recent_output do %>{line}
 <% end %></pre>
-          </section>
-      <% end %>
+              </.card>
+          <% end %>
         </div>
       </:main_window>
     </IdeShell.ide_shell>
