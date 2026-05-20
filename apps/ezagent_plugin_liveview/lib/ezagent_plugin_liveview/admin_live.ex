@@ -55,7 +55,23 @@ defmodule EzagentPluginLiveview.AdminLive do
     :ok = SessionViewRegistry.init()
     :ok = SessionViewRegistry.register(ConversationView)
 
-    current_session_uri = @main_session_uri
+    # Phase 8c follow-up (Allen 2026-05-20) — auto-spawn session://main
+    # if missing. Without this the LV mounts with a hardcoded
+    # `current_session_uri` for a session that doesn't exist; the right
+    # panel shows "No members — Chat plugin failed to start?" which is
+    # misleading copy AND blames the wrong subsystem.
+    #
+    # Root cause: PR-J removed session://main from the boot static
+    # children (workspace://default seeds it via Workspace.Loader). On
+    # cold start before any session-creating action, KindRegistry has
+    # no session://main. The wizard at `/` creates one, but the
+    # post-login redirect lands on /sessions directly (Phase 8c PR-L:
+    # /sessions IS the default landing). So most logins skip the
+    # wizard and walk straight into the broken state.
+    #
+    # Idempotent: ensure_main_session/2 is a no-op when the kind is
+    # already alive; only spawns on the cold-start path.
+    current_session_uri = ensure_main_session(@main_session_uri, socket)
 
     if connected?(socket) do
       Phoenix.PubSub.subscribe(EzagentCore.PubSub, Ezagent.Audit.stream_topic())
@@ -669,6 +685,31 @@ defmodule EzagentPluginLiveview.AdminLive do
     case rows do
       [%{at: %DateTime{} = at} | _] -> at
       _ -> nil
+    end
+  end
+
+  # Phase 8c follow-up — see mount/3 comment. Returns the URI on success
+  # (lookup hit, OR fresh spawn succeeded). Returns the URI even on
+  # spawn failure — better to render an obviously-empty state than
+  # crash the LV; the spawn failure logs separately.
+  defp ensure_main_session(%URI{} = uri, socket) do
+    case Ezagent.KindRegistry.lookup(uri) do
+      {:ok, _pid} ->
+        uri
+
+      :error ->
+        creator =
+          Map.get(socket.assigns, :current_entity_uri) || Ezagent.Entity.User.admin_uri()
+
+        case EzagentDomainChat.create_session("main", creator) do
+          {:ok, _spawned_uri} ->
+            uri
+
+          {:error, reason} ->
+            require Logger
+            Logger.warning("AdminLive.ensure_main_session failed: #{inspect(reason)}")
+            uri
+        end
     end
   end
 

@@ -25,8 +25,14 @@ defmodule EzagentPluginLiveview.Admin.MemberPanel do
     ~H"""
     <aside id="session-members" class="p-3 text-zinc-800 dark:text-zinc-200">
       <h3 class="text-[10px] uppercase tracking-wide text-zinc-500 mb-2">Members</h3>
+      <%!-- Phase 8c follow-up (Allen 2026-05-20) — the prior copy
+            "(No members — Chat plugin failed to start?)" blamed the
+            chat plugin for a normal cold-start state. Empty here just
+            means the session has no joined members yet — invite an
+            agent via the picker below. AdminLive.ensure_main_session/2
+            guarantees the session itself exists before we render. --%>
       <p :if={@members == []} id="session-members-empty" class="text-xs text-zinc-500">
-        (No members — Chat plugin failed to start?)
+        No members yet. Invite an agent from the picker below.
       </p>
       <table :if={@members != []} id="session-members-table" class="w-full text-xs">
         <tbody>
