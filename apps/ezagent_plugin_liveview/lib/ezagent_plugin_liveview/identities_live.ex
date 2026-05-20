@@ -114,11 +114,11 @@ defmodule EzagentPluginLiveview.IdentitiesLive do
             label={"agent: " <> f}
           />
           <div class="text-[10px] uppercase tracking-wide text-zinc-500 mt-3 mb-1">Manage</div>
-          <a href="/identities/users" class="px-2 py-1 text-xs rounded text-zinc-600 hover:bg-zinc-100">+ Users admin</a>
+          <a href="/identities/users" class="px-2 py-1 text-xs rounded text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800">+ Users admin</a>
         </div>
       </:resource_panel>
       <:main_window>
-        <div class="flex-1 overflow-auto px-6 py-6 text-zinc-900">
+        <div class="flex-1 overflow-auto px-6 py-6 text-zinc-900 dark:text-zinc-100">
           <.page_header title="Identities">
             <:subtitle>
               The directory of every live entity — users and agents.
@@ -150,7 +150,7 @@ defmodule EzagentPluginLiveview.IdentitiesLive do
       href={"/identities?filter=" <> URI.encode_www_form(@value)}
       class={[
         "px-2 py-1 text-xs rounded font-mono",
-        @filter == @value && "bg-zinc-900 text-white" || "text-zinc-600 hover:bg-zinc-100"
+        @filter == @value && "bg-zinc-900 text-white" || "text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"
       ]}
     >{@label}</a>
     """
@@ -175,16 +175,16 @@ defmodule EzagentPluginLiveview.IdentitiesLive do
             <%= if @entity.host == "user" do %>
               <a
                 href={"/identities/users/" <> URI.encode_www_form(@entity.uri_str) <> "/caps"}
-                class="text-zinc-700 hover:text-zinc-900 underline"
+                class="text-zinc-700 dark:text-zinc-300 hover:text-zinc-900 dark:hover:text-zinc-100 underline"
               >Caps</a>
               <a
                 href={"/identities/users/" <> URI.encode_www_form(@entity.uri_str) <> "/api-keys"}
-                class="text-zinc-700 hover:text-zinc-900 underline"
+                class="text-zinc-700 dark:text-zinc-300 hover:text-zinc-900 dark:hover:text-zinc-100 underline"
               >API Keys</a>
             <% else %>
               <a
                 href={"/identities/agents/" <> URI.encode_www_form(@entity.uri_str)}
-                class="text-zinc-700 hover:text-zinc-900 underline"
+                class="text-zinc-700 dark:text-zinc-300 hover:text-zinc-900 dark:hover:text-zinc-100 underline"
               >Status</a>
             <% end %>
           </div>

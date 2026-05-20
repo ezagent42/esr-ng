@@ -317,8 +317,8 @@ defmodule EzagentPluginLiveview.RoutingLive do
             class={[
               "text-left px-2 py-1 text-xs rounded font-mono",
               @current_table == mod
-                && "bg-zinc-100 text-zinc-900"
-                || "text-zinc-600 hover:bg-zinc-100"
+                && "bg-zinc-100 dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100"
+                || "text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"
             ]}
           >
             {label}
@@ -326,7 +326,7 @@ defmodule EzagentPluginLiveview.RoutingLive do
         </div>
       </:resource_panel>
       <:main_window>
-        <div class="flex-1 overflow-auto px-6 py-6 text-zinc-900">
+        <div class="flex-1 overflow-auto px-6 py-6 text-zinc-900 dark:text-zinc-100">
         <header>
         <h1 style="font-size: 22px; font-weight: 600;">Routing Rules</h1>
         <p style="font-size: 13px; color: #666;">

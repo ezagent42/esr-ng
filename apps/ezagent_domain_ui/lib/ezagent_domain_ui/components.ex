@@ -63,12 +63,12 @@ defmodule EzagentDomainUi.Components do
   defp size_class("md"), do: "h-9 px-4 text-sm"
   defp size_class("lg"), do: "h-10 px-6 text-sm"
 
-  defp variant_class("default"), do: "bg-zinc-100 text-zinc-900 hover:bg-zinc-200 border border-zinc-200"
-  defp variant_class("primary"), do: "bg-zinc-900 text-zinc-50 hover:bg-zinc-800 shadow-sm"
-  defp variant_class("success"), do: "bg-emerald-600 text-emerald-50 hover:bg-emerald-700 shadow-sm"
-  defp variant_class("danger"), do: "bg-red-600 text-red-50 hover:bg-red-700 shadow-sm"
-  defp variant_class("ghost"), do: "text-zinc-700 hover:bg-zinc-100"
-  defp variant_class("outline"), do: "bg-transparent border border-zinc-300 text-zinc-700 hover:bg-zinc-50"
+  defp variant_class("default"), do: "bg-zinc-100 dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 hover:bg-zinc-200 dark:hover:bg-zinc-700 border border-zinc-200 dark:border-zinc-800"
+  defp variant_class("primary"), do: "bg-zinc-900 dark:bg-zinc-100 text-zinc-50 dark:text-zinc-900 hover:bg-zinc-800 dark:hover:bg-zinc-200 shadow-sm"
+  defp variant_class("success"), do: "bg-emerald-600 text-emerald-50 hover:bg-emerald-700 dark:hover:bg-emerald-500 shadow-sm"
+  defp variant_class("danger"), do: "bg-red-600 text-red-50 hover:bg-red-700 dark:hover:bg-red-500 shadow-sm"
+  defp variant_class("ghost"), do: "text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800"
+  defp variant_class("outline"), do: "bg-transparent border border-zinc-300 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-900"
 
   @doc """
   Card — container with subtle border + shadow.
@@ -85,11 +85,11 @@ defmodule EzagentDomainUi.Components do
 
   def card(assigns) do
     ~H"""
-    <div class={["bg-white rounded-md border border-zinc-200 shadow-sm", @class]} {@rest}>
-      <div :if={@header != []} class="px-4 py-3 border-b border-zinc-200">
-        <h3 class="text-sm font-semibold text-zinc-900">{render_slot(@header)}</h3>
+    <div class={["bg-white dark:bg-zinc-900 rounded-md border border-zinc-200 dark:border-zinc-800 shadow-sm", @class]} {@rest}>
+      <div :if={@header != []} class="px-4 py-3 border-b border-zinc-200 dark:border-zinc-800">
+        <h3 class="text-sm font-semibold text-zinc-900 dark:text-zinc-100">{render_slot(@header)}</h3>
       </div>
-      <div class="p-4 text-sm text-zinc-700">
+      <div class="p-4 text-sm text-zinc-700 dark:text-zinc-300">
         {render_slot(@inner_block)}
       </div>
     </div>
@@ -122,12 +122,12 @@ defmodule EzagentDomainUi.Components do
     """
   end
 
-  defp badge_class("default"), do: "bg-zinc-100 text-zinc-700 border-zinc-200"
-  defp badge_class("primary"), do: "bg-zinc-900 text-zinc-50 border-zinc-900"
-  defp badge_class("success"), do: "bg-emerald-50 text-emerald-700 border-emerald-200"
-  defp badge_class("warning"), do: "bg-amber-50 text-amber-700 border-amber-200"
-  defp badge_class("danger"), do: "bg-red-50 text-red-700 border-red-200"
-  defp badge_class("info"), do: "bg-sky-50 text-sky-700 border-sky-200"
+  defp badge_class("default"), do: "bg-zinc-100 dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 border-zinc-200 dark:border-zinc-800"
+  defp badge_class("primary"), do: "bg-zinc-900 dark:bg-zinc-100 text-zinc-50 dark:text-zinc-900 border-zinc-900 dark:border-zinc-100"
+  defp badge_class("success"), do: "bg-emerald-50 dark:bg-emerald-950 text-emerald-700 dark:text-emerald-300 border-emerald-200 dark:border-emerald-800"
+  defp badge_class("warning"), do: "bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800"
+  defp badge_class("danger"), do: "bg-red-50 dark:bg-red-950 text-red-700 dark:text-red-300 border-red-200 dark:border-red-800"
+  defp badge_class("info"), do: "bg-sky-50 dark:bg-sky-950 text-sky-700 dark:text-sky-300 border-sky-200 dark:border-sky-800"
 
   @doc """
   Page header — title + optional subtitle + actions slot.
@@ -146,9 +146,9 @@ defmodule EzagentDomainUi.Components do
 
   def page_header(assigns) do
     ~H"""
-    <div class={["flex items-end justify-between mb-6 pb-4 border-b border-zinc-200", @class]}>
+    <div class={["flex items-end justify-between mb-6 pb-4 border-b border-zinc-200 dark:border-zinc-800", @class]}>
       <div>
-        <h1 class="text-xl font-semibold text-zinc-900">{@title}</h1>
+        <h1 class="text-xl font-semibold text-zinc-900 dark:text-zinc-100">{@title}</h1>
         <p :if={@subtitle != []} class="mt-1 text-sm text-zinc-500">{render_slot(@subtitle)}</p>
       </div>
       <div :if={@actions != []} class="flex items-center gap-2">{render_slot(@actions)}</div>
@@ -178,8 +178,8 @@ defmodule EzagentDomainUi.Components do
     """
   end
 
-  defp stat_value_class("default"), do: "text-zinc-900"
-  defp stat_value_class("success"), do: "text-emerald-700"
-  defp stat_value_class("warning"), do: "text-amber-700"
-  defp stat_value_class("danger"), do: "text-red-700"
+  defp stat_value_class("default"), do: "text-zinc-900 dark:text-zinc-100"
+  defp stat_value_class("success"), do: "text-emerald-700 dark:text-emerald-300"
+  defp stat_value_class("warning"), do: "text-amber-700 dark:text-amber-300"
+  defp stat_value_class("danger"), do: "text-red-700 dark:text-red-300"
 end

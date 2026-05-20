@@ -104,8 +104,8 @@ defmodule EzagentPluginLiveview.ObservabilityLive do
       phx-value-key={Atom.to_string(@value)}
       class={[
         "text-left px-2 py-1 text-xs rounded",
-        @tab == @value && "bg-zinc-100 text-zinc-900 font-medium"
-          || "text-zinc-600 hover:bg-zinc-100"
+        @tab == @value && "bg-zinc-100 dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 font-medium"
+          || "text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"
       ]}
     >
       {@label}
@@ -142,7 +142,7 @@ defmodule EzagentPluginLiveview.ObservabilityLive do
     </.page_header>
     <.card class="p-0">
       <table class="w-full text-xs font-mono">
-        <thead class="bg-zinc-50 border-b border-zinc-200 text-zinc-500">
+        <thead class="bg-zinc-50 dark:bg-zinc-950 border-b border-zinc-200 dark:border-zinc-800 text-zinc-500">
           <tr>
             <th class="text-left px-3 py-2">Target</th>
             <th class="text-left">Action</th>
@@ -151,7 +151,7 @@ defmodule EzagentPluginLiveview.ObservabilityLive do
           </tr>
         </thead>
         <tbody>
-          <tr :for={[target, action, authz, dur, _at] <- @audit_rows} class="border-b border-zinc-100">
+          <tr :for={[target, action, authz, dur, _at] <- @audit_rows} class="border-b border-zinc-100 dark:border-zinc-900">
             <td class="px-3 py-1 truncate max-w-md">{target}</td>
             <td>{action || "—"}</td>
             <td>
@@ -173,14 +173,14 @@ defmodule EzagentPluginLiveview.ObservabilityLive do
     <.empty_state :if={@bridges == []} title="No connected bridges" description="A bridge connects when a cc.agent local-pty mode spawns claude with the sidecar." />
     <.card :if={@bridges != []} class="p-0">
       <table class="w-full text-xs font-mono">
-        <thead class="bg-zinc-50 border-b border-zinc-200 text-zinc-500">
+        <thead class="bg-zinc-50 dark:bg-zinc-950 border-b border-zinc-200 dark:border-zinc-800 text-zinc-500">
           <tr>
             <th class="text-left px-3 py-2">agent_uri</th>
             <th class="text-left">status</th>
           </tr>
         </thead>
         <tbody>
-          <tr :for={{uri, _pid} <- @bridges} class="border-b border-zinc-100">
+          <tr :for={{uri, _pid} <- @bridges} class="border-b border-zinc-100 dark:border-zinc-900">
             <td class="px-3 py-1">{URI.to_string(uri)}</td>
             <td>
               <.badge variant="success">connected</.badge>
@@ -200,7 +200,7 @@ defmodule EzagentPluginLiveview.ObservabilityLive do
     <.empty_state :if={@snapshots == []} title="No snapshots" description="Kinds with persistence: {:snapshot, :on_change} write here." />
     <.card :if={@snapshots != []} class="p-0">
       <table class="w-full text-xs font-mono">
-        <thead class="bg-zinc-50 border-b border-zinc-200 text-zinc-500">
+        <thead class="bg-zinc-50 dark:bg-zinc-950 border-b border-zinc-200 dark:border-zinc-800 text-zinc-500">
           <tr>
             <th class="text-left px-3 py-2">URI</th>
             <th class="text-left">kind</th>
@@ -210,7 +210,7 @@ defmodule EzagentPluginLiveview.ObservabilityLive do
           </tr>
         </thead>
         <tbody>
-          <tr :for={[uri, kind, version, bytes, updated_at] <- @snapshots} class="border-b border-zinc-100">
+          <tr :for={[uri, kind, version, bytes, updated_at] <- @snapshots} class="border-b border-zinc-100 dark:border-zinc-900">
             <td class="px-3 py-1 truncate max-w-xs">{uri}</td>
             <td>{kind || "—"}</td>
             <td class="text-right tabular-nums">{version || 0}</td>

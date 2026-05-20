@@ -160,7 +160,7 @@ defmodule EzagentPluginLiveview.UserApiKeysLive do
       status={%{agents_alive: 0, bridges: 0, debug_events: 0, version: "dev"}}
     >
       <:main_window>
-        <div class="flex-1 overflow-auto px-6 py-6 text-zinc-900">
+        <div class="flex-1 overflow-auto px-6 py-6 text-zinc-900 dark:text-zinc-100">
       <header>
         <h1 style="font-size: 22px; font-weight: 600;">API Keys for <code>{URI.to_string(@user_uri)}</code></h1>
         <p style="font-size: 13px; color: #666;">

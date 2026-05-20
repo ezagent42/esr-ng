@@ -84,14 +84,14 @@ defmodule EzagentPluginLiveview.WorkspacesLive do
           <a
             :for={ws <- @workspaces}
             href={"/workspaces/#{ws.name}"}
-            class="block px-2 py-1 text-xs hover:bg-zinc-100 rounded font-mono text-zinc-700"
+            class="block px-2 py-1 text-xs hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded font-mono text-zinc-700 dark:text-zinc-300"
           >
             {ws.name}
           </a>
         </div>
       </:resource_panel>
       <:main_window>
-        <div class="flex-1 overflow-auto px-6 py-6 text-zinc-900">
+        <div class="flex-1 overflow-auto px-6 py-6 text-zinc-900 dark:text-zinc-100">
         <.page_header title="Workspaces">
         <:subtitle>
           Persisted cluster configurations — members + session templates + routing rules.
@@ -106,11 +106,11 @@ defmodule EzagentPluginLiveview.WorkspacesLive do
             name="new_workspace[name]"
             id="new_workspace_name"
             placeholder="architect-review"
-            class="flex-1 px-3 py-1.5 text-sm border border-zinc-300 rounded-md focus:outline-none focus:ring-2 focus:ring-zinc-500"
+            class="flex-1 px-3 py-1.5 text-sm border border-zinc-300 dark:border-zinc-700 rounded-md focus:outline-none focus:ring-2 focus:ring-zinc-500"
           />
           <.button type="submit" variant="primary" size="sm">Create</.button>
         </.form>
-        <p :if={@flash_error} class="text-red-700 text-xs mt-2">{@flash_error}</p>
+        <p :if={@flash_error} class="text-red-700 dark:text-red-300 text-xs mt-2">{@flash_error}</p>
       </.card>
 
       <section id="workspaces-list">
@@ -120,7 +120,7 @@ defmodule EzagentPluginLiveview.WorkspacesLive do
 
         <.card :if={@workspaces != []} class="p-0">
           <table id="workspaces-table" class="w-full text-sm">
-            <thead class="bg-zinc-50 border-b border-zinc-200">
+            <thead class="bg-zinc-50 dark:bg-zinc-950 border-b border-zinc-200 dark:border-zinc-800">
               <tr class="text-left text-xs uppercase tracking-wide text-zinc-500">
                 <th class="px-4 py-2">Name</th>
                 <th class="py-2">URI</th>
@@ -132,7 +132,7 @@ defmodule EzagentPluginLiveview.WorkspacesLive do
               </tr>
             </thead>
             <tbody>
-              <tr :for={ws <- @workspaces} class="border-b border-zinc-100 last:border-0">
+              <tr :for={ws <- @workspaces} class="border-b border-zinc-100 dark:border-zinc-900 last:border-0">
                 <td class="px-4 py-2 font-medium">{ws.name}</td>
                 <td class="py-2 font-mono text-xs text-zinc-500">{URI.to_string(ws.uri)}</td>
                 <td class="py-2 tabular-nums">{length(ws.members)}</td>
@@ -145,7 +145,7 @@ defmodule EzagentPluginLiveview.WorkspacesLive do
                 <td class="py-2 pr-4 text-right">
                   <a
                     href={"/workspaces/#{ws.name}"}
-                    class="text-zinc-600 hover:text-zinc-900 text-xs"
+                    class="text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100 text-xs"
                   >detail →</a>
                 </td>
               </tr>

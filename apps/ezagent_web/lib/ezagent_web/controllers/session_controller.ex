@@ -31,6 +31,49 @@ defmodule EzagentWeb.SessionController do
         --line: #e5e5e5;
         --accent: #1f883d;
         --accent-faint: #e6f4ea;
+        --bg-page: #fafafa;
+        --bg-card: #ffffff;
+        --bg-input: #ffffff;
+        --bg-code: #f4f4f5;
+        --error-fg: #b91c1c;
+        --error-bg: #fef2f2;
+        --error-line: #fecaca;
+        --btn-fg: #ffffff;
+      }
+      /* Phase 8c PR-D — explicit theme + system-pref fallback. The
+         login page renders before the LV WS, so we honor both
+         data-theme=dark (set by the toggle JS) and the prefers-color-scheme. */
+      :root[data-theme="dark"] {
+        --ink: #fafafa;
+        --ink-dim: #a3a3a3;
+        --line: #27272a;
+        --accent: #4ade80;
+        --accent-faint: #052e16;
+        --bg-page: #09090b;
+        --bg-card: #18181b;
+        --bg-input: #18181b;
+        --bg-code: #27272a;
+        --error-fg: #fca5a5;
+        --error-bg: #450a0a;
+        --error-line: #7f1d1d;
+        --btn-fg: #18181b;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root:not([data-theme="light"]) {
+          --ink: #fafafa;
+          --ink-dim: #a3a3a3;
+          --line: #27272a;
+          --accent: #4ade80;
+          --accent-faint: #052e16;
+          --bg-page: #09090b;
+          --bg-card: #18181b;
+          --bg-input: #18181b;
+          --bg-code: #27272a;
+          --error-fg: #fca5a5;
+          --error-bg: #450a0a;
+          --error-line: #7f1d1d;
+          --btn-fg: #18181b;
+        }
       }
       * { box-sizing: border-box; }
       html, body { height: 100%; }
@@ -41,7 +84,7 @@ defmodule EzagentWeb.SessionController do
         background:
           radial-gradient(circle at 0% 0%, rgba(31,136,61,0.04), transparent 40%),
           radial-gradient(circle at 100% 100%, rgba(10,10,10,0.03), transparent 40%),
-          #fafafa;
+          var(--bg-page);
         display: grid;
         place-items: center;
         padding: 24px;
@@ -49,7 +92,7 @@ defmodule EzagentWeb.SessionController do
       .card {
         width: 100%;
         max-width: 380px;
-        background: #fff;
+        background: var(--bg-card);
         border: 1px solid var(--line);
         border-radius: 12px;
         padding: 32px 28px;
@@ -72,7 +115,8 @@ defmodule EzagentWeb.SessionController do
         border-radius: 8px;
         font-size: 14px;
         font-family: var(--font-mono);
-        background: #fff;
+        background: var(--bg-input);
+        color: var(--ink);
         transition: border-color 120ms ease;
       }
       input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-faint); }
@@ -80,7 +124,7 @@ defmodule EzagentWeb.SessionController do
         margin-top: 4px;
         padding: 10px 14px;
         background: var(--ink);
-        color: white;
+        color: var(--btn-fg);
         border: none;
         border-radius: 8px;
         font-size: 14px;
@@ -91,16 +135,16 @@ defmodule EzagentWeb.SessionController do
       }
       button:hover { opacity: 0.85; }
       .error {
-        color: #b91c1c;
+        color: var(--error-fg);
         font-size: 13px;
         padding: 10px 12px;
-        background: #fef2f2;
-        border: 1px solid #fecaca;
+        background: var(--error-bg);
+        border: 1px solid var(--error-line);
         border-radius: 8px;
         margin-bottom: 8px;
       }
       .hint { color: var(--ink-dim); font-size: 12px; margin: 16px 0 0; line-height: 1.55; }
-      code { font-family: var(--font-mono); font-size: 11px; background: #f4f4f5; padding: 1px 5px; border-radius: 3px; }
+      code { font-family: var(--font-mono); font-size: 11px; background: var(--bg-code); padding: 1px 5px; border-radius: 3px; }
     </style>
   </head>
   <body>

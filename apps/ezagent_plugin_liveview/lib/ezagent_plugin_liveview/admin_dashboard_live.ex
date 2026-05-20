@@ -67,14 +67,14 @@ defmodule EzagentPluginLiveview.AdminDashboardLive do
       <:resource_panel>
         <div class="p-3 flex flex-col gap-px">
           <div class="text-[10px] uppercase tracking-wide text-zinc-500 mb-2">Admin</div>
-          <a href="/admin" class="px-2 py-1 text-xs rounded bg-zinc-100 text-zinc-900 font-medium">Overview</a>
-          <a href="/admin/logs" class="px-2 py-1 text-xs rounded text-zinc-600 hover:bg-zinc-100">Logs &amp; Audit</a>
-          <a href="/admin/registry" class="px-2 py-1 text-xs rounded text-zinc-600 hover:bg-zinc-100">Registry</a>
-          <a href="/admin/snapshots" class="px-2 py-1 text-xs rounded text-zinc-600 hover:bg-zinc-100">Snapshots</a>
+          <a href="/admin" class="px-2 py-1 text-xs rounded bg-zinc-100 dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 font-medium">Overview</a>
+          <a href="/admin/logs" class="px-2 py-1 text-xs rounded text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800">Logs &amp; Audit</a>
+          <a href="/admin/registry" class="px-2 py-1 text-xs rounded text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800">Registry</a>
+          <a href="/admin/snapshots" class="px-2 py-1 text-xs rounded text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800">Snapshots</a>
         </div>
       </:resource_panel>
       <:main_window>
-        <div class="flex-1 overflow-auto px-6 py-6 text-zinc-900">
+        <div class="flex-1 overflow-auto px-6 py-6 text-zinc-900 dark:text-zinc-100">
           <.page_header title="Dashboard">
             <:subtitle>
               Sysadmin overview. Business surfaces live at the top-level
@@ -83,19 +83,16 @@ defmodule EzagentPluginLiveview.AdminDashboardLive do
             </:subtitle>
           </.page_header>
 
+          <%!-- Phase 8c PR-D — animated KPIs. The value renders SSR-final
+                (no flash of 0); the `CountUp` JS hook resets to 0 on
+                mount and animates 0 → target over 800ms with an
+                ease-out curve. Falls back gracefully to the static
+                number if JS doesn't run. --%>
           <div class="grid grid-cols-4 gap-3 mb-6">
-            <.card>
-              <.stat label="Sessions" value={@sessions} />
-            </.card>
-            <.card>
-              <.stat label="Workspaces" value={@workspaces} />
-            </.card>
-            <.card>
-              <.stat label="Identities" value={@identities} />
-            </.card>
-            <.card>
-              <.stat label="Kinds alive" value={@kinds_total} />
-            </.card>
+            <.card><.kpi label="Sessions"    value={@sessions}    id="kpi-sessions" /></.card>
+            <.card><.kpi label="Workspaces"  value={@workspaces}  id="kpi-workspaces" /></.card>
+            <.card><.kpi label="Identities"  value={@identities}  id="kpi-identities" /></.card>
+            <.card><.kpi label="Kinds alive" value={@kinds_total} id="kpi-kinds" /></.card>
           </div>
 
           <div class="grid grid-cols-3 gap-3">
@@ -127,6 +124,37 @@ defmodule EzagentPluginLiveview.AdminDashboardLive do
         </div>
       </:main_window>
     </IdeShell.ide_shell>
+    """
+  end
+
+  # --- kpi -----------------------------------------------------------------
+
+  @doc """
+  Phase 8c PR-D — animated KPI tile.
+
+  Renders the same visual shape as `Components.stat/1` but wraps the
+  numeric value in a `phx-hook="CountUp"` span so the JS hook animates
+  0 → target on mount.
+
+  `id` MUST be stable + unique on the page (LiveView hooks require it).
+  """
+  attr :label, :string, required: true
+  attr :value, :integer, required: true
+  attr :id, :string, required: true
+
+  defp kpi(assigns) do
+    ~H"""
+    <div class="flex flex-col gap-0.5">
+      <span class="text-xs uppercase tracking-wide text-zinc-500">{@label}</span>
+      <span
+        id={@id}
+        phx-hook="CountUp"
+        data-value={@value}
+        class="text-lg font-semibold tabular-nums text-zinc-900 dark:text-zinc-100"
+      >
+        {@value}
+      </span>
+    </div>
     """
   end
 end

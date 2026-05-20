@@ -19,6 +19,34 @@
         --ink-faint: #a3a3a3;
         --line: #e5e5e5;
         --accent: #1f883d;
+        --bg-top: #fafafa;
+        --bg-bottom: #ffffff;
+        --btn-bg: #ffffff;
+      }
+      /* Phase 8c PR-D — honor explicit data-theme=dark from the theme
+         toggle in root.html.heex AND prefers-color-scheme as fallback
+         (404 may render before the JS theme-init runs). */
+      :root[data-theme="dark"] {
+        --ink: #fafafa;
+        --ink-dim: #a3a3a3;
+        --ink-faint: #525252;
+        --line: #27272a;
+        --accent: #4ade80;
+        --bg-top: #09090b;
+        --bg-bottom: #18181b;
+        --btn-bg: #18181b;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root:not([data-theme="light"]) {
+          --ink: #fafafa;
+          --ink-dim: #a3a3a3;
+          --ink-faint: #525252;
+          --line: #27272a;
+          --accent: #4ade80;
+          --bg-top: #09090b;
+          --bg-bottom: #18181b;
+          --btn-bg: #18181b;
+        }
       }
       * { box-sizing: border-box; }
       html, body { height: 100%; margin: 0; }
@@ -26,7 +54,7 @@
         font-family: var(--font-sans);
         color: var(--ink);
         background:
-          linear-gradient(180deg, #fafafa 0%, #fff 100%);
+          linear-gradient(180deg, var(--bg-top) 0%, var(--bg-bottom) 100%);
         display: grid;
         place-items: center;
         padding: 24px;
@@ -69,13 +97,13 @@
         padding: 8px 16px;
         border-radius: 8px;
         border: 1px solid var(--line);
-        background: #fff;
+        background: var(--btn-bg);
         color: var(--ink);
         text-decoration: none;
         transition: all 120ms ease;
       }
       .btn:hover { border-color: var(--ink); }
-      .btn-primary { background: var(--ink); color: #fff; border-color: var(--ink); }
+      .btn-primary { background: var(--ink); color: var(--bg-top); border-color: var(--ink); }
       .btn-primary:hover { opacity: 0.85; }
       .brand {
         position: fixed;

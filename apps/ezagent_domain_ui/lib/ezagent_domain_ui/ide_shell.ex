@@ -60,22 +60,22 @@ defmodule EzagentDomainUi.IdeShell do
     ~H"""
     <div
       id="ide-shell"
-      class="fixed inset-0 flex flex-col bg-zinc-50 text-zinc-900 text-sm font-sans"
+      class="fixed inset-0 flex flex-col bg-zinc-50 dark:bg-zinc-950 text-zinc-900 dark:text-zinc-100 text-sm font-sans"
     >
       <.top_command_bar current_entity_uri={@current_entity_uri} />
 
       <div class="flex-1 flex min-h-0">
         <.activity_bar current_path={@current_path} />
 
-        <div :if={@resource_panel != []} class="w-56 border-r border-zinc-200 bg-white overflow-y-auto">
+        <div :if={@resource_panel != []} class="w-56 border-r border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 overflow-y-auto">
           {render_slot(@resource_panel)}
         </div>
 
-        <div class="flex-1 flex flex-col min-w-0 bg-white">
+        <div class="flex-1 flex flex-col min-w-0 bg-white dark:bg-zinc-900">
           {render_slot(@main_window)}
         </div>
 
-        <div :if={@right_sidebar != []} id="right-sidebar" class="w-72 border-l border-zinc-200 bg-white overflow-y-auto hidden lg:block">
+        <div :if={@right_sidebar != []} id="right-sidebar" class="w-72 border-l border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 overflow-y-auto hidden lg:block">
           {render_slot(@right_sidebar)}
         </div>
       </div>
@@ -103,15 +103,15 @@ defmodule EzagentDomainUi.IdeShell do
     assigns = assign(assigns, :items, items) |> assign(:active_key, active_key)
 
     ~H"""
-    <nav class="w-12 border-r border-zinc-200 bg-zinc-100 flex flex-col items-center py-2 gap-1">
+    <nav class="w-12 border-r border-zinc-200 dark:border-zinc-800 bg-zinc-100 dark:bg-zinc-900 flex flex-col items-center py-2 gap-1">
       <a
         :for={item <- @items}
         href={item.path}
         class={[
           "relative w-10 h-10 flex items-center justify-center rounded-md transition-colors",
           item.key == @active_key
-            && "bg-white shadow-sm text-zinc-900"
-            || "text-zinc-500 hover:bg-zinc-200 hover:text-zinc-700"
+            && "bg-white dark:bg-zinc-900 shadow-sm text-zinc-900 dark:text-zinc-100"
+            || "text-zinc-500 hover:bg-zinc-200 dark:hover:bg-zinc-700 hover:text-zinc-700 dark:hover:text-zinc-300"
         ]}
         title={item.label}
         aria-label={item.label}
@@ -186,26 +186,37 @@ defmodule EzagentDomainUi.IdeShell do
 
   def top_command_bar(assigns) do
     ~H"""
-    <header class="h-10 border-b border-zinc-200 bg-white px-3 flex items-center gap-3 shrink-0">
+    <header class="h-10 border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 flex items-center gap-3 shrink-0">
       <div class="flex items-center gap-2 shrink-0">
         <span class="font-semibold text-xs tracking-tight">ezagent</span>
       </div>
 
+      <%!-- Phase 8c PR-D — cycling typing-animation placeholder. 4
+            prompts rotate every 3s for a 12s total cycle. Pure CSS:
+            4 stacked spans, all but the active one transparent, with
+            staggered `opacity` keyframes. No JS hook, no LV state.
+            `aria-live="polite"` so screen readers announce changes
+            gracefully. --%>
       <div class="flex-1 max-w-md mx-auto">
         <button
           type="button"
           phx-click={JS.dispatch("ezagent:open-command-palette")}
-          class="w-full flex items-center gap-2 px-3 py-1.5 bg-zinc-100 hover:bg-zinc-200 rounded-md text-xs text-zinc-500 transition-colors"
+          class="w-full flex items-center gap-2 px-3 py-1.5 bg-zinc-100 dark:bg-zinc-900 hover:bg-zinc-200 dark:hover:bg-zinc-700 rounded-md text-xs text-zinc-500 transition-colors"
         >
           <.icon name="search" size="xs" />
-          <span>搜索 sessions / entities / actions ...</span>
-          <span class="ml-auto text-[10px] text-zinc-400 font-mono">⌘K</span>
+          <span class="ez-typing-placeholder relative flex-1 text-left h-4 overflow-hidden" aria-live="polite">
+            <span class="ez-typing-line">搜索 sessions</span>
+            <span class="ez-typing-line">召唤 entity</span>
+            <span class="ez-typing-line">执行 action</span>
+            <span class="ez-typing-line">跳转 routing</span>
+          </span>
+          <span class="ml-auto text-[10px] text-zinc-400 dark:text-zinc-600 font-mono">⌘K</span>
         </button>
       </div>
 
       <div class="flex items-center gap-2 shrink-0">
-        <.icon name="bell" size="sm" class="text-zinc-500 hover:text-zinc-700 cursor-pointer" />
-        <.icon name="help" size="sm" class="text-zinc-500 hover:text-zinc-700 cursor-pointer" />
+        <.icon name="bell" size="sm" class="text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 cursor-pointer" />
+        <.icon name="help" size="sm" class="text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 cursor-pointer" />
         <.avatar_menu current_entity_uri={@current_entity_uri} />
       </div>
     </header>
@@ -253,12 +264,12 @@ defmodule EzagentDomainUi.IdeShell do
 
       <div
         id={@menu_id}
-        class="hidden absolute right-0 top-full mt-1 w-64 bg-white border border-zinc-200 rounded-md shadow-lg z-40 transition transform"
+        class="hidden absolute right-0 top-full mt-1 w-64 bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-md shadow-lg z-40 transition transform"
       >
-        <div class="px-3 py-3 border-b border-zinc-200 flex items-center gap-2">
+        <div class="px-3 py-3 border-b border-zinc-200 dark:border-zinc-800 flex items-center gap-2">
           <.avatar uri={@current_entity_uri} size="md" />
           <div class="flex-1 min-w-0">
-            <div class="font-mono text-[11px] text-zinc-700 truncate">{@uri_str}</div>
+            <div class="font-mono text-[11px] text-zinc-700 dark:text-zinc-300 truncate">{@uri_str}</div>
             <div class="flex items-center gap-1 text-[10px] text-zinc-500 mt-0.5">
               <.status_dot color="green" />
               <span>online</span>
@@ -268,23 +279,23 @@ defmodule EzagentDomainUi.IdeShell do
         <div class="py-1">
           <a
             href="/profile"
-            class="block px-3 py-1.5 text-xs text-zinc-700 hover:bg-zinc-100"
+            class="block px-3 py-1.5 text-xs text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800"
           >Profile</a>
           <a
             href="/settings"
-            class="block px-3 py-1.5 text-xs text-zinc-700 hover:bg-zinc-100"
+            class="block px-3 py-1.5 text-xs text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800"
           >Settings</a>
         </div>
         <%!-- Phase 8c PR-C: dark mode toggle. daisyUI infrastructure
               already exists in root.html.heex (data-theme + localStorage +
               a window listener for `phx:set-theme`). Each button
               dispatches that event with its `data-phx-theme` payload. --%>
-        <div class="border-t border-zinc-200 py-1">
+        <div class="border-t border-zinc-200 dark:border-zinc-800 py-1">
           <button
             type="button"
             data-phx-theme="light"
             phx-click={JS.dispatch("phx:set-theme")}
-            class="w-full text-left px-3 py-1.5 text-xs text-zinc-700 hover:bg-zinc-100 flex items-center gap-2"
+            class="w-full text-left px-3 py-1.5 text-xs text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center gap-2"
           >
             <.icon name="sun" size="xs" /> Light theme
           </button>
@@ -292,7 +303,7 @@ defmodule EzagentDomainUi.IdeShell do
             type="button"
             data-phx-theme="dark"
             phx-click={JS.dispatch("phx:set-theme")}
-            class="w-full text-left px-3 py-1.5 text-xs text-zinc-700 hover:bg-zinc-100 flex items-center gap-2"
+            class="w-full text-left px-3 py-1.5 text-xs text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center gap-2"
           >
             <.icon name="moon" size="xs" /> Dark theme
           </button>
@@ -300,12 +311,12 @@ defmodule EzagentDomainUi.IdeShell do
             type="button"
             data-phx-theme="system"
             phx-click={JS.dispatch("phx:set-theme")}
-            class="w-full text-left px-3 py-1.5 text-xs text-zinc-700 hover:bg-zinc-100 flex items-center gap-2"
+            class="w-full text-left px-3 py-1.5 text-xs text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center gap-2"
           >
             <.icon name="settings" size="xs" /> System
           </button>
         </div>
-        <div class="border-t border-zinc-200 py-1">
+        <div class="border-t border-zinc-200 dark:border-zinc-800 py-1">
           <form action="/logout" method="post" class="block">
             <input
               type="hidden"
@@ -314,7 +325,7 @@ defmodule EzagentDomainUi.IdeShell do
             />
             <button
               type="submit"
-              class="w-full text-left px-3 py-1.5 text-xs text-rose-600 hover:bg-zinc-100"
+              class="w-full text-left px-3 py-1.5 text-xs text-rose-600 dark:text-rose-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"
             >Sign out</button>
           </form>
         </div>
@@ -347,7 +358,7 @@ defmodule EzagentDomainUi.IdeShell do
       |> assign(:events_color, if(events > 0, do: "amber", else: "gray"))
 
     ~H"""
-    <footer class="h-6 border-t border-zinc-200 bg-zinc-50 px-3 flex items-center gap-4 text-[11px] text-zinc-600 shrink-0">
+    <footer class="h-6 border-t border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 px-3 flex items-center gap-4 text-[11px] text-zinc-600 dark:text-zinc-400 shrink-0">
       <span class="flex items-center gap-1">
         <.icon name="users" size="xs" />
         <span class="font-mono">{format_uri_for_status(@current_entity_uri)}</span>
@@ -364,13 +375,13 @@ defmodule EzagentDomainUi.IdeShell do
         <.status_dot color={@bridges_color} />
         <span>{@bridges_count} bridges</span>
       </span>
-      <a href="/admin/logs" class="flex items-center gap-1 hover:text-zinc-900 ml-auto">
+      <a href="/admin/logs" class="flex items-center gap-1 hover:text-zinc-900 dark:hover:text-zinc-100 ml-auto">
         <.icon name="bug" size="xs" />
-        <span class={@events_color == "amber" && "text-amber-700" || ""}>
+        <span class={@events_color == "amber" && "text-amber-700 dark:text-amber-300" || ""}>
           {@events_count} events
         </span>
       </a>
-      <span class="font-mono text-zinc-400">v{Map.get(@status, :version, "dev")}</span>
+      <span class="font-mono text-zinc-400 dark:text-zinc-600">v{Map.get(@status, :version, "dev")}</span>
     </footer>
     """
   end
@@ -394,14 +405,14 @@ defmodule EzagentDomainUi.IdeShell do
 
   def editor_tabs(assigns) do
     ~H"""
-    <div class="flex items-center gap-px border-b border-zinc-200 bg-zinc-50 px-2 shrink-0">
+    <div class="flex items-center gap-px border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 px-2 shrink-0">
       <div
         :for={{key, label} <- @items}
         class={[
           "flex items-center gap-1 px-3 py-1.5 text-xs font-medium border-b-2 cursor-pointer",
           to_string(key) == to_string(@selected)
-            && "border-zinc-900 text-zinc-900 bg-white"
-            || "border-transparent text-zinc-500 hover:text-zinc-700 hover:bg-zinc-100"
+            && "border-zinc-900 dark:border-zinc-100 text-zinc-900 dark:text-zinc-100 bg-white dark:bg-zinc-900"
+            || "border-transparent text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800"
         ]}
         phx-click={@on_select}
         phx-value-key={inspect(key)}
@@ -436,7 +447,7 @@ defmodule EzagentDomainUi.IdeShell do
       "flex flex-1 min-h-0 min-w-0",
       @direction == "vertical" && "flex-row" || "flex-col"
     ]}>
-      <div class={["flex-1 min-h-0 min-w-0", @open && @secondary != [] && "border-r border-zinc-200"]}>
+      <div class={["flex-1 min-h-0 min-w-0", @open && @secondary != [] && "border-r border-zinc-200 dark:border-zinc-800"]}>
         {render_slot(@primary)}
       </div>
       <div
@@ -473,7 +484,7 @@ defmodule EzagentDomainUi.IdeShell do
         class="absolute inset-0 bg-zinc-900/40 backdrop-blur-sm"
         phx-click="close_command_palette"
       />
-      <div class="relative z-10 w-full max-w-xl mx-4 bg-white rounded-lg shadow-2xl overflow-hidden">
+      <div class="relative z-10 w-full max-w-xl mx-4 bg-white dark:bg-zinc-900 rounded-lg shadow-2xl overflow-hidden">
         <form phx-change="command_query" phx-submit="command_select">
           <input
             type="text"
@@ -482,7 +493,7 @@ defmodule EzagentDomainUi.IdeShell do
             placeholder="搜索 sessions / entities / actions ..."
             autocomplete="off"
             autofocus
-            class="w-full px-4 py-3 text-sm border-b border-zinc-200 focus:outline-none"
+            class="w-full px-4 py-3 text-sm border-b border-zinc-200 dark:border-zinc-800 focus:outline-none"
           />
         </form>
         <div class="max-h-96 overflow-y-auto">
@@ -494,11 +505,11 @@ defmodule EzagentDomainUi.IdeShell do
             type="button"
             phx-click="command_select_result"
             phx-value-key={r.key}
-            class="w-full px-4 py-2 text-left text-xs hover:bg-zinc-100 flex items-center gap-2 border-b border-zinc-100"
+            class="w-full px-4 py-2 text-left text-xs hover:bg-zinc-100 dark:hover:bg-zinc-800 flex items-center gap-2 border-b border-zinc-100 dark:border-zinc-900"
           >
             <.icon name={r.icon || "dot"} size="xs" />
             <span class="font-mono">{r.label}</span>
-            <span :if={Map.get(r, :group)} class="ml-auto text-[10px] text-zinc-400 uppercase">{r.group}</span>
+            <span :if={Map.get(r, :group)} class="ml-auto text-[10px] text-zinc-400 dark:text-zinc-600 uppercase">{r.group}</span>
           </button>
         </div>
       </div>

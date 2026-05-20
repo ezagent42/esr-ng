@@ -398,7 +398,7 @@ defmodule EzagentPluginLiveview.AdminLive do
 
         <section
           :if={@debug_open and @cc_events != []}
-          class="border-t border-zinc-200 bg-zinc-50 max-h-48 overflow-y-auto p-3"
+          class="border-t border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 max-h-48 overflow-y-auto p-3"
         >
           <h3 class="text-[10px] uppercase tracking-wide text-zinc-500 mb-1">
             Debug events (last 20)
@@ -407,9 +407,9 @@ defmodule EzagentPluginLiveview.AdminLive do
             <li :for={ev <- @cc_events} class="flex gap-2">
               <span class={[
                 "px-1 rounded font-semibold",
-                ev.level == "error" && "bg-rose-100 text-rose-700",
-                ev.level == "warning" && "bg-amber-100 text-amber-700",
-                ev.level not in ["error", "warning"] && "bg-zinc-200 text-zinc-700"
+                ev.level == "error" && "bg-rose-100 dark:bg-rose-900 text-rose-700 dark:text-rose-300",
+                ev.level == "warning" && "bg-amber-100 dark:bg-amber-900 text-amber-700 dark:text-amber-300",
+                ev.level not in ["error", "warning"] && "bg-zinc-200 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300"
               ]}>{ev.level}</span>
               <span class="font-mono text-[10px] text-zinc-500">{ev.bridge_id}</span>
               <span class="flex-1">{ev.text}</span>

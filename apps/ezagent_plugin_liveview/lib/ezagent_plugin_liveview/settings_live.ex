@@ -65,8 +65,8 @@ defmodule EzagentPluginLiveview.SettingsLive do
       phx-value-key={Atom.to_string(@value)}
       class={[
         "text-left px-2 py-1 text-xs rounded",
-        @section == @value && "bg-zinc-100 text-zinc-900 font-medium"
-          || "text-zinc-600 hover:bg-zinc-100"
+        @section == @value && "bg-zinc-100 dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100 font-medium"
+          || "text-zinc-600 dark:text-zinc-400 hover:bg-zinc-100 dark:hover:bg-zinc-800"
       ]}
     >
       {@label}
@@ -113,15 +113,15 @@ defmodule EzagentPluginLiveview.SettingsLive do
     </.page_header>
     <.card>
       <div class="grid grid-cols-2 gap-2 text-xs">
-        <div class="flex justify-between border-b border-zinc-100 py-1">
+        <div class="flex justify-between border-b border-zinc-100 dark:border-zinc-900 py-1">
           <span>Open Command Palette</span>
           <kbd class="font-mono text-zinc-500">⌘K / Ctrl+K</kbd>
         </div>
-        <div class="flex justify-between border-b border-zinc-100 py-1">
+        <div class="flex justify-between border-b border-zinc-100 dark:border-zinc-900 py-1">
           <span>Close modal</span>
           <kbd class="font-mono text-zinc-500">Esc</kbd>
         </div>
-        <div class="flex justify-between border-b border-zinc-100 py-1">
+        <div class="flex justify-between border-b border-zinc-100 dark:border-zinc-900 py-1">
           <span>Send chat message</span>
           <kbd class="font-mono text-zinc-500">Enter</kbd>
         </div>
@@ -150,15 +150,15 @@ defmodule EzagentPluginLiveview.SettingsLive do
     </.page_header>
     <.card>
       <div class="text-xs space-y-2">
-        <div class="flex justify-between border-b border-zinc-100 pb-1">
+        <div class="flex justify-between border-b border-zinc-100 dark:border-zinc-900 pb-1">
           <span>ezagent_core version</span>
           <span class="font-mono">{system_version()}</span>
         </div>
-        <div class="flex justify-between border-b border-zinc-100 pb-1">
+        <div class="flex justify-between border-b border-zinc-100 dark:border-zinc-900 pb-1">
           <span>Elixir / OTP</span>
           <span class="font-mono">{System.version()} / {System.otp_release()}</span>
         </div>
-        <div class="flex justify-between border-b border-zinc-100 pb-1">
+        <div class="flex justify-between border-b border-zinc-100 dark:border-zinc-900 pb-1">
           <span>Loaded apps</span>
           <span class="font-mono">{loaded_app_count()}</span>
         </div>

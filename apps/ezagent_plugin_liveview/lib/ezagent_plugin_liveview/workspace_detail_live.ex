@@ -272,12 +272,12 @@ defmodule EzagentPluginLiveview.WorkspaceDetailLive do
       <:resource_panel>
         <div class="p-3">
           <div class="text-[10px] uppercase tracking-wide text-zinc-500 mb-2">Workspace</div>
-          <div class="px-2 py-1 text-xs bg-zinc-100 rounded font-mono">{@workspace.name}</div>
-          <a href="/workspaces" class="block mt-3 px-2 py-1 text-xs text-zinc-600 hover:text-zinc-900">← All workspaces</a>
+          <div class="px-2 py-1 text-xs bg-zinc-100 dark:bg-zinc-900 rounded font-mono">{@workspace.name}</div>
+          <a href="/workspaces" class="block mt-3 px-2 py-1 text-xs text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-100">← All workspaces</a>
         </div>
       </:resource_panel>
       <:main_window>
-        <div class="flex-1 overflow-auto px-6 py-6 text-zinc-900">
+        <div class="flex-1 overflow-auto px-6 py-6 text-zinc-900 dark:text-zinc-100">
         <header>
         <h1 style="font-size: 22px; font-weight: 600;">
           Workspace: <code>{@workspace.name}</code>

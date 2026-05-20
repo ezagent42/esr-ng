@@ -78,7 +78,7 @@ defmodule EzagentPluginLiveview.PluginsLive do
           <a
             :for={p <- @plugins}
             href={"#plugin-#{p.slug}"}
-            class="block px-2 py-1 text-xs hover:bg-zinc-100 rounded font-mono text-zinc-700"
+            class="block px-2 py-1 text-xs hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded font-mono text-zinc-700 dark:text-zinc-300"
           >
             {p.name}
           </a>
@@ -100,12 +100,12 @@ defmodule EzagentPluginLiveview.PluginsLive do
                 <div class="flex items-start justify-between">
                   <div>
                     <div class="font-medium text-sm">{p.name}</div>
-                    <div class="text-[11px] text-zinc-400 font-mono mt-0.5">v{p.version}</div>
+                    <div class="text-[11px] text-zinc-400 dark:text-zinc-600 font-mono mt-0.5">v{p.version}</div>
                   </div>
                   <.badge variant="success">active</.badge>
                 </div>
                 <div class="text-xs text-zinc-500 mt-2">{p.description}</div>
-                <div :if={p.link} class="mt-3 text-xs text-blue-600">
+                <div :if={p.link} class="mt-3 text-xs text-blue-600 dark:text-blue-400">
                   → {elem(p.link, 0)}
                 </div>
               </.card>

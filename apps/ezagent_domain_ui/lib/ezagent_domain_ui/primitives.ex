@@ -141,7 +141,7 @@ defmodule EzagentDomainUi.Primitives do
 
   def tabs(assigns) do
     ~H"""
-    <div class={["flex items-center gap-px border-b border-zinc-200 bg-zinc-50", @class]}>
+    <div class={["flex items-center gap-px border-b border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950", @class]}>
       <button
         :for={{key, label} <- @items}
         type="button"
@@ -150,8 +150,8 @@ defmodule EzagentDomainUi.Primitives do
         class={[
           "px-3 py-1.5 text-xs font-medium transition-colors border-b-2",
           to_string(key) == to_string(@selected)
-            && "border-zinc-900 text-zinc-900 bg-white"
-            || "border-transparent text-zinc-500 hover:text-zinc-700 hover:bg-zinc-100"
+            && "border-zinc-900 dark:border-zinc-100 text-zinc-900 dark:text-zinc-100 bg-white dark:bg-zinc-900"
+            || "border-transparent text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800"
         ]}
       >
         {label}
@@ -195,14 +195,14 @@ defmodule EzagentDomainUi.Primitives do
         class="absolute inset-0 bg-zinc-900/40 backdrop-blur-sm"
         phx-click={if @on_close, do: @on_close}
       />
-      <div class="relative z-10 w-full max-w-md mx-4 bg-white rounded-lg shadow-2xl overflow-hidden">
-        <div :if={@header != []} class="px-4 py-3 border-b border-zinc-200 font-medium text-sm">
+      <div class="relative z-10 w-full max-w-md mx-4 bg-white dark:bg-zinc-900 rounded-lg shadow-2xl overflow-hidden">
+        <div :if={@header != []} class="px-4 py-3 border-b border-zinc-200 dark:border-zinc-800 font-medium text-sm">
           {render_slot(@header)}
         </div>
-        <div :if={@body != []} class="px-4 py-3 text-sm text-zinc-700">
+        <div :if={@body != []} class="px-4 py-3 text-sm text-zinc-700 dark:text-zinc-300">
           {render_slot(@body)}
         </div>
-        <div :if={@footer != []} class="px-4 py-3 border-t border-zinc-200 bg-zinc-50 flex justify-end gap-2">
+        <div :if={@footer != []} class="px-4 py-3 border-t border-zinc-200 dark:border-zinc-800 bg-zinc-50 dark:bg-zinc-950 flex justify-end gap-2">
           {render_slot(@footer)}
         </div>
       </div>
@@ -265,7 +265,7 @@ defmodule EzagentDomainUi.Primitives do
       <div :for={section <- @section} class="mb-2">
         <div class="px-2 py-1 text-[10px] uppercase tracking-wide text-zinc-500 font-medium flex items-center justify-between">
           <span>{section.title}</span>
-          <span :if={Map.get(section, :count)} class="text-zinc-400 normal-case tracking-normal">
+          <span :if={Map.get(section, :count)} class="text-zinc-400 dark:text-zinc-600 normal-case tracking-normal">
             {section.count}
           </span>
         </div>
@@ -300,7 +300,7 @@ defmodule EzagentDomainUi.Primitives do
     ~H"""
     <div class="flex flex-col items-center justify-center py-12 px-4 text-center">
       <div class="text-3xl mb-3 opacity-50">{@icon}</div>
-      <div class="text-sm font-medium text-zinc-700">{@title}</div>
+      <div class="text-sm font-medium text-zinc-700 dark:text-zinc-300">{@title}</div>
       <div :if={@description} class="text-xs text-zinc-500 mt-1 max-w-xs">{@description}</div>
       <div :if={@action != []} class="mt-4">
         {render_slot(@action)}
@@ -332,9 +332,9 @@ defmodule EzagentDomainUi.Primitives do
   def form_field(assigns) do
     ~H"""
     <div class={["flex flex-col gap-1", @class]}>
-      <label class="text-xs font-medium text-zinc-700">
+      <label class="text-xs font-medium text-zinc-700 dark:text-zinc-300">
         {@label}
-        <span :if={@required} class="text-rose-600">*</span>
+        <span :if={@required} class="text-rose-600 dark:text-rose-400">*</span>
       </label>
       <input
         type={@type}
@@ -344,12 +344,12 @@ defmodule EzagentDomainUi.Primitives do
         required={@required}
         class={[
           "px-2 py-1.5 text-xs border rounded-md font-mono",
-          @error && "border-rose-400" || "border-zinc-300"
+          @error && "border-rose-400 dark:border-rose-600" || "border-zinc-300 dark:border-zinc-700"
         ]}
         {@rest}
       />
       <div :if={@help != []} class="text-[11px] text-zinc-500">{render_slot(@help)}</div>
-      <div :if={@error} class="text-[11px] text-rose-600">{@error}</div>
+      <div :if={@error} class="text-[11px] text-rose-600 dark:text-rose-400">{@error}</div>
     </div>
     """
   end
@@ -374,7 +374,7 @@ defmodule EzagentDomainUi.Primitives do
     <span
       class={[
         "inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-[11px] font-mono",
-        "bg-zinc-100 text-zinc-700 border border-zinc-200",
+        "bg-zinc-100 dark:bg-zinc-900 text-zinc-700 dark:text-zinc-300 border border-zinc-200 dark:border-zinc-800",
         @class
       ]}
       title={if @copyable, do: "Click to copy"}

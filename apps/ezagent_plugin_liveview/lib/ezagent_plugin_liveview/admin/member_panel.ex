@@ -17,14 +17,14 @@ defmodule EzagentPluginLiveview.Admin.MemberPanel do
 
   def member_panel(assigns) do
     ~H"""
-    <aside id="session-members" class="p-3 text-zinc-800">
+    <aside id="session-members" class="p-3 text-zinc-800 dark:text-zinc-200">
       <h3 class="text-[10px] uppercase tracking-wide text-zinc-500 mb-2">Members</h3>
       <p :if={@members == []} id="session-members-empty" class="text-xs text-zinc-500">
         (No members — Chat plugin failed to start?)
       </p>
       <table :if={@members != []} id="session-members-table" class="w-full text-xs">
         <tbody>
-          <tr :for={member <- @members} class="border-b border-zinc-100">
+          <tr :for={member <- @members} class="border-b border-zinc-100 dark:border-zinc-900">
             <td class="py-1.5 align-top">
               <div class="flex items-center gap-1 justify-between">
                 <div class="font-mono text-[11px] break-all flex-1">{member.uri}</div>
@@ -35,14 +35,14 @@ defmodule EzagentPluginLiveview.Admin.MemberPanel do
                   phx-value-agent={member.uri}
                   title={"Open PTY for #{member.uri}"}
                   aria-label={"Open PTY for #{member.uri}"}
-                  class="p-1 text-zinc-500 hover:text-zinc-900 hover:bg-zinc-100 rounded shrink-0"
+                  class="p-1 text-zinc-500 hover:text-zinc-900 dark:hover:text-zinc-100 hover:bg-zinc-100 dark:hover:bg-zinc-800 rounded shrink-0"
                 >
                   <.icon name="terminal" size="xs" />
                 </button>
               </div>
               <div class={member_status_class(member.online)}>
                 {if member.online, do: "online", else: "offline"}
-                <span :if={member.last_seen} class="text-zinc-400 font-normal">
+                <span :if={member.last_seen} class="text-zinc-400 dark:text-zinc-600 font-normal">
                   · {DateTime.to_iso8601(member.last_seen)}
                 </span>
               </div>
@@ -59,6 +59,6 @@ defmodule EzagentPluginLiveview.Admin.MemberPanel do
   defp cc_agent_uri?("entity://agent/cc_" <> _), do: true
   defp cc_agent_uri?(_), do: false
 
-  defp member_status_class(true), do: "text-[10px] text-emerald-600 font-semibold"
-  defp member_status_class(false), do: "text-[10px] text-zinc-400"
+  defp member_status_class(true), do: "text-[10px] text-emerald-600 dark:text-emerald-400 font-semibold"
+  defp member_status_class(false), do: "text-[10px] text-zinc-400 dark:text-zinc-600"
 end

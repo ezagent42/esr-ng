@@ -133,4 +133,40 @@ code, kbd, pre, samp, .font-mono {
   font-feature-settings: "calt", "ss02";
 }
 
+/* Phase 8c PR-D — typing-animation placeholder for the Top Command Bar
+   "fake search" button (apps/ezagent_domain_ui/lib/.../ide_shell.ex
+   top_command_bar/1).
+
+   4 stacked spans cycle visibility on a 12s loop (3s each). Pure CSS,
+   no JS hook. Each line is absolutely-positioned over the wrapper so
+   they don't push surrounding flex children. `nth-child(N)` shifts the
+   start of the animation by 3s per line. `prefers-reduced-motion`
+   freezes on the first prompt — no flickering for users who opted out
+   of motion. */
+.ez-typing-placeholder { display: inline-block; vertical-align: middle; }
+.ez-typing-line {
+  position: absolute;
+  inset: 0;
+  display: inline-block;
+  opacity: 0;
+  animation: ez-typing-cycle 12s infinite;
+}
+.ez-typing-line:nth-child(1) { animation-delay:  0s; }
+.ez-typing-line:nth-child(2) { animation-delay:  3s; }
+.ez-typing-line:nth-child(3) { animation-delay:  6s; }
+.ez-typing-line:nth-child(4) { animation-delay:  9s; }
+
+@keyframes ez-typing-cycle {
+  0%   { opacity: 0; transform: translateY(4px); }
+  3%   { opacity: 1; transform: translateY(0); }
+  22%  { opacity: 1; transform: translateY(0); }
+  25%  { opacity: 0; transform: translateY(-4px); }
+  100% { opacity: 0; transform: translateY(-4px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ez-typing-line { animation: none; }
+  .ez-typing-line:nth-child(1) { opacity: 1; }
+}
+
 /* This file is for your main application CSS */

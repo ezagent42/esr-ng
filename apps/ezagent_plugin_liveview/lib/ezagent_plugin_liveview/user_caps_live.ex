@@ -158,16 +158,16 @@ defmodule EzagentPluginLiveview.UserCapsLive do
       status={%{agents_alive: 0, bridges: 0, debug_events: 0, version: "dev"}}
     >
       <:main_window>
-        <div class="flex-1 overflow-auto px-6 py-6 text-zinc-900">
+        <div class="flex-1 overflow-auto px-6 py-6 text-zinc-900 dark:text-zinc-100">
       <.page_header title={"Caps for " <> URI.to_string(@user_uri)}>
         <:subtitle>
           Live cap mutation via Identity Behavior. Admin caps required (CapBAC at dispatch step 5.5).
-          <a href="/identities/users" class="text-zinc-600 underline hover:text-zinc-900 ml-1">← /identities/users</a>
+          <a href="/identities/users" class="text-zinc-600 dark:text-zinc-400 underline hover:text-zinc-900 dark:hover:text-zinc-100 ml-1">← /identities/users</a>
         </:subtitle>
       </.page_header>
 
-      <p :if={@flash_info} class="text-emerald-700 text-sm mb-3">{@flash_info}</p>
-      <p :if={@flash_error} class="text-red-700 text-sm mb-3">{@flash_error}</p>
+      <p :if={@flash_info} class="text-emerald-700 dark:text-emerald-300 text-sm mb-3">{@flash_info}</p>
+      <p :if={@flash_error} class="text-red-700 dark:text-red-300 text-sm mb-3">{@flash_error}</p>
 
       <.card class="mb-6">
         <:header>Grant new cap</:header>
@@ -175,17 +175,17 @@ defmodule EzagentPluginLiveview.UserCapsLive do
           <label class="text-xs">
             kind
             <input type="text" name="grant[kind]" placeholder="echo or :any"
-              class="block w-full px-2 py-1 text-sm border border-zinc-300 rounded-md" />
+              class="block w-full px-2 py-1 text-sm border border-zinc-300 dark:border-zinc-700 rounded-md" />
           </label>
           <label class="text-xs">
             behavior
             <input type="text" name="grant[behavior]" value="any"
-              class="block w-full px-2 py-1 text-sm border border-zinc-300 rounded-md" />
+              class="block w-full px-2 py-1 text-sm border border-zinc-300 dark:border-zinc-700 rounded-md" />
           </label>
           <label class="text-xs">
             instance
             <input type="text" name="grant[instance]" value="any"
-              class="block w-full px-2 py-1 text-sm border border-zinc-300 rounded-md" />
+              class="block w-full px-2 py-1 text-sm border border-zinc-300 dark:border-zinc-700 rounded-md" />
           </label>
           <div class="col-span-3 flex justify-end">
             <.button type="submit" variant="primary" size="sm">Grant</.button>
@@ -197,14 +197,14 @@ defmodule EzagentPluginLiveview.UserCapsLive do
         <:header>Current caps</:header>
         <%= case @caps do %>
           <% :user_not_live -> %>
-            <p class="text-red-700 text-sm">User Kind not registered (not live in BEAM).</p>
+            <p class="text-red-700 dark:text-red-300 text-sm">User Kind not registered (not live in BEAM).</p>
           <% {:error, reason} -> %>
-            <p class="text-red-700 text-sm">Error reading caps: {inspect(reason)}</p>
+            <p class="text-red-700 dark:text-red-300 text-sm">Error reading caps: {inspect(reason)}</p>
           <% caps when is_list(caps) and caps == [] -> %>
             <p class="text-zinc-500 italic text-sm">No caps. Grant one above.</p>
           <% caps when is_list(caps) -> %>
             <table class="w-full text-sm">
-              <thead class="bg-zinc-50 border-b border-zinc-200">
+              <thead class="bg-zinc-50 dark:bg-zinc-950 border-b border-zinc-200 dark:border-zinc-800">
                 <tr class="text-left text-xs uppercase tracking-wide text-zinc-500">
                   <th class="px-2 py-2">kind</th>
                   <th class="py-2">behavior</th>
@@ -214,7 +214,7 @@ defmodule EzagentPluginLiveview.UserCapsLive do
                 </tr>
               </thead>
               <tbody>
-                <tr :for={{cap, i} <- Enum.with_index(caps)} class="border-b border-zinc-100 last:border-0">
+                <tr :for={{cap, i} <- Enum.with_index(caps)} class="border-b border-zinc-100 dark:border-zinc-900 last:border-0">
                   <td class="px-2 py-2 font-mono text-xs">{inspect(cap.kind)}</td>
                   <td class="py-2 font-mono text-xs">{inspect(cap.behavior)}</td>
                   <td class="py-2 font-mono text-xs">{inspect(cap.instance)}</td>

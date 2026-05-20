@@ -120,7 +120,7 @@ defmodule EzagentPluginLiveview.AgentDetailLive do
       status={%{agents_alive: 0, bridges: 0, debug_events: 0, version: "dev"}}
     >
       <:main_window>
-        <div class="flex-1 overflow-auto px-6 py-6 text-zinc-900">
+        <div class="flex-1 overflow-auto px-6 py-6 text-zinc-900 dark:text-zinc-100">
       <h1>Agent URI invalid</h1>
       <p><code>{@bad_uri}</code></p>
       <p><a href="/identities/agents" style="color: #0969da;">← Agents</a></p>
@@ -143,7 +143,7 @@ defmodule EzagentPluginLiveview.AgentDetailLive do
       status={%{agents_alive: 0, bridges: 0, debug_events: 0, version: "dev"}}
     >
       <:main_window>
-        <div class="flex-1 overflow-auto px-6 py-6 text-zinc-900">
+        <div class="flex-1 overflow-auto px-6 py-6 text-zinc-900 dark:text-zinc-100">
       <header>
         <h1 style="font-size: 22px; font-weight: 600;">
           Agent: <code>{URI.to_string(@agent_uri)}</code>
