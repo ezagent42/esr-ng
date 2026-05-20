@@ -26,6 +26,7 @@ defmodule EzagentPluginLiveview.PtyTerminalLive do
   """
 
   use Phoenix.LiveView
+  alias EzagentDomainUi.IdeShell
   import Phoenix.Component
 
   @impl true
@@ -167,18 +168,42 @@ defmodule EzagentPluginLiveview.PtyTerminalLive do
 
   @impl true
   def render(%{not_found: true} = assigns) do
+    assigns =
+      assign_new(assigns, :current_entity_uri_str, fn ->
+        URI.to_string(Map.get(assigns, :current_entity_uri) || URI.parse("entity://user/admin"))
+      end)
+
     ~H"""
-    <div style="max-width: 800px; margin: 0 auto; padding: 24px; font-family: -apple-system, sans-serif;">
+    <IdeShell.ide_shell
+      current_entity_uri={@current_entity_uri_str}
+      current_path="/admin/agents"
+      status={%{agents_alive: 0, bridges: 0, debug_events: 0, version: "dev"}}
+    >
+      <:main_window>
+        <div class="flex-1 overflow-auto px-6 py-6 text-zinc-900">
       <h1>Agent URI invalid</h1>
       <p><code>{@bad_uri}</code></p>
       <p><a href="/admin/agents" style="color: #0969da;">← Agents</a></p>
-    </div>
+        </div>
+      </:main_window>
+    </IdeShell.ide_shell>
     """
   end
 
   def render(assigns) do
+    assigns =
+      assign_new(assigns, :current_entity_uri_str, fn ->
+        URI.to_string(Map.get(assigns, :current_entity_uri) || URI.parse("entity://user/admin"))
+      end)
+
     ~H"""
-    <div style="max-width: 1200px; margin: 0 auto; padding: 24px; font-family: -apple-system, sans-serif;">
+    <IdeShell.ide_shell
+      current_entity_uri={@current_entity_uri_str}
+      current_path="/admin/agents"
+      status={%{agents_alive: 0, bridges: 0, debug_events: 0, version: "dev"}}
+    >
+      <:main_window>
+        <div class="flex-1 overflow-auto px-6 py-6 text-zinc-900">
       <header>
         <h1 style="font-size: 22px; font-weight: 600;">
           Pty-Web: <code>{URI.to_string(@agent_uri)}</code>
@@ -205,7 +230,9 @@ defmodule EzagentPluginLiveview.PtyTerminalLive do
       <p style="font-size: 11px; color: #57606a; margin-top: 8px;">
         Type to send input. Output streams via <code>pty:output:&lt;agent_uri&gt;</code> PubSub.
       </p>
-    </div>
+        </div>
+      </:main_window>
+    </IdeShell.ide_shell>
     """
   end
 end

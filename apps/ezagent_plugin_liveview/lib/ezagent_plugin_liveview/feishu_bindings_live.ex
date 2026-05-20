@@ -10,6 +10,7 @@ defmodule EzagentPluginLiveview.FeishuBindingsLive do
   """
 
   use Phoenix.LiveView
+  alias EzagentDomainUi.IdeShell
   use EzagentDomainUi.Components
   import Phoenix.Component
 
@@ -75,8 +76,19 @@ defmodule EzagentPluginLiveview.FeishuBindingsLive do
 
   @impl true
   def render(assigns) do
+    assigns =
+      assign_new(assigns, :current_entity_uri_str, fn ->
+        URI.to_string(Map.get(assigns, :current_entity_uri) || URI.parse("entity://user/admin"))
+      end)
+
     ~H"""
-    <div class="max-w-5xl mx-auto px-6 py-8 font-sans text-zinc-900">
+    <IdeShell.ide_shell
+      current_entity_uri={@current_entity_uri_str}
+      current_path="/admin/feishu/bindings"
+      status={%{agents_alive: 0, bridges: 0, debug_events: 0, version: "dev"}}
+    >
+      <:main_window>
+        <div class="flex-1 overflow-auto px-6 py-6 text-zinc-900">
       <.page_header title="Feishu user bindings">
         <:subtitle>
           Map a Feishu open_id to a local ESR user URI. The bound user
@@ -147,7 +159,9 @@ defmodule EzagentPluginLiveview.FeishuBindingsLive do
           </tbody>
         </table>
       </.card>
-    </div>
+        </div>
+      </:main_window>
+    </IdeShell.ide_shell>
     """
   end
 end
