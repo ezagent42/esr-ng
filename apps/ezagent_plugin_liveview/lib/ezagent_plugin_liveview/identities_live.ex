@@ -186,6 +186,10 @@ defmodule EzagentPluginLiveview.IdentitiesLive do
                 href={"/identities/agents/" <> URI.encode_www_form(@entity.uri_str)}
                 class="text-zinc-700 dark:text-zinc-300 hover:text-zinc-900 dark:hover:text-zinc-100 underline"
               >Status</a>
+              <a
+                href={"/identities/agents/" <> URI.encode_www_form(@entity.uri_str) <> "/caps"}
+                class="text-zinc-700 dark:text-zinc-300 hover:text-zinc-900 dark:hover:text-zinc-100 underline"
+              >Caps</a>
             <% end %>
           </div>
         </div>

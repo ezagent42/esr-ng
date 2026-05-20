@@ -70,7 +70,12 @@ defmodule EzagentWeb.Router do
       # Identities Activity (address book: users + agents are entity sub-types).
       live "/identities", IdentitiesLive
       live "/identities/users", UsersLive
-      live "/identities/users/:uri/caps", UserCapsLive
+      # PR-G (Phase 8c): EntityCapsLive serves both user + agent caps
+      # (generalized from the former UserCapsLive). Backend
+      # `Ezagent.Behavior.Identity` always accepted any entity URI;
+      # this exposes the agent surface in the UI.
+      live "/identities/users/:uri/caps", EntityCapsLive
+      live "/identities/agents/:uri/caps", EntityCapsLive
       live "/identities/users/:uri/api-keys", UserApiKeysLive
       live "/identities/agents/:uri", AgentDetailLive
       # Phase 8b — `/identities/agents/:uri/terminal` retired. PTY is
