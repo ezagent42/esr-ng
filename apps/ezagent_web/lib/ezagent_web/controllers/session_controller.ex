@@ -70,7 +70,7 @@ defmodule EzagentWeb.SessionController do
         conn
         |> configure_session(renew: true)
         |> put_session(:current_entity_uri, uri_str)
-        |> redirect(to: "/admin")
+        |> redirect(to: "/sessions")
 
       :error ->
         conn

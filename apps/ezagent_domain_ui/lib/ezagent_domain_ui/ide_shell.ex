@@ -15,6 +15,13 @@ defmodule EzagentDomainUi.IdeShell do
   not socket state. Use `EzagentDomainUi.IdeShell.activity_for_path/1`
   to compute it.
 
+  Phase 8 polish (Allen 2026-05-20):
+  - 6 Activity items (Settings moved under the avatar dropdown).
+  - Top bar shows avatar + dropdown trigger; no workspace label.
+  - Business routes live at top level (`/sessions`, `/workspaces`,
+    `/identities`, `/routing`, `/plugins`). `/admin/*` is reserved
+    for the sysadmin Dashboard.
+
   ## Usage
 
       <.ide_shell
@@ -43,7 +50,6 @@ defmodule EzagentDomainUi.IdeShell do
 
   attr :current_entity_uri, :any, required: true
   attr :current_path, :string, required: true
-  attr :workspace_name, :string, default: "default"
   attr :status, :map, default: %{}
   slot :resource_panel
   slot :main_window, required: true
@@ -56,10 +62,7 @@ defmodule EzagentDomainUi.IdeShell do
       id="ide-shell"
       class="fixed inset-0 flex flex-col bg-zinc-50 text-zinc-900 text-sm font-sans"
     >
-      <.top_command_bar
-        current_entity_uri={@current_entity_uri}
-        workspace_name={@workspace_name}
-      />
+      <.top_command_bar current_entity_uri={@current_entity_uri} />
 
       <div class="flex-1 flex min-h-0">
         <.activity_bar current_path={@current_path} />
@@ -79,7 +82,6 @@ defmodule EzagentDomainUi.IdeShell do
 
       <.status_bar
         current_entity_uri={@current_entity_uri}
-        workspace_name={@workspace_name}
         status={@status}
       />
 
@@ -91,7 +93,7 @@ defmodule EzagentDomainUi.IdeShell do
   # --- activity_bar ----------------------------------------------------------
 
   @doc """
-  Vertical icon strip on the left edge. 7 top-level Activities.
+  Vertical icon strip on the left edge. 6 top-level Activities.
   """
   attr :current_path, :string, required: true
 
@@ -120,16 +122,22 @@ defmodule EzagentDomainUi.IdeShell do
     """
   end
 
-  @doc "List of all 7 Activity Bar items in display order."
+  @doc """
+  List of all 6 Activity Bar items in display order.
+
+  Phase 8 polish (2026-05-20): Settings is no longer a top-level
+  Activity — it moved under the avatar dropdown. The 6 items are
+  business features (Sessions / Workspaces / Identities / Routing /
+  Plugins) plus the admin Dashboard.
+  """
   def activity_items do
     [
-      %{key: :sessions, label: "Sessions", icon: "message-square", path: "/admin"},
-      %{key: :workspaces, label: "Workspaces", icon: "folder", path: "/admin/workspaces"},
-      %{key: :identities, label: "Identities", icon: "users", path: "/admin/entities"},
-      %{key: :routing, label: "Routing", icon: "route", path: "/admin/routing"},
-      %{key: :plugins, label: "Plugins", icon: "puzzle", path: "/admin/feishu/bindings"},
-      %{key: :observability, label: "Observability", icon: "activity", path: "/admin/observability"},
-      %{key: :settings, label: "Settings", icon: "settings", path: "/admin/settings"}
+      %{key: :sessions, label: "Sessions", icon: "message-square", path: "/sessions"},
+      %{key: :workspaces, label: "Workspaces", icon: "folder", path: "/workspaces"},
+      %{key: :identities, label: "Identities", icon: "users", path: "/identities"},
+      %{key: :routing, label: "Routing", icon: "route", path: "/routing"},
+      %{key: :plugins, label: "Plugins", icon: "puzzle", path: "/plugins"},
+      %{key: :dashboard, label: "Dashboard", icon: "dashboard", path: "/admin"}
     ]
   end
 
@@ -138,28 +146,25 @@ defmodule EzagentDomainUi.IdeShell do
 
   Examples:
 
-      iex> activity_for_path("/admin")
+      iex> activity_for_path("/sessions")
       :sessions
 
-      iex> activity_for_path("/admin/workspaces/demo")
+      iex> activity_for_path("/workspaces/demo")
       :workspaces
 
-      iex> activity_for_path("/admin/observability")
-      :observability
+      iex> activity_for_path("/admin/logs")
+      :dashboard
   """
   def activity_for_path(path) when is_binary(path) do
     cond do
-      path == "/admin" -> :sessions
-      String.starts_with?(path, "/admin/workspaces") -> :workspaces
-      String.starts_with?(path, "/admin/entities") -> :identities
-      String.starts_with?(path, "/admin/agents") -> :identities
-      String.starts_with?(path, "/admin/users") -> :identities
-      String.starts_with?(path, "/admin/routing") -> :routing
-      String.starts_with?(path, "/admin/feishu") -> :plugins
-      String.starts_with?(path, "/admin/auto") -> :plugins
-      String.starts_with?(path, "/admin/observability") -> :observability
-      String.starts_with?(path, "/admin/snapshots") -> :observability
-      String.starts_with?(path, "/admin/settings") -> :settings
+      String.starts_with?(path, "/sessions") -> :sessions
+      String.starts_with?(path, "/workspaces") -> :workspaces
+      String.starts_with?(path, "/identities") -> :identities
+      String.starts_with?(path, "/routing") -> :routing
+      String.starts_with?(path, "/plugins") -> :plugins
+      String.starts_with?(path, "/admin") -> :dashboard
+      String.starts_with?(path, "/profile") -> :sessions
+      String.starts_with?(path, "/settings") -> :sessions
       true -> :sessions
     end
   end
@@ -169,15 +174,12 @@ defmodule EzagentDomainUi.IdeShell do
   # --- top_command_bar -------------------------------------------------------
 
   attr :current_entity_uri, :any, required: true
-  attr :workspace_name, :string, default: "default"
 
   def top_command_bar(assigns) do
     ~H"""
     <header class="h-10 border-b border-zinc-200 bg-white px-3 flex items-center gap-3 shrink-0">
       <div class="flex items-center gap-2 shrink-0">
         <span class="font-semibold text-xs tracking-tight">ezagent</span>
-        <span class="text-zinc-300">/</span>
-        <span class="text-xs text-zinc-600 font-mono">{@workspace_name}</span>
       </div>
 
       <div class="flex-1 max-w-md mx-auto">
@@ -195,16 +197,90 @@ defmodule EzagentDomainUi.IdeShell do
       <div class="flex items-center gap-2 shrink-0">
         <.icon name="bell" size="sm" class="text-zinc-500 hover:text-zinc-700 cursor-pointer" />
         <.icon name="help" size="sm" class="text-zinc-500 hover:text-zinc-700 cursor-pointer" />
-        <.uri_chip uri={@current_entity_uri} />
+        <.avatar_menu current_entity_uri={@current_entity_uri} />
       </div>
     </header>
+    """
+  end
+
+  # --- avatar_menu -----------------------------------------------------------
+
+  @doc """
+  Right-corner avatar button + dropdown menu (Phase 8 polish #5,
+  Allen 2026-05-20).
+
+  Replaces the prior `<.uri_chip>` in `top_command_bar/1`. Dropdown
+  shows Profile / Settings / Sign out links. Menu visibility is
+  handled by `Phoenix.LiveView.JS.toggle/1` — no LV state needed
+  because the menu is purely presentational.
+
+  Tooltip on the avatar shows "Your profile".
+  """
+  attr :current_entity_uri, :any, required: true
+
+  def avatar_menu(assigns) do
+    assigns =
+      assigns
+      |> assign_new(:menu_id, fn -> "avatar-menu" end)
+      |> assign(:uri_str, format_uri_for_status(assigns.current_entity_uri))
+
+    ~H"""
+    <div class="relative">
+      <button
+        type="button"
+        phx-click={JS.toggle(to: "##{@menu_id}")}
+        title="Your profile"
+        aria-label="Your profile"
+        class="flex items-center"
+      >
+        <.avatar uri={@current_entity_uri} size="sm" />
+      </button>
+
+      <div
+        id={@menu_id}
+        class="hidden absolute right-0 top-full mt-1 w-64 bg-white border border-zinc-200 rounded-md shadow-lg z-40"
+      >
+        <div class="px-3 py-3 border-b border-zinc-200 flex items-center gap-2">
+          <.avatar uri={@current_entity_uri} size="md" />
+          <div class="flex-1 min-w-0">
+            <div class="font-mono text-[11px] text-zinc-700 truncate">{@uri_str}</div>
+            <div class="flex items-center gap-1 text-[10px] text-zinc-500 mt-0.5">
+              <.status_dot color="green" />
+              <span>online</span>
+            </div>
+          </div>
+        </div>
+        <div class="py-1">
+          <a
+            href="/profile"
+            class="block px-3 py-1.5 text-xs text-zinc-700 hover:bg-zinc-100"
+          >Profile</a>
+          <a
+            href="/settings"
+            class="block px-3 py-1.5 text-xs text-zinc-700 hover:bg-zinc-100"
+          >Settings</a>
+        </div>
+        <div class="border-t border-zinc-200 py-1">
+          <form action="/logout" method="post" class="block">
+            <input
+              type="hidden"
+              name="_csrf_token"
+              value={Plug.CSRFProtection.get_csrf_token()}
+            />
+            <button
+              type="submit"
+              class="w-full text-left px-3 py-1.5 text-xs text-rose-600 hover:bg-zinc-100"
+            >Sign out</button>
+          </form>
+        </div>
+      </div>
+    </div>
     """
   end
 
   # --- status_bar ------------------------------------------------------------
 
   attr :current_entity_uri, :any, required: true
-  attr :workspace_name, :string, default: "default"
   attr :status, :map, default: %{}
 
   def status_bar(assigns) do
@@ -213,10 +289,6 @@ defmodule EzagentDomainUi.IdeShell do
       <span class="flex items-center gap-1">
         <.icon name="users" size="xs" />
         <span class="font-mono">{format_uri_for_status(@current_entity_uri)}</span>
-      </span>
-      <span class="flex items-center gap-1">
-        <.icon name="folder" size="xs" />
-        <span class="font-mono">{@workspace_name}</span>
       </span>
       <span :if={Map.get(@status, :session_uri)} class="flex items-center gap-1">
         <.icon name="message-square" size="xs" />
@@ -230,7 +302,7 @@ defmodule EzagentDomainUi.IdeShell do
         <.status_dot color={(Map.get(@status, :bridges, 0) > 0) && "green" || "gray"} />
         <span>{Map.get(@status, :bridges, 0)} bridges</span>
       </span>
-      <a href="/admin/observability" class="flex items-center gap-1 hover:text-zinc-900 ml-auto">
+      <a href="/admin/logs" class="flex items-center gap-1 hover:text-zinc-900 ml-auto">
         <.icon name="bug" size="xs" />
         <span>{Map.get(@status, :debug_events, 0)} events</span>
       </a>
@@ -288,13 +360,6 @@ defmodule EzagentDomainUi.IdeShell do
 
   @doc """
   Optional vertical or horizontal split between two slots.
-
-  Default is single pane (no split). User opts in via state flag.
-
-      <.split_pane open={@split_open} direction="vertical">
-        <:primary>chat...</:primary>
-        <:secondary>terminal...</:secondary>
-      </.split_pane>
   """
   attr :open, :boolean, default: false
   attr :direction, :string, default: "vertical", values: ~w(vertical horizontal)
@@ -324,12 +389,6 @@ defmodule EzagentDomainUi.IdeShell do
 
   @doc """
   Command palette modal — triggered by ⌘K or CmdK button in TopCommandBar.
-
-      <.command_palette
-        open={@command_palette_open}
-        query={@command_query}
-        results={@command_results}
-      />
   """
   attr :open, :boolean, default: false
   attr :query, :string, default: ""
