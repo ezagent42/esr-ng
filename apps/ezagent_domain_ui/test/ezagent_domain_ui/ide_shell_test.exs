@@ -32,14 +32,15 @@ defmodule EzagentDomainUi.IdeShellTest do
         """)
 
       assert html =~ ~r/id="ide-shell"/
-      # Activity Bar
+      # Activity Bar — 6 items per Phase 8 polish (Allen 2026-05-20)
       assert html =~ "Sessions"
       assert html =~ "Workspaces"
       assert html =~ "Identities"
       assert html =~ "Routing"
       assert html =~ "Plugins"
-      assert html =~ "Observability"
-      assert html =~ "Settings"
+      assert html =~ "Dashboard"
+      refute html =~ ">Settings<"
+      refute html =~ ">Observability<"
       # Top Command Bar
       assert html =~ "ezagent"
       assert html =~ "⌘K"
@@ -55,41 +56,40 @@ defmodule EzagentDomainUi.IdeShellTest do
   end
 
   describe "activity_for_path/1" do
-    test "/admin → :sessions" do
-      assert IdeShell.activity_for_path("/admin") == :sessions
+    # Phase 8 polish (Allen 2026-05-20) — IA refactor: /admin/X → /X promoted
+    # to top-level Activity Bar destinations. /admin is now the management
+    # dashboard (with /admin/logs + /admin/registry + /admin/snapshots as
+    # sub-pages).
+    test "/sessions → :sessions" do
+      assert IdeShell.activity_for_path("/sessions") == :sessions
+      assert IdeShell.activity_for_path("/sessions/main") == :sessions
     end
 
-    test "/admin/workspaces → :workspaces" do
-      assert IdeShell.activity_for_path("/admin/workspaces") == :workspaces
-      assert IdeShell.activity_for_path("/admin/workspaces/demo") == :workspaces
+    test "/workspaces → :workspaces" do
+      assert IdeShell.activity_for_path("/workspaces") == :workspaces
+      assert IdeShell.activity_for_path("/workspaces/demo") == :workspaces
     end
 
-    test "/admin/entities → :identities" do
-      assert IdeShell.activity_for_path("/admin/entities") == :identities
+    test "/identities → :identities" do
+      assert IdeShell.activity_for_path("/identities") == :identities
+      assert IdeShell.activity_for_path("/identities/users/foo/caps") == :identities
+      assert IdeShell.activity_for_path("/identities/agents/foo/terminal") == :identities
     end
 
-    test "/admin/users + /admin/agents both → :identities (entity sub-types)" do
-      assert IdeShell.activity_for_path("/admin/users") == :identities
-      assert IdeShell.activity_for_path("/admin/users/foo/caps") == :identities
-      assert IdeShell.activity_for_path("/admin/agents/foo/terminal") == :identities
+    test "/routing → :routing" do
+      assert IdeShell.activity_for_path("/routing") == :routing
     end
 
-    test "/admin/routing → :routing" do
-      assert IdeShell.activity_for_path("/admin/routing") == :routing
+    test "/plugins → :plugins" do
+      assert IdeShell.activity_for_path("/plugins") == :plugins
+      assert IdeShell.activity_for_path("/plugins/feishu/bindings") == :plugins
     end
 
-    test "/admin/feishu/* + /admin/auto/* → :plugins" do
-      assert IdeShell.activity_for_path("/admin/feishu/bindings") == :plugins
-      assert IdeShell.activity_for_path("/admin/auto/user") == :plugins
-    end
-
-    test "/admin/observability + /admin/snapshots → :observability" do
-      assert IdeShell.activity_for_path("/admin/observability") == :observability
-      assert IdeShell.activity_for_path("/admin/snapshots") == :observability
-    end
-
-    test "/admin/settings → :settings" do
-      assert IdeShell.activity_for_path("/admin/settings") == :settings
+    test "/admin → :dashboard" do
+      assert IdeShell.activity_for_path("/admin") == :dashboard
+      assert IdeShell.activity_for_path("/admin/logs") == :dashboard
+      assert IdeShell.activity_for_path("/admin/registry") == :dashboard
+      assert IdeShell.activity_for_path("/admin/snapshots") == :dashboard
     end
 
     test "unknown path → :sessions (fallback)" do
@@ -98,11 +98,11 @@ defmodule EzagentDomainUi.IdeShellTest do
   end
 
   describe "activity_items/0" do
-    test "returns 7 items in the SPEC-defined order" do
+    test "returns 6 items in the SPEC-defined order (post-polish)" do
       items = IdeShell.activity_items()
-      assert length(items) == 7
+      assert length(items) == 6
       keys = Enum.map(items, & &1.key)
-      assert keys == [:sessions, :workspaces, :identities, :routing, :plugins, :observability, :settings]
+      assert keys == [:sessions, :workspaces, :identities, :routing, :plugins, :dashboard]
     end
   end
 
