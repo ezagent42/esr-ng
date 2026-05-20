@@ -14,6 +14,7 @@ defmodule EzagentPluginLiveview.IdentitiesLive do
   """
   use Phoenix.LiveView
   alias EzagentDomainUi.IdeShell
+  alias Phoenix.LiveView.JS
   use EzagentDomainUi.Components
   use EzagentDomainUi.Primitives
 
@@ -126,6 +127,11 @@ defmodule EzagentPluginLiveview.IdentitiesLive do
               Driven by <code>Ezagent.KindRegistry</code> filtered to
               <code>entity://*</code>.
             </:subtitle>
+            <:actions>
+              <.button variant="primary" size="sm" type="button" phx-click={JS.navigate("/identities/agents/new")}>
+                + New agent
+              </.button>
+            </:actions>
           </.page_header>
 
           <p :if={@entities == []} id="identities-empty" class="text-sm text-zinc-500 italic">

@@ -77,6 +77,10 @@ defmodule EzagentWeb.Router do
       live "/identities/users/:uri/caps", EntityCapsLive
       live "/identities/agents/:uri/caps", EntityCapsLive
       live "/identities/users/:uri/api-keys", UserApiKeysLive
+      # Phase 8c PR-N: "/new" MUST appear before ":uri" — Phoenix
+      # matches routes top-down and would otherwise bind "new" as the
+      # `:uri` param for AgentDetailLive.
+      live "/identities/agents/new", AgentNewLive
       live "/identities/agents/:uri", AgentDetailLive
       # Phase 8b — `/identities/agents/:uri/terminal` retired. PTY is
       # now accessed via the SessionEditor view-switcher on /sessions
