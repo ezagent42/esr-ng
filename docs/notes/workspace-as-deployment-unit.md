@@ -105,14 +105,27 @@ These are sketches, not commitments. Phase 9 SPEC will refine.
 
 Two options under discussion:
 
-**Option A — namespace-prefixed URI**:
+**Option A — workspace name as a path segment** (Allen 2026-05-20 preferred shape):
 ```
-entity://workspace/team-alpha/user/admin
-entity://workspace/team-beta/user/admin
+entity://user/team-alpha/admin
+entity://user/team-beta/admin
+entity://agent/team-alpha/cc_demo
 ```
+Scheme stays `entity://`; host stays the kind (`user` / `agent`); workspace
+name is the **first path segment**, the existing entity name shifts to
+become the second.
+- ✅ Smallest delta from today's `entity://user/admin` — migration is
+  literally "prepend workspace name as a path segment"
+- ✅ Matches the agent flavor-prefix convention's spirit (path layered
+  by qualifiers, not authority)
 - ✅ Globally unique, self-describing
-- ❌ Long, verbose; existing URIs need migration
-- ❌ Snapshot key changes; entity rehydrate logic touches every domain
+- ❌ Existing URIs need a migration pass (path layout change)
+- ❌ Snapshot keys change; entity rehydrate logic touches every domain
+
+System-scoped (cross-workspace) entities need a sentinel path
+segment — likely `_system` or just the legacy two-segment form
+(`entity://user/admin` continues to mean implicit `workspace://default`).
+Decision deferred to the Phase 9 SPEC.
 
 **Option B — workspace context in dispatch envelope**:
 ```
@@ -125,9 +138,11 @@ Dispatch ctx: %{workspace: workspace://team-alpha, ...}
 - ❌ Auth + caps lookup becomes 2-key: (entity, workspace)
 - ❌ Cross-workspace data leak risk if dispatch ctx isn't validated
 
-Option B is closer to how routing rules work today (URI is
-workspace-agnostic; the rule itself is workspace-scoped). Likely
-direction.
+Option A is closer to "the URI tells you everything" (no hidden
+ambient context to forget about). Option B is closer to how routing
+rules work today (URI is workspace-agnostic; the rule itself is
+workspace-scoped). Phase 9 SPEC will pick one — current lean is
+toward Option A for explicitness.
 
 ### Per-workspace capability grants
 
