@@ -65,6 +65,13 @@ config :mime, :types, %{
   "text/event-stream" => ["event-stream"]
 }
 
+# Username & Auth M2 — Swoosh. SMTP relay/credentials are supplied at
+# deliver-time from Ezagent.AppSettings (runtime, admin-configured), so
+# only the adapter is fixed here. api_client: false — SMTP only, no HTTP
+# API adapters, so no hackney/finch dependency is pulled in.
+config :ezagent_web, EzagentWeb.Mailer, adapter: Swoosh.Adapters.SMTP
+config :swoosh, :api_client, false
+
 # Import environment specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.
 import_config "#{config_env()}.exs"

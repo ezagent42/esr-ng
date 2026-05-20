@@ -57,6 +57,8 @@ defmodule EzagentWeb.MixProject do
       {:telemetry_metrics, "~> 1.0"},
       {:telemetry_poller, "~> 1.0"},
       {:gettext, "~> 0.26"},
+      {:swoosh, "~> 1.17"},
+      {:gen_smtp, "~> 1.2"},
       {:ezagent_core, in_umbrella: true},
       {:ezagent_domain_identity, in_umbrella: true},
       {:ezagent_domain_workspace, in_umbrella: true},
