@@ -50,7 +50,7 @@ defmodule EzagentWeb.SessionController do
   </html>
   """
 
-  def new(conn, _params) do
+  def credentials_new(conn, _params) do
     err = flash_error(conn)
     error_block = if err, do: ~s(<div class="error">#{Plug.HTML.html_escape(err)}</div>), else: ""
 
@@ -64,7 +64,7 @@ defmodule EzagentWeb.SessionController do
     |> send_resp(200, html)
   end
 
-  def create(conn, %{"entity_uri" => uri_str, "secret" => secret}) do
+  def credentials_create(conn, %{"entity_uri" => uri_str, "secret" => secret}) do
     case authenticate(uri_str, secret) do
       :ok ->
         conn
@@ -75,14 +75,14 @@ defmodule EzagentWeb.SessionController do
       :error ->
         conn
         |> put_flash(:error, "Invalid URI or credentials.")
-        |> redirect(to: "/login")
+        |> redirect(to: "/login/credentials")
     end
   end
 
-  def create(conn, _params) do
+  def credentials_create(conn, _params) do
     conn
     |> put_flash(:error, "Entity URI and credentials are required.")
-    |> redirect(to: "/login")
+    |> redirect(to: "/login/credentials")
   end
 
   def delete(conn, _params) do
