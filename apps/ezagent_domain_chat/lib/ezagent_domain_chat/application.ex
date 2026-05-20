@@ -85,6 +85,7 @@ defmodule EzagentDomainChat.Application do
 
     case Supervisor.start_link(children, strategy: :one_for_one, name: __MODULE__) do
       {:ok, sup_pid} ->
+        :ok = bind_default_session_to_default_workspace()
         :ok = admin_user_joins_default_session()
         :ok = EzagentDomainChat.DefaultRules.bootstrap()
 
@@ -273,6 +274,19 @@ defmodule EzagentDomainChat.Application do
       {Ezagent.Kind.Server, {kind_module, args}},
       id: child_id
     )
+  end
+
+  # Phase 8c PR-E (Allen 2026-05-20) — every session in KindRegistry MUST
+  # have a WorkspaceRegistry binding (per architectural invariant).
+  # session://main is a static supervisor child (line 80 above) — it
+  # skips `Ezagent.Entity.Session.spawn_from_template/2` which would
+  # have done the binding. This post-boot step closes that gap so the
+  # default session participates in the same workspace contract as
+  # every other session.
+  defp bind_default_session_to_default_workspace do
+    session_uri = Session.default_uri()
+    {:ok, workspace_uri} = Ezagent.WorkspaceRegistry.default_workspace_uri()
+    :ok = Ezagent.WorkspaceRegistry.bind(session_uri, workspace_uri)
   end
 
   defp admin_user_joins_default_session do

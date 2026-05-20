@@ -14,6 +14,7 @@ defmodule EzagentPluginLiveview.Admin.MemberPanel do
   use EzagentDomainUi.Primitives
 
   attr :members, :list, required: true
+  attr :floating_agents, :list, default: []
 
   def member_panel(assigns) do
     ~H"""
@@ -50,6 +51,24 @@ defmodule EzagentPluginLiveview.Admin.MemberPanel do
           </tr>
         </tbody>
       </table>
+
+      <%!-- Phase 8c PR-E (Allen 2026-05-20) — restore "Floating agents"
+            picker that pre-Phase-8b sessions_sidebar provided. Lets
+            an operator add any agent in KindRegistry that isn't yet
+            a member of any session to the current session. --%>
+      <div :if={@floating_agents != []} class="mt-4 pt-3 border-t border-zinc-200 dark:border-zinc-800">
+        <h3 class="text-[10px] uppercase tracking-wide text-zinc-500 mb-2">Floating agents</h3>
+        <form phx-change="add_floating_agent" class="contents">
+          <select
+            name="agent_uri"
+            id="floating-agents-picker"
+            class="w-full text-[11px] font-mono px-2 py-1 border border-zinc-300 dark:border-zinc-700 rounded bg-white dark:bg-zinc-900 text-zinc-800 dark:text-zinc-200"
+          >
+            <option value="">— add to session…</option>
+            <option :for={uri <- @floating_agents} value={uri}>{uri}</option>
+          </select>
+        </form>
+      </div>
     </aside>
     """
   end

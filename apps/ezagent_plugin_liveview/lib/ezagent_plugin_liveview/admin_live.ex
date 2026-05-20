@@ -271,6 +271,37 @@ defmodule EzagentPluginLiveview.AdminLive do
      |> assign(:active_pty_agent_uri, agent_uri_str)}
   end
 
+  # Phase 8c PR-E (Allen 2026-05-20) — restored Floating agents picker.
+  # Dispatches `chat.join` with the picked agent as the member to add
+  # to the current session. Re-asserts session context to refresh
+  # member list + floating list.
+  def handle_event("add_floating_agent", %{"agent_uri" => ""}, socket), do: {:noreply, socket}
+
+  def handle_event("add_floating_agent", %{"agent_uri" => agent_uri_str}, socket) do
+    with {:ok, agent_uri} <- URI.new(agent_uri_str),
+         session_uri = socket.assigns.current_session_uri,
+         target = URI.new!("#{URI.to_string(session_uri)}?action=chat.join") do
+      _ =
+        Ezagent.Invocation.dispatch(%Ezagent.Invocation{
+          target: target,
+          mode: :cast,
+          args: %{member: agent_uri},
+          ctx: %{
+            caller: socket.assigns.caller_uri,
+            caps: socket.assigns.caller_caps,
+            reply: :ignore
+          }
+        })
+
+      {:noreply,
+       socket
+       |> assign_session_context(session_uri)
+       |> assign(:floating_agents, list_floating_agents())}
+    else
+      _ -> {:noreply, assign(socket, :flash_error, "Bad agent URI: #{agent_uri_str}")}
+    end
+  end
+
   # Phase 8b §1.6 — Debug events toggle in setting dropdown.
   def handle_event("toggle_debug_panel", _params, socket) do
     {:noreply, assign(socket, :debug_open, not socket.assigns.debug_open)}
@@ -419,7 +450,7 @@ defmodule EzagentPluginLiveview.AdminLive do
       </:main_window>
 
       <:right_sidebar>
-        <MemberPanel.member_panel members={@session_members} />
+        <MemberPanel.member_panel members={@session_members} floating_agents={@floating_agents} />
       </:right_sidebar>
     </IdeShell.ide_shell>
     """

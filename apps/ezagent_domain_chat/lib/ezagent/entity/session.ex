@@ -142,11 +142,12 @@ defmodule Ezagent.Entity.Session do
   end
 
   defp default_workspace_for_session(_session_uri) do
-    # Phase 7 PR 41 minimal: workspace defaults to a generic
-    # "generated-session" workspace. SessionTemplate's
-    # default_workspace_uri field will replace this once
-    # SessionTemplate slice population lands (PR 46 era).
-    {:ok, URI.new!("workspace://generated-sessions")}
+    # Phase 8c PR-E (Allen 2026-05-20): canonical name is
+    # `workspace://default` per `Ezagent.URI` docs. The earlier
+    # `workspace://generated-sessions` name was a Phase 7 stop-gap.
+    # Sessions that don't override via SessionTemplate's
+    # `default_workspace_uri` field land here.
+    Ezagent.WorkspaceRegistry.default_workspace_uri()
   end
 
   defp spawn_orchestrator(session_uri, workspace_uri, owner_uri) do
