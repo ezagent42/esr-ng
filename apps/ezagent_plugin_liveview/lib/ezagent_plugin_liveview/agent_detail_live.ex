@@ -68,7 +68,8 @@ defmodule EzagentPluginLiveview.AgentDetailLive do
   # Per-agent so the operator can see "is this agent's WS bridge live?"
   # while looking at the agent's other status data. Returns `nil` if
   # the BridgeRegistry has no entry for this agent (most likely cause:
-  # local-pty agent that doesn't open a WS bridge).
+  # PtyServer is running but the Python MCP bridge inside claude
+  # hasn't connected back via `/cc_socket` yet, or has disconnected).
   defp load_bridge_entry(agent_uri) do
     if Code.ensure_loaded?(EzagentPluginCc.BridgeRegistry) do
       EzagentPluginCc.BridgeRegistry.list_connected()

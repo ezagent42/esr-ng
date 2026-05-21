@@ -74,9 +74,12 @@ defmodule Ezagent.Domain.Agent do
   # ── flavor → plugin lifecycle helper dispatch ────────────────────
 
   defp delegate_alive_status("cc", agent_uri) do
-    # cc plugin's deeper lifecycle = PtyServer (or remote-channel
-    # bridge). PtyServer.find_by_agent_uri + status returns the
-    # operator-facing snapshot.
+    # cc plugin's deeper lifecycle = PtyServer.
+    # PtyServer.find_by_agent_uri + status returns the operator-facing
+    # snapshot. Post-V1-fix (Allen 2026-05-21) cc agents are always
+    # local-pty — a missing PtyServer when the Kind is alive is now
+    # always a transient state (between Kind spawn and PtyServer
+    # start, or a crash that left the Kind up).
     if Code.ensure_loaded?(Ezagent.PluginCc.PtyServer) do
       case Ezagent.PluginCc.PtyServer.find_by_agent_uri(agent_uri) do
         {:ok, pid} ->
@@ -88,9 +91,9 @@ defmodule Ezagent.Domain.Agent do
           end
 
         :error ->
-          # Kind is alive but PtyServer isn't — common for remote-
-          # channel mode (no local PTY spawned) or transient between
-          # Kind spawn and PtyServer start.
+          # Kind is alive but PtyServer isn't — transient state
+          # (between Kind spawn and PtyServer start) or a crash that
+          # left the Kind up.
           %{phase: :registered, flavor: "cc", detail: %{note: "no PtyServer"}}
       end
     else

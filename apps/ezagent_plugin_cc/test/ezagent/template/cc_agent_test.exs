@@ -1,9 +1,16 @@
 defmodule Ezagent.PluginCc.Template.CcAgentTest do
   @moduledoc """
-  PR-D2 — unified `cc.agent` Template Class. Replaces the previous
-  cc.pty / cc.channel_instance split.
+  Unified `cc.agent` Template Class. The `mode` field was removed
+  Allen 2026-05-21 (V1 fix) — local-pty is the only path. Tests for
+  remote-channel placeholder + mode-validation were deleted with it.
+
+  Allen 2026-05-21 V1 fix: instantiate now spawns BOTH the Agent
+  Kind (via `SpawnRegistry.spawn/1` → snapshot persistence path) AND
+  the PtyServer. The Agent Kind path needs DB sandbox checkout, so
+  this suite uses `EzagentCore.DataCase` rather than a plain
+  `ExUnit.Case`.
   """
-  use ExUnit.Case, async: false
+  use EzagentCore.DataCase, async: false
 
   alias Ezagent.PluginCc.Template.CcAgent
 
@@ -14,31 +21,27 @@ defmodule Ezagent.PluginCc.Template.CcAgentTest do
   end
 
   describe "validate/1" do
-    test "accepts a well-formed local-pty template" do
+    test "accepts a well-formed template" do
       assert :ok =
                CcAgent.validate(%{
                  "class" => "cc.agent",
                  "agent_uri" => "entity://agent/default/cc_cc-architect",
+                 "cwd" => "/tmp"
+               })
+    end
+
+    test "tolerates legacy `mode` field (silently ignored, no migration needed)" do
+      # PR-D2 migration seeded `mode: "local-pty"` into existing rows.
+      # The V1 fix removed the field from the schema but did NOT
+      # migrate the JSON — legacy rows must still validate, since
+      # extra fields are non-load-bearing per the let-it-crash
+      # principle (no shims, just structural irrelevance).
+      assert :ok =
+               CcAgent.validate(%{
+                 "class" => "cc.agent",
+                 "agent_uri" => "entity://agent/default/cc_legacy",
                  "mode" => "local-pty",
                  "cwd" => "/tmp"
-               })
-    end
-
-    test "accepts back-compat missing-mode (defaults to local-pty, cwd still required)" do
-      assert :ok =
-               CcAgent.validate(%{
-                 "class" => "cc.agent",
-                 "agent_uri" => "entity://agent/default/cc_no-mode",
-                 "cwd" => "/tmp"
-               })
-    end
-
-    test "accepts remote-channel without cwd (placeholder mode)" do
-      assert :ok =
-               CcAgent.validate(%{
-                 "class" => "cc.agent",
-                 "agent_uri" => "entity://agent/default/cc_remote",
-                 "mode" => "remote-channel"
                })
     end
 
@@ -97,34 +100,22 @@ defmodule Ezagent.PluginCc.Template.CcAgentTest do
                })
     end
 
-    test "rejects missing cwd for local-pty" do
+    test "rejects missing cwd" do
       assert {:error, :missing_cwd} =
                CcAgent.validate(%{
                  "class" => "cc.agent",
-                 "agent_uri" => "entity://agent/default/cc_x",
-                 "mode" => "local-pty"
-               })
-    end
-
-    test "rejects unsupported mode" do
-      assert {:error, {:unsupported_mode, "bogus"}} =
-               CcAgent.validate(%{
-                 "class" => "cc.agent",
-                 "agent_uri" => "entity://agent/default/cc_x",
-                 "mode" => "bogus",
-                 "cwd" => "/tmp"
+                 "agent_uri" => "entity://agent/default/cc_x"
                })
     end
   end
 
-  describe "instantiate/3 — local-pty mode" do
+  describe "instantiate/3" do
     test "spawns a PtyServer for the declared agent" do
       agent_uri_str = "entity://agent/default/cc_test-#{System.unique_integer([:positive])}"
 
       tmpl = %{
         "class" => "cc.agent",
         "agent_uri" => agent_uri_str,
-        "mode" => "local-pty",
         "cwd" => "/tmp"
       }
 
@@ -134,6 +125,37 @@ defmodule Ezagent.PluginCc.Template.CcAgentTest do
       assert URI.to_string(returned_uri) == agent_uri_str
     end
 
+    test "produces BOTH the Agent Kind AND the PtyServer (V1 fix invariant)" do
+      # V1 fix Allen 2026-05-21: instantiate is the sole producer of
+      # the cc agent's runtime resources. After it returns:
+      # 1. KindRegistry.lookup(agent_uri) must succeed — Agent Kind alive
+      # 2. PtyServer.find_by_agent_uri(agent_uri) must succeed — PTY alive
+      agent_uri_str = "entity://agent/default/cc_v1fix-#{System.unique_integer([:positive])}"
+      agent_uri = URI.parse(agent_uri_str)
+
+      tmpl = %{
+        "class" => "cc.agent",
+        "agent_uri" => agent_uri_str,
+        "cwd" => "/tmp"
+      }
+
+      workspace_uri = URI.parse("workspace://test")
+
+      assert {:ok, [^agent_uri]} = CcAgent.instantiate("t", tmpl, workspace_uri)
+
+      assert {:ok, agent_pid} = Ezagent.KindRegistry.lookup(agent_uri),
+             "Agent Kind must be alive after cc.agent.instantiate (V1 fix invariant)"
+
+      assert is_pid(agent_pid)
+      assert Process.alive?(agent_pid)
+
+      assert {:ok, pty_pid} = Ezagent.PluginCc.PtyServer.find_by_agent_uri(agent_uri),
+             "PtyServer must be alive after cc.agent.instantiate (V1 fix invariant)"
+
+      assert is_pid(pty_pid)
+      assert Process.alive?(pty_pid)
+    end
+
     test "is idempotent — second call returns same URI without spawning a second PtyServer" do
       agent_uri_str = "entity://agent/default/cc_idem-#{System.unique_integer([:positive])}"
       uri = URI.parse(agent_uri_str)
@@ -141,7 +163,6 @@ defmodule Ezagent.PluginCc.Template.CcAgentTest do
       tmpl = %{
         "class" => "cc.agent",
         "agent_uri" => agent_uri_str,
-        "mode" => "local-pty",
         "cwd" => "/tmp"
       }
 
@@ -156,21 +177,6 @@ defmodule Ezagent.PluginCc.Template.CcAgentTest do
 
       pids_after = list_pty_pids_for(agent_uri_str)
       assert pids_after == pids_before
-    end
-  end
-
-  describe "instantiate/3 — remote-channel mode (placeholder)" do
-    test "returns :not_implemented" do
-      assert {:error, :remote_mode_not_implemented} =
-               CcAgent.instantiate(
-                 "t",
-                 %{
-                   "class" => "cc.agent",
-                   "agent_uri" => "entity://agent/default/cc_remote-x",
-                   "mode" => "remote-channel"
-                 },
-                 URI.parse("workspace://test")
-               )
     end
   end
 
