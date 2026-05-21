@@ -1,0 +1,115 @@
+## "msgid"s in this file come from POT (.pot) files.
+###
+### Do not add, change, or remove "msgid"s manually here as
+### they're tied to the ones in the corresponding POT file
+### (with the same domain).
+###
+### Use "mix gettext.extract --merge" or "mix gettext.merge"
+### to merge POT files into PO files.
+msgid ""
+msgstr ""
+"Language: en\n"
+"Plural-Forms: nplurals=2; plural=(n != 1);\n"
+
+#: lib/ezagent_web/components/core_components.ex:342
+#, elixir-autogen, elixir-format
+msgid "Actions"
+msgstr ""
+
+#: lib/ezagent_web/components/layouts.ex:99
+#: lib/ezagent_web/components/layouts.ex:111
+#, elixir-autogen, elixir-format
+msgid "Attempting to reconnect"
+msgstr ""
+
+#: lib/ezagent_web/controllers/session_controller.ex:397
+#, elixir-autogen, elixir-format
+msgid "Email address"
+msgstr ""
+
+#: lib/ezagent_web/controllers/session_controller.ex:400
+#, elixir-autogen, elixir-format
+msgid "Email me a sign-in link"
+msgstr ""
+
+#: lib/ezagent_web/controllers/session_controller.ex:406
+#, elixir-autogen, elixir-format
+msgid "Email sign-in is not enabled. An admin can turn it on in Settings → SMTP."
+msgstr ""
+
+#: lib/ezagent_web/controllers/session_controller.ex:421
+#, elixir-autogen, elixir-format
+msgid "Password or token"
+msgstr ""
+
+#: lib/ezagent_web/controllers/session_controller.ex:418
+#, elixir-autogen, elixir-format
+msgid "Sign in"
+msgstr ""
+
+#: lib/ezagent_web/components/layouts.ex:106
+#, elixir-autogen, elixir-format
+msgid "Something went wrong!"
+msgstr ""
+
+#: lib/ezagent_web/controllers/session_controller.ex:420
+#, elixir-autogen, elixir-format
+msgid "Username or entity URI"
+msgstr ""
+
+#: lib/ezagent_web/components/layouts.ex:94
+#, elixir-autogen, elixir-format
+msgid "We can't find the internet"
+msgstr ""
+
+#: lib/ezagent_web/controllers/session_controller.ex:423
+#, elixir-autogen, elixir-format
+msgid "With email magic link"
+msgstr ""
+
+#: lib/ezagent_web/controllers/session_controller.ex:419
+#, elixir-autogen, elixir-format
+msgid "With password"
+msgstr ""
+
+#: lib/ezagent_web/components/core_components.ex:74
+#, elixir-autogen, elixir-format
+msgid "close"
+msgstr ""
+
+#: lib/ezagent_web/controllers/session_controller.ex:417
+#, elixir-autogen, elixir-format
+msgid "ezagent · sign in"
+msgstr ""
+
+#: lib/ezagent_web/controllers/session_controller.ex:422
+#, elixir-autogen, elixir-format
+msgid "or"
+msgstr ""
+
+# --- i18n V1 manual additions ---------------------------------------
+# Strings wrapped in apps/ezagent_plugin_liveview which uses
+# EzagentWeb.Gettext as its backend. `mix gettext.extract` runs from
+# the ezagent_web Mix project and does NOT walk sibling umbrella apps,
+# so these msgids are added by hand on the same wrap-PR. Future PRs
+# that touch many strings should either run extract from each app or
+# centralize via an extraction shim.
+#: ../ezagent_plugin_liveview/lib/ezagent_plugin_liveview/admin_dashboard_live.ex
+#, elixir-format
+msgid "Overview"
+msgstr ""
+
+#: ../ezagent_plugin_liveview/lib/ezagent_plugin_liveview/identities_live.ex
+#, elixir-format
+msgid "Identities"
+msgstr ""
+
+#: ../ezagent_plugin_liveview/lib/ezagent_plugin_liveview/profile_live.ex
+#, elixir-format
+msgid "Profile"
+msgstr ""
+
+#: ../ezagent_plugin_liveview/lib/ezagent_plugin_liveview/users_live.ex
+#, elixir-format
+msgid "Users"
+msgstr ""

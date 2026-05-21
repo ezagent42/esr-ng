@@ -13,6 +13,8 @@ defmodule EzagentPluginLiveview.IdentitiesLive do
   — Identities is the user-facing directory.
   """
   use Phoenix.LiveView
+  # i18n V1 (Allen 2026-05-21) — see admin_dashboard_live for rationale.
+  use Gettext, backend: EzagentWeb.Gettext
   alias EzagentDomainUi.IdeShell
   alias Phoenix.LiveView.JS
   use EzagentDomainUi.Components
@@ -155,7 +157,7 @@ defmodule EzagentPluginLiveview.IdentitiesLive do
       </:resource_panel>
       <:main_window>
         <div class="flex-1 overflow-auto px-6 py-6 text-zinc-900 dark:text-zinc-100">
-          <.page_header title="Identities">
+          <.page_header title={gettext("Identities")}>
             <:subtitle>
               The directory of every live entity — users and agents.
               Driven by <code>Ezagent.KindRegistry</code> filtered to

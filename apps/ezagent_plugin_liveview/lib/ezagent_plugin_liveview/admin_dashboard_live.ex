@@ -15,6 +15,11 @@ defmodule EzagentPluginLiveview.AdminDashboardLive do
   perspective opened from the avatar dropdown.
   """
   use Phoenix.LiveView
+  # i18n V1 (Allen 2026-05-21): backend module reference is runtime —
+  # EzagentWeb.Gettext lives in the host app but doesn't need a
+  # compile-time dep here. Gettext macros expand to runtime calls
+  # against the named backend.
+  use Gettext, backend: EzagentWeb.Gettext
   alias EzagentDomainUi.AdminSettingsShell
   use EzagentDomainUi.Components
   use EzagentDomainUi.Primitives
@@ -70,7 +75,7 @@ defmodule EzagentPluginLiveview.AdminDashboardLive do
     >
       <:main>
         <div class="px-6 py-6 text-zinc-900 dark:text-zinc-100">
-          <.page_header title="Overview">
+          <.page_header title={gettext("Overview")}>
             <:subtitle>
               System layer (admin settings drawer). Workspace-layer surfaces
               — Sessions, Workspaces, Identities, Routing, Plugins — live on

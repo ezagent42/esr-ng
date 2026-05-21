@@ -14,6 +14,7 @@ defmodule EzagentWeb.SessionController do
   with an inline notice when SMTP isn't configured).
   """
   use Phoenix.Controller, formats: [:html], layouts: []
+  use Gettext, backend: EzagentWeb.Gettext
 
   import Plug.Conn
 
@@ -24,7 +25,7 @@ defmodule EzagentWeb.SessionController do
   <!DOCTYPE html>
   <html lang="en">
   <head>
-    <title>ezagent · sign in</title>
+    <title>{{T_PAGE_TITLE}}</title>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -217,27 +218,27 @@ defmodule EzagentWeb.SessionController do
   <body>
     <div class="card">
       <p class="brand">ezagent</p>
-      <h1>Sign in</h1>
+      <h1>{{T_SIGN_IN}}</h1>
 
       {{WORKSPACE_BANNER}}
 
       {{NOTICE}}
 
-      <p class="section-label">With password</p>
+      <p class="section-label">{{T_WITH_PASSWORD}}</p>
       {{CRED_ERROR}}
       <form method="post" action="/login/credentials">
         <input type="hidden" name="_csrf_token" value="{{CSRF}}">
         {{WORKSPACE_HIDDEN}}
-        <label for="entity_uri">Username or entity URI</label>
+        <label for="entity_uri">{{T_USERNAME_OR_URI}}</label>
         <input type="text" id="entity_uri" name="entity_uri" placeholder="admin   or   entity://user/system/admin" required autofocus>
-        <label for="secret">Password or token</label>
+        <label for="secret">{{T_PASSWORD_OR_TOKEN}}</label>
         <input type="password" id="secret" name="secret" required>
-        <button type="submit">Sign in</button>
+        <button type="submit">{{T_SIGN_IN}}</button>
       </form>
 
-      <div class="divider"><span>or</span></div>
+      <div class="divider"><span>{{T_OR}}</span></div>
 
-      <p class="section-label">With email magic link</p>
+      <p class="section-label">{{T_WITH_EMAIL_MAGIC_LINK}}</p>
       {{EMAIL_SECTION}}
 
       <p class="hint">
@@ -245,6 +246,12 @@ defmodule EzagentWeb.SessionController do
         Full URIs (<code>entity://user/&lt;name&gt;</code> /
         <code>entity://agent/&lt;flavor&gt;_&lt;name&gt;</code>) also accepted.
         First-time admin: <code>mix ezagent.user.set_password entity://user/system/admin --password X</code>.
+      </p>
+
+      <p class="hint" style="text-align:center;margin-top:8px;">
+        <a href="?locale=en" style="color:var(--ink-dim);text-decoration:none;">English</a>
+        ·
+        <a href="?locale=zh_CN" style="color:var(--ink-dim);text-decoration:none;">中文</a>
       </p>
     </div>
   </body>
@@ -254,14 +261,14 @@ defmodule EzagentWeb.SessionController do
   @email_form """
   <form method="post" action="/login">
     <input type="hidden" name="_csrf_token" value="{{CSRF}}">
-    <label for="email">Email address</label>
+    <label for="email">{{T_EMAIL_ADDRESS}}</label>
     <input type="email" id="email" name="email" placeholder="you@example.com" required>
-    <button type="submit" class="secondary">Email me a sign-in link</button>
+    <button type="submit" class="secondary">{{T_EMAIL_ME_SIGN_IN_LINK}}</button>
   </form>
   """
 
   @email_disabled_notice """
-  <p class="disabled-notice">Email sign-in is not enabled. An admin can turn it on in Settings → SMTP.</p>
+  <p class="disabled-notice">{{T_EMAIL_SIGN_IN_DISABLED}}</p>
   """
 
   # GET /login — unified login page with both credential and email forms.
@@ -378,13 +385,26 @@ defmodule EzagentWeb.SessionController do
     # will canonicalize into this workspace instead of `default`.
     {workspace_banner, workspace_hidden} = workspace_form_bits(workspace)
 
+    # Resolve i18n strings on the controller side (the login heredoc
+    # is raw HTML, not a HEEx template, so we cannot inline gettext
+    # macros — instead we placeholder-substitute pre-translated strings).
+    # Locale is set by EzagentWeb.Plugs.Locale earlier in the pipeline.
     email_section =
       if Ezagent.AppSettings.smtp_configured?() do
         @email_form
         |> String.replace("{{CSRF}}", Plug.CSRFProtection.get_csrf_token())
         |> String.replace("{{WORKSPACE_HIDDEN}}", workspace_hidden)
+        |> String.replace("{{T_EMAIL_ADDRESS}}", esc(gettext("Email address")))
+        |> String.replace(
+          "{{T_EMAIL_ME_SIGN_IN_LINK}}",
+          esc(gettext("Email me a sign-in link"))
+        )
       else
         @email_disabled_notice
+        |> String.replace(
+          "{{T_EMAIL_SIGN_IN_DISABLED}}",
+          esc(gettext("Email sign-in is not enabled. An admin can turn it on in Settings → SMTP."))
+        )
       end
 
     html =
@@ -394,11 +414,27 @@ defmodule EzagentWeb.SessionController do
       |> String.replace("{{WORKSPACE_BANNER}}", workspace_banner)
       |> String.replace("{{WORKSPACE_HIDDEN}}", workspace_hidden)
       |> String.replace("{{EMAIL_SECTION}}", email_section)
+      |> String.replace("{{T_PAGE_TITLE}}", esc(gettext("ezagent · sign in")))
+      |> String.replace("{{T_SIGN_IN}}", esc(gettext("Sign in")))
+      |> String.replace("{{T_WITH_PASSWORD}}", esc(gettext("With password")))
+      |> String.replace("{{T_USERNAME_OR_URI}}", esc(gettext("Username or entity URI")))
+      |> String.replace("{{T_PASSWORD_OR_TOKEN}}", esc(gettext("Password or token")))
+      |> String.replace("{{T_OR}}", esc(gettext("or")))
+      |> String.replace("{{T_WITH_EMAIL_MAGIC_LINK}}", esc(gettext("With email magic link")))
       |> String.replace("{{CSRF}}", Plug.CSRFProtection.get_csrf_token())
 
     conn
     |> put_resp_content_type("text/html")
     |> send_resp(200, html)
+  end
+
+  # html_escape across Plug versions returns either an iodata or a
+  # binary; normalize to binary so `String.replace/3` accepts it.
+  defp esc(text) do
+    case Plug.HTML.html_escape(text) do
+      bin when is_binary(bin) -> bin
+      iodata -> IO.iodata_to_binary(iodata)
+    end
   end
 
   # Reads the workspace context from form params (POST) or query string
