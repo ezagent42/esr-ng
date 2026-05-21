@@ -85,7 +85,7 @@ defmodule Ezagent.MessageStoreMultiSessionTest do
   end
 
   test "write is idempotent on (message_id, session_uri) — duplicate write doesn't fail or double-insert routing" do
-    sender = URI.new!("entity://user/default/admin")
+    sender = URI.new!("entity://user/system/admin")
     msg = Message.new(sender, %{text: "once", attachments: []})
     session = URI.new!("session://default/default/main")
 

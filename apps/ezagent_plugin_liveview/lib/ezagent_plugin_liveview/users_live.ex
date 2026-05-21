@@ -215,7 +215,7 @@ defmodule EzagentPluginLiveview.UsersLive do
   def render(assigns) do
     assigns =
       assign_new(assigns, :current_entity_uri_str, fn ->
-        URI.to_string(assigns.current_entity_uri || URI.parse("entity://user/default/admin"))
+        URI.to_string(assigns.current_entity_uri || URI.parse("entity://user/system/admin"))
       end)
 
     ~H"""
@@ -224,6 +224,7 @@ defmodule EzagentPluginLiveview.UsersLive do
       current_path="/identities/users"
       status={%{agents_alive: 0, bridges: 0, debug_events: 0, version: "dev"}}
       is_admin?={@is_admin?}
+      is_system_member?={@is_system_member?}
       workspaces={@workspaces}
     >
       <:main_window>

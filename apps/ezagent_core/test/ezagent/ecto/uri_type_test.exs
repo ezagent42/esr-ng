@@ -44,8 +44,8 @@ defmodule Ezagent.Ecto.URITest do
 
   describe "dump/1" do
     test "%URI{} → DB string" do
-      uri = URI.new!("entity://user/default/admin")
-      assert {:ok, "entity://user/default/admin"} = URIType.dump(uri)
+      uri = URI.new!("entity://user/system/admin")
+      assert {:ok, "entity://user/system/admin"} = URIType.dump(uri)
     end
 
     test "accepts already-string (idempotent)" do

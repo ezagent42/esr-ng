@@ -10,7 +10,7 @@ defmodule Ezagent.EntityPresenterTest do
   end
 
   test "display/1 falls back to the URI path segment when no profile" do
-    assert EntityPresenter.display("entity://user/default/admin") == "admin"
+    assert EntityPresenter.display("entity://user/system/admin") == "admin"
     assert EntityPresenter.display("entity://agent/default/echo") == "echo"
   end
 

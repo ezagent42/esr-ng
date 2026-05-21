@@ -21,8 +21,12 @@ defmodule Ezagent.Entity.User do
   """
 
   # Phase 9 PR-2 (SPEC v3 §3): entity URIs carry a workspace segment.
-  # Admin lives in the bootstrap `default` workspace.
-  @admin_uri URI.parse("entity://user/default/admin")
+  # Phase 9 PR-8 (SPEC v3 §13.1): admin moved from `workspace://default`
+  # to `workspace://system` — the Keycloak realm-admin model. System
+  # members hold cross-workspace authority by membership (see
+  # `Ezagent.Capability.cross_workspace?/2`); the structural admin cap
+  # keeps `workspace_uri: :any` for defence in depth.
+  @admin_uri URI.parse("entity://user/system/admin")
   @system_bootstrap_uri URI.parse("system://bootstrap/default")
 
   # Static granted_at — admin capability is a structural bootstrap, not
@@ -30,7 +34,7 @@ defmodule Ezagent.Entity.User do
   # deterministic.
   @admin_granted_at ~U[2026-01-01 00:00:00Z]
 
-  @doc "Bootstrap admin principal URI: `entity://user/default/admin`."
+  @doc "Bootstrap admin principal URI: `entity://user/system/admin`."
   @spec admin_uri() :: URI.t()
   def admin_uri, do: @admin_uri
 
@@ -76,7 +80,7 @@ defmodule Ezagent.Entity.User do
   instance"; whether the message actually lands depends on session
   membership and routing rules, not on this cap. Admin's wildcard
   `admin_caps/0` is the only true escape hatch, and is granted only
-  to `entity://user/default/admin`.
+  to `entity://user/system/admin`.
 
   **Behavior wildcard**: `:any` follows the existing project
   convention. Modeling specific behaviors here would require

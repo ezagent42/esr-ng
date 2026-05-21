@@ -21,7 +21,7 @@ defmodule EzagentPluginLiveview.UsersLiveTest do
   test "GET /identities/users renders existing admin row + create form", %{conn: conn} do
     {:ok, _lv, html} = live(conn, "/identities/users")
     assert html =~ "Users"
-    assert html =~ "entity://user/default/admin"
+    assert html =~ "entity://user/system/admin"
     assert html =~ "Create user"
   end
 

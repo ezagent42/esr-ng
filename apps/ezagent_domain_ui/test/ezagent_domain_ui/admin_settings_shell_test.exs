@@ -16,7 +16,7 @@ defmodule EzagentDomainUi.AdminSettingsShellTest do
   describe "admin_settings_shell/1" do
     test "renders shell + topbar + sidebar + main" do
       assigns = %{
-        current_entity_uri: "entity://user/default/admin",
+        current_entity_uri: "entity://user/system/admin",
         current_path: "/admin"
       }
 
@@ -40,7 +40,7 @@ defmodule EzagentDomainUi.AdminSettingsShellTest do
     end
 
     test "Back link defaults to /sessions" do
-      assigns = %{current_entity_uri: "entity://user/default/admin", current_path: "/admin"}
+      assigns = %{current_entity_uri: "entity://user/system/admin", current_path: "/admin"}
 
       html =
         rendered_to_string(~H"""
@@ -57,7 +57,7 @@ defmodule EzagentDomainUi.AdminSettingsShellTest do
 
     test "Back link respects custom back_href" do
       assigns = %{
-        current_entity_uri: "entity://user/default/admin",
+        current_entity_uri: "entity://user/system/admin",
         current_path: "/admin",
         back_href: "/workspaces/default"
       }
@@ -77,7 +77,7 @@ defmodule EzagentDomainUi.AdminSettingsShellTest do
     end
 
     test "does NOT render Activity Bar or status bar" do
-      assigns = %{current_entity_uri: "entity://user/default/admin", current_path: "/admin"}
+      assigns = %{current_entity_uri: "entity://user/system/admin", current_path: "/admin"}
 
       html =
         rendered_to_string(~H"""
@@ -101,7 +101,7 @@ defmodule EzagentDomainUi.AdminSettingsShellTest do
     end
 
     test "sidebar lists all 5 sub-sections (PR-M added Workspaces)" do
-      assigns = %{current_entity_uri: "entity://user/default/admin", current_path: "/admin"}
+      assigns = %{current_entity_uri: "entity://user/system/admin", current_path: "/admin"}
 
       html =
         rendered_to_string(~H"""
@@ -127,7 +127,7 @@ defmodule EzagentDomainUi.AdminSettingsShellTest do
 
     test "active_section explicit value highlights that sidebar item" do
       assigns = %{
-        current_entity_uri: "entity://user/default/admin",
+        current_entity_uri: "entity://user/system/admin",
         current_path: "/admin",
         active_section: :registry
       }
@@ -148,7 +148,7 @@ defmodule EzagentDomainUi.AdminSettingsShellTest do
     end
 
     test "active_section defaults to section_for_path(current_path)" do
-      assigns = %{current_entity_uri: "entity://user/default/admin", current_path: "/admin/snapshots"}
+      assigns = %{current_entity_uri: "entity://user/system/admin", current_path: "/admin/snapshots"}
 
       html =
         rendered_to_string(~H"""

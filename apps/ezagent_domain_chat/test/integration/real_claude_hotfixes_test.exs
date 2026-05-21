@@ -63,7 +63,7 @@ defmodule EzagentDomainChat.Integration.RealClaudeHotfixesTest do
       :ok = BridgeRegistry.bind(agent_uri, self())
 
       msg =
-        Message.new(URI.new!("entity://user/default/admin"), %{text: "hi cc-builder", attachments: []})
+        Message.new(URI.new!("entity://user/system/admin"), %{text: "hi cc-builder", attachments: []})
 
       ctx = %{
         caller: session_uri,
@@ -77,7 +77,7 @@ defmodule EzagentDomainChat.Integration.RealClaudeHotfixesTest do
 
       assert_receive {:to_claude, %{"meta" => meta}}, 500
       assert meta["session"] == URI.to_string(session_uri)
-      assert meta["sender"] == "entity://user/default/admin"
+      assert meta["sender"] == "entity://user/system/admin"
       assert meta["message_id"] == msg.id
 
       BridgeRegistry.unbind(agent_uri)

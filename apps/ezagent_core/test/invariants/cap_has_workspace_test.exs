@@ -49,7 +49,7 @@ defmodule Ezagent.Invariants.CapHasWorkspaceTest do
           kind: :session,
           behavior: :any,
           instance: :any,
-          granted_by: URI.parse("entity://user/default/admin"),
+          granted_by: URI.parse("entity://user/system/admin"),
           granted_at: ~U[2026-05-21 00:00:00Z]
         })
       end
@@ -62,7 +62,7 @@ defmodule Ezagent.Invariants.CapHasWorkspaceTest do
           behavior: :any,
           instance: :any,
           workspace_uri: URI.new!("workspace://default"),
-          granted_by: URI.parse("entity://user/default/admin"),
+          granted_by: URI.parse("entity://user/system/admin"),
           granted_at: ~U[2026-05-21 00:00:00Z]
         })
 
@@ -134,7 +134,7 @@ defmodule Ezagent.Invariants.CapHasWorkspaceTest do
         behavior: :any,
         instance: :any,
         workspace_uri: URI.new!("workspace://team-alpha"),
-        granted_by: URI.parse("entity://user/default/admin"),
+        granted_by: URI.parse("entity://user/system/admin"),
         granted_at: ~U[2026-05-21 00:00:00Z]
       }
 

@@ -36,7 +36,7 @@ defmodule Ezagent.IdentityTest do
     end
 
     test "returns true for the seeded admin URI (string form)" do
-      assert Ezagent.Identity.admin?("entity://user/default/admin")
+      assert Ezagent.Identity.admin?("entity://user/system/admin")
     end
 
     test "returns false for a non-admin user URI" do

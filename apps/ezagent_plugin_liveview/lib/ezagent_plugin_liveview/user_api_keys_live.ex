@@ -150,7 +150,7 @@ defmodule EzagentPluginLiveview.UserApiKeysLive do
   def render(assigns) do
     assigns =
       assign_new(assigns, :current_entity_uri_str, fn ->
-        URI.to_string(Map.get(assigns, :current_entity_uri) || URI.parse("entity://user/default/admin"))
+        URI.to_string(Map.get(assigns, :current_entity_uri) || URI.parse("entity://user/system/admin"))
       end)
 
     ~H"""
@@ -159,6 +159,7 @@ defmodule EzagentPluginLiveview.UserApiKeysLive do
       current_path="/identities/users"
       status={%{agents_alive: 0, bridges: 0, debug_events: 0, version: "dev"}}
       is_admin?={@is_admin?}
+      is_system_member?={@is_system_member?}
       workspaces={@workspaces}
     >
       <:main_window>
@@ -250,7 +251,7 @@ defmodule EzagentPluginLiveview.UserApiKeysLive do
             style="padding: 8px 16px; background: #0969da; color: white; border: none; border-radius: 4px; cursor: pointer;"
           >Save</button>
           <p :if={not (@is_admin? or @self?)} style="font-size: 12px; color: #b91c1c;">
-            You can only edit your own keys. Admin (<code>entity://user/default/admin</code>) can edit any.
+            You can only edit your own keys. Admin (<code>entity://user/system/admin</code>) can edit any.
           </p>
         </.form>
       </section>

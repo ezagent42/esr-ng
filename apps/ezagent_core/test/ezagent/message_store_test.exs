@@ -16,7 +16,7 @@ defmodule Ezagent.MessageStoreTest do
 
   @session_a URI.new!("session://default/default/main")
   @session_b URI.new!("session://default/default/other")
-  @admin URI.new!("entity://user/default/admin")
+  @admin URI.new!("entity://user/system/admin")
   @bot URI.new!("entity://agent/default/test_cc-builder")
 
   setup do

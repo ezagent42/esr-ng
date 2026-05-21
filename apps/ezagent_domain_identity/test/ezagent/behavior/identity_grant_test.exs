@@ -12,7 +12,7 @@ defmodule Ezagent.Behavior.IdentityGrantTest do
   alias Ezagent.Capability
 
   @workspace_uri URI.new!("workspace://default")
-  @granter URI.parse("entity://user/default/admin")
+  @granter URI.parse("entity://user/system/admin")
 
   defp echo_cap do
     %Capability{

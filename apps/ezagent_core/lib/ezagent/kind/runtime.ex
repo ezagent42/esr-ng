@@ -238,9 +238,16 @@ defmodule Ezagent.Kind.Runtime do
 
   defp ws_equal?(_, _), do: false
 
+  # Phase 9 PR-8 (SPEC v3 §13.3) — the arity-2 form honors the
+  # membership-based bypass: ANY cap held by a `workspace://system`
+  # member counts as cross-workspace (Keycloak realm-admin model).
+  # The `:system` caller short-circuit above already returns :ok for
+  # internal-only flows, so the predicate here only fires for real
+  # entity URIs.
   defp caps_have_cross_workspace?(ctx) do
     caps = Map.get(ctx, :caps, MapSet.new())
-    Enum.any?(caps, &Ezagent.Capability.cross_workspace?/1)
+    caller = Map.get(ctx, :caller)
+    Enum.any?(caps, &Ezagent.Capability.cross_workspace?(&1, caller))
   end
 
   defp validate_args(behavior_module, action, args) do

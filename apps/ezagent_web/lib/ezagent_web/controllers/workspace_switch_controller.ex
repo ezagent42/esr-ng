@@ -1,49 +1,51 @@
 defmodule EzagentWeb.WorkspaceSwitchController do
   @moduledoc """
-  Workspace switcher endpoint.
+  Workspace switcher endpoint — Phase 9 PR-8 (SPEC v3 §6.4 amendment 3
+  + §13.2).
 
-  Per SPEC v3 §6.4 amendment (Allen 2026-05-21): workspace switch is
-  NOT an in-place context swap. Entity URIs are workspace-bound
-  (3-segment: `entity://<type>/<workspace>/<name>`), so switching
-  workspace = switching entity = must re-authenticate.
+  Permission-gated branching, NOT always-logout. The user's membership
+  in `workspace://system` determines the UX:
 
-  Flow:
+  - **System member** → context swap. `:current_workspace_uri` is
+    updated to the target while `:current_entity_uri` stays as
+    `entity://user/system/admin`. The §6.5 invariant
+    (`current_workspace_uri == entity_workspace_uri(current_entity_uri)`)
+    is intentionally relaxed for system members per §13.2.
+  - **Regular user** → denial page. Shows a "Sign in to <ws>" prompt
+    that POSTs to /logout?return_to=/login?workspace=<ws>, so the
+    decision to lose the current session is conscious.
+  - **No-op when already in target workspace** → just redirect back
+    to /sessions.
+  - **Hidden target** (`visible: false`) → flash error. System
+    workspace is not directly switchable from this endpoint.
 
-  1. User picks another workspace from the top-left dropdown.
-  2. Browser POSTs `/workspaces/switch` with `workspace=<target>` +
-     CSRF token.
-  3. This controller validates the target exists in
-     `Ezagent.Workspace.Store`.
-  4. On success: clears BOTH `:current_entity_uri` and
-     `:current_workspace_uri` from the session, then redirects to
-     `/login?workspace=<target>` with the workspace pre-filled in the
-     login form (so the bare-handle path canonicalizes into the
-     target workspace).
-  5. On unknown workspace: redirects back to `/sessions` with a flash
-     error (no auth change — current session stays intact).
-
-  Why not a LV action / phx-click handler: this MUST mutate the
-  session cookie + clear-session behavior, which only HTTP plug
-  controllers can do reliably. LV-side `redirect/2` to the same URL
-  would not rotate the cookie.
+  Note: the system-member branch is the SECOND sanctioned writer of
+  `:current_workspace_uri` outside `SessionPrincipal.put/3` (the
+  first). The §6.5 invariant test allows this controller path
+  explicitly.
   """
   use EzagentWeb, :controller
 
-  alias EzagentWeb.SessionPrincipal
-
   def switch(conn, %{"workspace" => target_workspace})
       when is_binary(target_workspace) and target_workspace != "" do
+    current_entity_uri = get_session(conn, :current_entity_uri)
+
     case Ezagent.Workspace.Store.get_by_name(target_workspace) do
       nil ->
         conn
         |> put_flash(:error, "Unknown workspace: " <> target_workspace)
         |> redirect(to: ~p"/sessions")
 
-      _ws ->
+      %{visible: false} ->
+        # System workspace (or any future hidden workspace) is not
+        # directly switchable; the system-member context-swap still
+        # operates on visible targets only.
         conn
-        |> SessionPrincipal.clear()
-        |> put_flash(:info, "Sign in to workspace " <> target_workspace <> ".")
-        |> redirect(to: "/login?workspace=" <> URI.encode(target_workspace))
+        |> put_flash(:error, "Workspace not available")
+        |> redirect(to: ~p"/sessions")
+
+      workspace ->
+        do_switch(conn, workspace, current_entity_uri)
     end
   end
 
@@ -51,5 +53,45 @@ defmodule EzagentWeb.WorkspaceSwitchController do
     conn
     |> put_flash(:error, "Missing workspace parameter.")
     |> redirect(to: ~p"/sessions")
+  end
+
+  defp do_switch(conn, workspace, current_entity_uri)
+       when is_binary(current_entity_uri) do
+    caller_uri = URI.parse(current_entity_uri)
+    caller_workspace = Ezagent.URI.entity_workspace_uri(caller_uri)
+    target_uri = URI.new!("workspace://" <> workspace.name)
+
+    cond do
+      URI.to_string(caller_workspace) == "workspace://system" ->
+        # System-member context swap — SPEC §13.2. Keep
+        # :current_entity_uri (admin stays admin); swap workspace
+        # slot. This is the SECOND sanctioned writer for the
+        # workspace slot — see session_principal_test.exs allow list.
+        conn
+        |> put_session(:current_workspace_uri, URI.to_string(target_uri))
+        |> put_flash(:info, "Operating on workspace " <> workspace.name)
+        |> redirect(to: ~p"/sessions")
+
+      URI.to_string(caller_workspace) == URI.to_string(target_uri) ->
+        # Already in this workspace — no-op.
+        redirect(conn, to: ~p"/sessions")
+
+      true ->
+        # Regular user trying to switch to a different workspace —
+        # render the denial page (SPEC §6.4 amendment 3). User must
+        # consciously choose to log out + re-auth via the "Sign in to
+        # <ws>" link.
+        conn
+        |> put_view(EzagentWeb.WorkspaceSwitchHTML)
+        |> render("denied.html",
+          target_workspace: workspace.name,
+          caller_uri: current_entity_uri
+        )
+    end
+  end
+
+  defp do_switch(conn, _workspace, _no_session) do
+    # No current session at all — bounce to login.
+    redirect(conn, to: "/login")
   end
 end

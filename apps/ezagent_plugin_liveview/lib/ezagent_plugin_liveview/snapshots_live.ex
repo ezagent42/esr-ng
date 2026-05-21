@@ -89,7 +89,7 @@ defmodule EzagentPluginLiveview.SnapshotsLive do
   def render(assigns) do
     assigns =
       assign_new(assigns, :current_entity_uri_str, fn ->
-        URI.to_string(Map.get(assigns, :current_entity_uri) || URI.parse("entity://user/default/admin"))
+        URI.to_string(Map.get(assigns, :current_entity_uri) || URI.parse("entity://user/system/admin"))
       end)
 
     ~H"""

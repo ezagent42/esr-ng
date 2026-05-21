@@ -294,7 +294,7 @@ defmodule Ezagent.CapabilityTest do
         behavior: :any,
         instance: instance,
         workspace_uri: URI.new!("workspace://default"),
-        granted_by: URI.parse("entity://user/default/admin"),
+        granted_by: URI.parse("entity://user/system/admin"),
         granted_at: ~U[2026-05-18 00:00:00Z]
       )
     end
@@ -409,7 +409,7 @@ defmodule Ezagent.CapabilityTest do
           behavior: :any,
           instance: {:spawned_by, orchestrator},
           workspace_uri: URI.new!("workspace://default"),
-          granted_by: URI.parse("entity://user/default/admin"),
+          granted_by: URI.parse("entity://user/system/admin"),
           granted_at: ~U[2026-05-18 00:00:00Z]
         )
 
@@ -453,7 +453,7 @@ defmodule Ezagent.CapabilityTest do
           behavior: :any,
           instance: {:spawned_by, orchestrator_b},
           workspace_uri: URI.new!("workspace://default"),
-          granted_by: URI.parse("entity://user/default/admin"),
+          granted_by: URI.parse("entity://user/system/admin"),
           granted_at: ~U[2026-05-18 00:00:00Z]
         )
 
@@ -482,7 +482,7 @@ defmodule Ezagent.CapabilityTest do
           behavior: :any,
           instance: {:within_session, session_uri},
           workspace_uri: URI.new!("workspace://default"),
-          granted_by: URI.parse("entity://user/default/admin"),
+          granted_by: URI.parse("entity://user/system/admin"),
           granted_at: ~U[2026-05-18 00:00:00Z]
         )
 

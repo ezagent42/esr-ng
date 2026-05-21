@@ -4,7 +4,7 @@ defmodule Ezagent.Routing.MatcherTest do
   alias Ezagent.Message
 
   defp msg(opts \\ []) do
-    sender = Keyword.get(opts, :sender, URI.new!("entity://user/default/admin"))
+    sender = Keyword.get(opts, :sender, URI.new!("entity://user/system/admin"))
     mentions = Keyword.get(opts, :mentions, [])
     text = Keyword.get(opts, :text, "hello world")
     Message.new(sender, %{text: text, attachments: []}, mentions: mentions)
@@ -50,7 +50,7 @@ defmodule Ezagent.Routing.MatcherTest do
     test "handles body with string keys (loaded from store)" do
       # Simulate body returned from Ecto :map column (string keys)
       m = %Message{
-        sender: URI.new!("entity://user/default/admin"),
+        sender: URI.new!("entity://user/system/admin"),
         body: %{"text" => "abc"},
         mentions: [],
         inserted_at: DateTime.utc_now(),
@@ -84,7 +84,7 @@ defmodule Ezagent.Routing.MatcherTest do
   describe "to_json/1 + from_json/1 round-trip" do
     test "all 5 matchers round-trip cleanly" do
       cases = [
-        Matcher.mention("entity://user/default/admin"),
+        Matcher.mention("entity://user/system/admin"),
         Matcher.from("entity://agent/default/test_cc-builder"),
         Matcher.text_contains("hi"),
         Matcher.text_matches("^cmd"),

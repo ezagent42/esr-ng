@@ -39,16 +39,19 @@ defmodule EzagentCore.Invariants.EntitiesHaveWorkspaceTest do
     end
 
     test "accepts 3-segment entity URI" do
-      uri = Ezagent.URI.parse!("entity://user/default/admin")
+      # Phase 9 PR-8: use a default-workspace user (NOT admin which
+      # moved to workspace://system) so this test still pins the
+      # "default workspace segment in path" invariant.
+      uri = Ezagent.URI.parse!("entity://user/default/allen")
       assert uri.scheme == "entity"
       assert uri.host == "user"
-      assert uri.path == "/default/admin"
+      assert uri.path == "/default/allen"
     end
   end
 
   describe "Ezagent.URI.entity_workspace_uri/1 — SPEC v3 §3.3" do
     test "extracts workspace URI from default-workspace user entity" do
-      uri = Ezagent.URI.parse!("entity://user/default/admin")
+      uri = Ezagent.URI.parse!("entity://user/default/allen")
       assert Ezagent.URI.entity_workspace_uri(uri) == URI.new!("workspace://default")
     end
 
@@ -57,8 +60,13 @@ defmodule EzagentCore.Invariants.EntitiesHaveWorkspaceTest do
       assert Ezagent.URI.entity_workspace_uri(uri) == URI.new!("workspace://team-alpha")
     end
 
+    test "extracts workspace://system URI from admin entity (Phase 9 PR-8)" do
+      uri = Ezagent.URI.parse!("entity://user/system/admin")
+      assert Ezagent.URI.entity_workspace_uri(uri) == URI.new!("workspace://system")
+    end
+
     test "ignores query string when extracting workspace" do
-      uri = Ezagent.URI.parse!("entity://user/default/admin?action=identity.list_caps")
+      uri = Ezagent.URI.parse!("entity://user/default/allen?action=identity.list_caps")
       assert Ezagent.URI.entity_workspace_uri(uri) == URI.new!("workspace://default")
     end
   end

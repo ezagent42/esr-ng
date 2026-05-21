@@ -74,7 +74,7 @@ defmodule EzagentPluginLiveview.RoutingLiveTest do
         "type" => "and",
         "items" => [
           %{"type" => "mention", "arg" => "entity://agent/default/test_lv-combo"},
-          %{"type" => "from", "arg" => "entity://user/default/admin"}
+          %{"type" => "from", "arg" => "entity://user/system/admin"}
         ]
       })
 

@@ -13,15 +13,25 @@ defmodule EzagentWeb.SessionPrincipalTest do
 
   describe "canonicalize/1" do
     test "full entity URIs pass through unchanged" do
-      assert SessionPrincipal.canonicalize("entity://user/default/admin") == "entity://user/default/admin"
+      assert SessionPrincipal.canonicalize("entity://user/system/admin") == "entity://user/system/admin"
       assert SessionPrincipal.canonicalize("entity://agent/default/echo_default") == "entity://agent/default/echo_default"
     end
 
-    test "bare handle is normalized to entity://user/<handle> (lowercased)" do
+    test "bare handle is normalized to entity://user/<workspace>/<handle> (lowercased)" do
+      # Phase 9 PR-8: bare handle still defaults to workspace "default"
+      # (no automatic admin → system mapping). To log in as admin, the
+      # user must POST the full URI or use /login?workspace=system.
       assert SessionPrincipal.canonicalize("admin") == "entity://user/default/admin"
       assert SessionPrincipal.canonicalize("ADMIN") == "entity://user/default/admin"
       assert SessionPrincipal.canonicalize("  allen  ") == "entity://user/default/allen"
       assert SessionPrincipal.canonicalize("user_123") == "entity://user/default/user_123"
+    end
+
+    test "bare handle with workspace: \"system\" canonicalizes to system workspace" do
+      # Phase 9 PR-8 (SPEC v3 §13): admin's only login path is via
+      # /login?workspace=system with the bare handle "admin".
+      assert SessionPrincipal.canonicalize("admin", workspace: "system") ==
+               "entity://user/system/admin"
     end
 
     test "raises ArgumentError on inputs that don't yield a valid entity URI" do
@@ -61,6 +71,8 @@ defmodule EzagentWeb.SessionPrincipalTest do
         |> Plug.Test.init_test_session(%{})
         |> SessionPrincipal.put("admin")
 
+      # Phase 9 PR-8: bare "admin" → default workspace (no automatic
+      # promotion to system). Admin login uses workspace=system opt.
       assert Plug.Conn.get_session(conn, :current_entity_uri) == "entity://user/default/admin"
     end
 
@@ -101,6 +113,8 @@ defmodule EzagentWeb.SessionPrincipalTest do
         |> Plug.Test.init_test_session(%{})
         |> SessionPrincipal.put("admin")
 
+      # Phase 9 PR-8: bare-handle default workspace stays "default";
+      # admin promotion happens via explicit workspace: "system" opt.
       assert Plug.Conn.get_session(conn, :current_entity_uri) ==
                "entity://user/default/admin"
 
@@ -144,17 +158,18 @@ defmodule EzagentWeb.SessionPrincipalTest do
 
     test "put/3 with workspace opt is ignored for full entity:// URIs" do
       # Full URI already carries its workspace — opts[:workspace] does
-      # not get to override the explicit segment.
+      # not get to override the explicit segment. Admin's full URI
+      # `entity://user/system/admin` derives `workspace://system`.
       conn =
         Plug.Test.conn(:get, "/")
         |> Plug.Test.init_test_session(%{})
-        |> SessionPrincipal.put("entity://user/default/admin", workspace: "team-alpha")
+        |> SessionPrincipal.put("entity://user/system/admin", workspace: "team-alpha")
 
       assert Plug.Conn.get_session(conn, :current_entity_uri) ==
-               "entity://user/default/admin"
+               "entity://user/system/admin"
 
       assert Plug.Conn.get_session(conn, :current_workspace_uri) ==
-               "workspace://default"
+               "workspace://system"
     end
 
     # SPEC v3 §6.4 amended — `clear/1` is shared by /logout AND
@@ -215,9 +230,13 @@ defmodule EzagentWeb.SessionPrincipalTest do
     # Phase 9 PR-5 (SPEC v3 §6.5) — extension of the above. The
     # workspace slot has its own invariant: it MUST equal
     # `entity_workspace_uri(:current_entity_uri)`, enforced at the
-    # SessionPrincipal write site. Any direct `put_session(_,
-    # :current_workspace_uri, _)` elsewhere bypasses that
-    # derivation and is forbidden.
+    # SessionPrincipal write site for regular users.
+    #
+    # Phase 9 PR-8 (SPEC v3 §13.2) — relaxed for system members. The
+    # `EzagentWeb.WorkspaceSwitchController` swaps `:current_workspace_uri`
+    # without rotating `:current_entity_uri` so a system admin can
+    # "Operate on workspace <x>" without re-auth. This is the SECOND
+    # sanctioned writer and is explicitly allowed below.
     test "no direct put_session(:current_workspace_uri, _) outside SessionPrincipal" do
       app_dir = Path.expand("../../../../", __DIR__)
 
@@ -239,7 +258,9 @@ defmodule EzagentWeb.SessionPrincipalTest do
         |> String.split("\n", trim: true)
         |> Enum.reject(fn line ->
           String.contains?(line, "session_principal") or
-            String.contains?(line, "test/")
+            String.contains?(line, "test/") or
+            # Phase 9 PR-8 (SPEC v3 §13.2) — system-member context-swap path.
+            String.contains?(line, "workspace_switch_controller")
         end)
 
       assert violations == [],
@@ -247,7 +268,9 @@ defmodule EzagentWeb.SessionPrincipalTest do
                Enum.join(violations, "\n") <>
                "\n\nFunnel all auth paths through EzagentWeb.SessionPrincipal.put/2 — " <>
                "it derives :current_workspace_uri from :current_entity_uri so the " <>
-               "two slots can never diverge. SPEC v3 §6.5 invariant."
+               "two slots can never diverge. SPEC v3 §6.5 invariant. The only " <>
+               "exception is `workspace_switch_controller.ex` per SPEC §13.2 " <>
+               "(system-member context-swap)."
     end
   end
 end

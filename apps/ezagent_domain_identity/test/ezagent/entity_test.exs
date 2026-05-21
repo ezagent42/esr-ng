@@ -13,7 +13,7 @@ defmodule Ezagent.EntityTest do
   - anything else → `{:error, {:unsupported_entity_uri, uri}}`
 
   These tests assume PR #141 has merged (entity:// scheme registered;
-  admin URI is `entity://user/default/admin`).
+  admin URI is `entity://user/system/admin`).
   """
   use EzagentCore.DataCase, async: false
 
@@ -47,10 +47,10 @@ defmodule Ezagent.EntityTest do
       assert {:error, :no_such_user} = Entity.authenticate(uri, "anything")
     end
 
-    test "admin (canonical entity://user/default/admin) + admin password works" do
+    test "admin (canonical entity://user/system/admin) + admin password works" do
       # Reseed sets admin's password to a known value via mix task —
       # this test mints fresh here to avoid coupling.
-      admin_uri_str = "entity://user/default/admin"
+      admin_uri_str = "entity://user/system/admin"
 
       case Users.get_by_uri(admin_uri_str) do
         nil -> {:ok, _} = Users.create(admin_uri_str, "test-admin-pw", [])

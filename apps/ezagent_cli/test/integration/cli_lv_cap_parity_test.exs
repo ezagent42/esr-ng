@@ -73,7 +73,7 @@ defmodule EzagentCli.Integration.CliLvCapParityTest do
       instance: :any,
       # Phase 9 PR-3 (SPEC v3 §4): explicit workspace scope.
       workspace_uri: URI.new!("workspace://default"),
-      granted_by: URI.parse("entity://user/default/admin"),
+      granted_by: URI.parse("entity://user/system/admin"),
       granted_at: ~U[2026-05-18 00:00:00Z]
     }
 
@@ -115,6 +115,6 @@ defmodule EzagentCli.Integration.CliLvCapParityTest do
              c.kind == :any and c.behavior == :any and c.instance == :any
            end),
            "non-admin agent resolved to admin wildcard cap via token — " <>
-             "auth elevation bug; only entity://user/default/admin should hold this cap"
+             "auth elevation bug; only entity://user/system/admin should hold this cap"
   end
 end

@@ -77,7 +77,7 @@ defmodule EzagentPluginLiveview.EntitiesLive do
     # Phase 8 阶段 C: wrap in IdeShell.
     assigns =
       assign_new(assigns, :current_entity_uri_str, fn ->
-        URI.to_string(assigns.current_entity_uri || URI.parse("entity://user/default/admin"))
+        URI.to_string(assigns.current_entity_uri || URI.parse("entity://user/system/admin"))
       end)
 
     ~H"""

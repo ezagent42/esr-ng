@@ -17,7 +17,7 @@ defmodule Ezagent.AuditTest do
       %{duration_us: 123},
       %{
         target: target,
-        caller: URI.parse("entity://user/default/admin"),
+        caller: URI.parse("entity://user/system/admin"),
         action: :test,
         kind_module: Foo,
         behavior_module: Bar,
@@ -37,7 +37,7 @@ defmodule Ezagent.AuditTest do
     :telemetry.execute(
       [:ezagent, :invoke, :error],
       %{duration_us: 7},
-      %{target: target, caller: URI.parse("entity://user/default/admin"), reason: :test_failure}
+      %{target: target, caller: URI.parse("entity://user/system/admin"), reason: :test_failure}
     )
 
     assert_receive {:audit_event, event}, 500

@@ -104,13 +104,13 @@ defmodule EzagentCore.Invariants.DemoSmokeTest do
       assert length(instances) > 0,
              """
              EzagentDomainUi.AutoDerive.list_instances(:user) returned []
-             but entity://user/default/admin should be live in the registry. Check
+             but entity://user/system/admin should be live in the registry. Check
              the state-field accessors (:kind vs :kind_module,
              :state vs :slices) in apps/ezagent_domain_ui/lib/.../auto_derive.ex.
              """
 
       uris = Enum.map(instances, &URI.to_string(&1.uri))
-      assert "entity://user/default/admin" in uris
+      assert "entity://user/system/admin" in uris
     end
 
     test "list_instances(:session) finds session://default/default/main" do
@@ -119,9 +119,9 @@ defmodule EzagentCore.Invariants.DemoSmokeTest do
       assert "session://default/default/main" in uris
     end
 
-    test "instance_detail/1 returns a populated map for entity://user/default/admin" do
+    test "instance_detail/1 returns a populated map for entity://user/system/admin" do
       {:ok, detail} =
-        EzagentDomainUi.AutoDerive.instance_detail(URI.parse("entity://user/default/admin"))
+        EzagentDomainUi.AutoDerive.instance_detail(URI.parse("entity://user/system/admin"))
 
       assert detail.kind_module == "Ezagent.Entity.User"
       assert is_map(detail.slices)

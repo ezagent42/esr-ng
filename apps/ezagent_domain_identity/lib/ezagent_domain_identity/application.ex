@@ -20,11 +20,11 @@ defmodule EzagentDomainIdentity.Application do
 
   ## Phase 8c PR-M — admin user creation goes through standard API
 
-  Allen 2026-05-20: previously, `entity://user/default/admin` was eagerly spawned
+  Allen 2026-05-20: previously, `entity://user/system/admin` was eagerly spawned
   as a static supervisor child via `kind_server_spec/4`, bypassing the
   same `Ezagent.Users.create/3` API every other user uses (and the
   `mix ezagent.user.create` task uses). The admin had no row in the
-  `users` table, breaking `mix ezagent.user.set_password entity://user/default/admin`
+  `users` table, breaking `mix ezagent.user.set_password entity://user/system/admin`
   on fresh DBs.
 
   PR-M removes the static child; the admin User Kind now spawns lazily

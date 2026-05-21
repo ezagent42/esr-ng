@@ -17,7 +17,7 @@ defmodule Ezagent.Capability do
     on construction — `@enforce_keys` rejects pre-PR-3 4-field caps
     at compile time so no silent drops can slip past.
 
-  `revoke/2` is admin-protected per Decision #81: `entity://user/default/admin`'s
+  `revoke/2` is admin-protected per Decision #81: `entity://user/system/admin`'s
   all-caps capability (`%Ezagent.Capability{kind: :any, behavior: :any,
   instance: :any, workspace_uri: :any, ...}` granted_by
   `system://bootstrap/default`) is a structural invariant and cannot
@@ -145,7 +145,7 @@ defmodule Ezagent.Capability do
   @doc """
   Remove a capability from a MapSet of caps.
 
-  Refuses to remove the admin all-caps invariant — `entity://user/default/admin`'s
+  Refuses to remove the admin all-caps invariant — `entity://user/system/admin`'s
   quadruple-`:any` capability granted_by `system://bootstrap/default`
   is structural per Decision #81 + SPEC v3 §4.4 and would break the
   bootstrap principal.
@@ -177,22 +177,57 @@ defmodule Ezagent.Capability do
   def admin_invariant?(%__MODULE__{}), do: false
 
   @doc """
-  Is `cap` a cross-workspace cap?
+  Is `cap` a cross-workspace cap (arity-1, structural form)?
 
   Phase 9 PR-4 (SPEC v3 §5.1) — returns true when the cap's
-  `workspace_uri` is `:any`, marking it as authorized across any
-  workspace. The structural admin invariant cap is the canonical
-  example; a non-admin cross-workspace cap (narrowed `kind` /
-  `behavior` / `instance`) keeps `workspace_uri: :any` and is the
-  same predicate.
+  `workspace_uri` is `:any`. Retained for back-compat with
+  call-sites that don't have a caller URI in hand (e.g. some test
+  fixtures and the `to_map/1` serialization sanity check).
 
-  Used by `Ezagent.Kind.Runtime` step 5.6 to decide whether to
-  override workspace isolation when caller and target are in
-  different workspaces.
+  New code should prefer `cross_workspace?/2` which also honors the
+  membership-based bypass per SPEC v3 §13.3.
   """
   @spec cross_workspace?(t()) :: boolean()
   def cross_workspace?(%__MODULE__{workspace_uri: :any}), do: true
   def cross_workspace?(%__MODULE__{}), do: false
+
+  @doc """
+  Is `cap` a cross-workspace cap OR is the caller a member of
+  `workspace://system`?
+
+  Phase 9 PR-8 (SPEC v3 §13.3) — Keycloak realm-admin model. ANY
+  cap held by a `workspace://system` member is treated as
+  cross-workspace by membership (not by explicit `:any` grant on
+  the cap itself). Regular users still need a `workspace_uri: :any`
+  cap to dispatch across workspaces — only system-workspace
+  membership grants the structural bypass.
+
+  Used by `Ezagent.Kind.Runtime` step 5.6 to decide whether to
+  override workspace isolation when caller and target differ.
+  """
+  @spec cross_workspace?(t(), URI.t() | :system | nil) :: boolean()
+  def cross_workspace?(%__MODULE__{workspace_uri: :any}, _caller_uri), do: true
+
+  def cross_workspace?(%__MODULE__{}, %URI{} = caller_uri) do
+    case workspace_of_caller_safe(caller_uri) do
+      %URI{} = workspace -> URI.to_string(workspace) == "workspace://system"
+      _ -> false
+    end
+  end
+
+  # `:system` (atom) caller + `nil` caller paths: degraded — cannot
+  # derive a workspace, so no membership-based bypass. The runtime's
+  # step 5.6 has its own `:system` short-circuit before calling here,
+  # so this branch fires only for unusual callers (test fixtures).
+  def cross_workspace?(%__MODULE__{}, _), do: false
+
+  defp workspace_of_caller_safe(%URI{} = uri) do
+    try do
+      workspace_of(uri)
+    rescue
+      _ -> :any
+    end
+  end
 
   @doc """
   Derive the workspace scope of a target URI.

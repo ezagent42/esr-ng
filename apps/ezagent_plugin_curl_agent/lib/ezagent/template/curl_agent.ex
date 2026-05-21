@@ -160,13 +160,13 @@ defmodule Ezagent.PluginCurlAgent.Template do
 
   defp parse_int(_, default), do: default
 
-  defp parse_owner_uri(nil), do: URI.parse("entity://user/default/admin")
-  defp parse_owner_uri(""), do: URI.parse("entity://user/default/admin")
+  defp parse_owner_uri(nil), do: URI.parse("entity://user/system/admin")
+  defp parse_owner_uri(""), do: URI.parse("entity://user/system/admin")
 
   defp parse_owner_uri(s) when is_binary(s) do
     case URI.new(s) do
       {:ok, %URI{scheme: "entity", host: "user"} = u} -> u
-      _ -> URI.parse("entity://user/default/admin")
+      _ -> URI.parse("entity://user/system/admin")
     end
   end
 
@@ -222,7 +222,7 @@ defmodule Ezagent.PluginCurlAgent.Template do
         type: :uri,
         label: "Owner user URI (whose api_key gets used)",
         required: false,
-        placeholder: "entity://user/default/admin"
+        placeholder: "entity://user/system/admin"
       }
     ]
   end
