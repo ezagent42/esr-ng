@@ -10,6 +10,8 @@ defmodule EzagentPluginLiveview.ProfileLive do
   input; submit upserts via `Ezagent.Entity.Profile.upsert/1`.
   """
   use Phoenix.LiveView
+  # i18n V1 (Allen 2026-05-21) — see admin_dashboard_live for rationale.
+  use Gettext, backend: EzagentWeb.Gettext
   alias EzagentDomainUi.IdeShell
   use EzagentDomainUi.Components
   use EzagentDomainUi.Primitives
@@ -95,7 +97,7 @@ defmodule EzagentPluginLiveview.ProfileLive do
     >
       <:main_window>
         <div class="flex-1 overflow-auto px-6 py-6 max-w-3xl">
-          <.page_header title="Profile">
+          <.page_header title={gettext("Profile")}>
             <:subtitle>Your entity URI and access summary.</:subtitle>
           </.page_header>
 

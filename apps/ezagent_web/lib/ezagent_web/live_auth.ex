@@ -48,7 +48,40 @@ defmodule EzagentWeb.LiveAuth do
   import Phoenix.Component, only: [assign: 3]
   import Phoenix.LiveView, only: [redirect: 2]
 
-  def on_mount(:require_entity, _params, session, socket) do
+  @doc """
+  LiveView on_mount hook that propagates the per-request Gettext locale
+  (set by `EzagentWeb.Plugs.Locale`) into the LiveView's BEAM process.
+
+  Reason: the websocket process is separate from the HTTP request
+  process; `Gettext.put_locale/2` is process-dictionary state and does
+  NOT propagate across processes. Without this hook, LV templates fall
+  back to the Gettext default (English) even when the dead-render was
+  translated.
+
+  Attach via `live_session :foo, on_mount: [{EzagentWeb.LiveAuth, :put_locale}, ...]`.
+  """
+  def on_mount(:put_locale, _params, session, socket) do
+    locale = session["locale"] || "en"
+
+    if locale in EzagentWeb.Plugs.Locale.supported_locales() do
+      Gettext.put_locale(EzagentWeb.Gettext, locale)
+    else
+      Gettext.put_locale(EzagentWeb.Gettext, EzagentWeb.Plugs.Locale.default_locale())
+    end
+
+    {:cont, assign(socket, :current_locale, Gettext.get_locale(EzagentWeb.Gettext))}
+  end
+
+  def on_mount(:require_entity, params, session, socket) do
+    # Locale must be set on the LV process too — chain to :put_locale
+    # first so any redirect message (e.g. "Please sign in") + every
+    # subsequent render uses the user's chosen locale.
+    {:cont, socket} = on_mount(:put_locale, params, session, socket)
+
+    require_entity_mount(session, socket)
+  end
+
+  defp require_entity_mount(session, socket) do
     case session["current_entity_uri"] do
       nil ->
         {:halt, redirect(socket, to: "/login")}

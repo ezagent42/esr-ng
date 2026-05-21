@@ -39,6 +39,11 @@ defmodule EzagentPluginLiveview.MixProject do
       # compile cycle. The plugin uses Phoenix.LiveView directly.
       {:phoenix_live_view, ">= 0.0.0"},
       {:phoenix_html, "~> 4.1"},
+      # i18n V1 (Allen 2026-05-21): LV pages call `gettext(...)` against
+      # the host `EzagentWeb.Gettext` backend (runtime module reference;
+      # no compile-time dep on :ezagent_web). The :gettext lib provides
+      # the macro surface used by `use Gettext, backend: ...`.
+      {:gettext, "~> 0.26"},
       {:jason, "~> 1.2"},
       # Phase 2: the /admin LV displays Session membership (online/
       # offline) sourced from `Ezagent.Behavior.Chat`. Same shape as the

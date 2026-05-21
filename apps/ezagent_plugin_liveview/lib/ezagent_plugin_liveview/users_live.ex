@@ -14,6 +14,8 @@ defmodule EzagentPluginLiveview.UsersLive do
   """
 
   use Phoenix.LiveView
+  # i18n V1 (Allen 2026-05-21) — see admin_dashboard_live for rationale.
+  use Gettext, backend: EzagentWeb.Gettext
   import Phoenix.Component
 
   @impl true
@@ -229,7 +231,7 @@ defmodule EzagentPluginLiveview.UsersLive do
     >
       <:main_window>
         <div class="flex-1 overflow-auto px-6 py-6">
-          <.page_header title="Users">
+          <.page_header title={gettext("Users")}>
             <:subtitle>Provisioned principals (independent of User Kind snapshot per Q-MU-2).</:subtitle>
           </.page_header>
 

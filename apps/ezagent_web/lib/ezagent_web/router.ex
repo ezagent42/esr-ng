@@ -4,6 +4,13 @@ defmodule EzagentWeb.Router do
   pipeline :browser do
     plug :accepts, ["html"]
     plug :fetch_session
+    # i18n V1 (Allen 2026-05-21): resolves Gettext locale from query
+    # string → session → Accept-Language → default "en". Persists the
+    # choice in the session so subsequent requests stay translated.
+    # Must run AFTER :fetch_session (reads + writes session) and
+    # BEFORE the controller/LiveView pipeline (so dead-render sees
+    # the locale).
+    plug EzagentWeb.Plugs.Locale
     plug :fetch_live_flash
     plug :put_root_layout, html: {EzagentWeb.Layouts, :root}
     plug :protect_from_forgery
@@ -17,7 +24,11 @@ defmodule EzagentWeb.Router do
   scope "/", EzagentWeb do
     pipe_through :browser
 
-    live "/", HomeLive
+    # i18n V1: public LV needs the locale hook too so the WS process
+    # inherits the session locale.
+    live_session :public, on_mount: {EzagentWeb.LiveAuth, :put_locale} do
+      live "/", HomeLive
+    end
 
     # Phase 4-completion Spec 05 §A.2.3 — controller-rendered login.
     get "/login", SessionController, :new
