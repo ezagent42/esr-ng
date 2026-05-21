@@ -1,5 +1,9 @@
 import Config
 
+# Show debug info in the branded 500 error page when it renders (in dev,
+# Plug.Debugger usually catches first; this controls the fallback case).
+config :ezagent_web, :show_error_debug, true
+
 # Configure your database
 #
 # Path follows the same env-var logic as `Ezagent.Home` (which lives in

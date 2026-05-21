@@ -34,6 +34,10 @@ config :ezagent_web, EzagentWeb.Endpoint,
 # Print only warnings and errors during test
 config :logger, level: :warning
 
+# Test env: keep error page debug section hidden so tests can assert
+# clean "Something went wrong" without internal details.
+config :ezagent_web, :show_error_debug, false
+
 # Initialize plugs at runtime for faster test compilation
 config :phoenix, :plug_init_mode, :runtime
 
