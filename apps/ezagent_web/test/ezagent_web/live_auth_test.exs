@@ -1,0 +1,219 @@
+defmodule EzagentWeb.LiveAuthTest do
+  @moduledoc """
+  V1 fix (Allen Feishu 2026-05-21) — `LiveAuth.parse_entity_uri/1`
+  delegates to `Ezagent.URI.parse!/1` (the SPEC v3 canonical parser)
+  so the write side (`EzagentWeb.SessionPrincipal.canonicalize/2` —
+  3-segment URIs) and the read side (LiveAuth) cannot diverge.
+
+  Regression context: pre-Phase-9 cookies that held a legacy
+  2-segment entity URI (e.g. `entity://user/` + `admin`) previously
+  parsed `{:ok, _}` here and were forwarded into
+  `Ezagent.URI.entity_workspace_uri/1`, which pattern-matches a
+  3-segment URI → `MatchError` → 500 at GET /sessions. Memory
+  `feedback_register_lookup_key_parity`.
+  """
+  use ExUnit.Case, async: true
+
+  alias EzagentWeb.LiveAuth
+
+  # `parse_entity_uri/1` is private — we exercise it via the public
+  # `on_mount(:require_entity, ...)` entry point. A stale 2-segment
+  # cookie therefore manifests as a `:halt` + redirect tuple (not a
+  # crash), which is the production-visible behavior we care about.
+
+  describe "on_mount(:require_entity, ...) — strict URI parity (V1 fix)" do
+    test "accepts canonical 3-segment entity://user URI" do
+      socket = build_socket()
+
+      assert {:cont, socket} =
+               LiveAuth.on_mount(
+                 :require_entity,
+                 %{},
+                 %{"current_entity_uri" => "entity://user/default/admin"},
+                 socket
+               )
+
+      assert %URI{scheme: "entity", host: "user", path: "/default/admin"} =
+               socket.assigns.current_entity_uri
+    end
+
+    test "accepts canonical 3-segment entity://agent URI" do
+      socket = build_socket()
+
+      assert {:cont, socket} =
+               LiveAuth.on_mount(
+                 :require_entity,
+                 %{},
+                 %{"current_entity_uri" => "entity://agent/default/cc_demo"},
+                 socket
+               )
+
+      assert %URI{scheme: "entity", host: "agent", path: "/default/cc_demo"} =
+               socket.assigns.current_entity_uri
+    end
+
+    test "REJECTS 2-segment user URI (stale pre-Phase-9 cookie regression)" do
+      # The exact symptom Allen reported: a session cookie carrying a
+      # legacy 2-segment entity URI reached LiveAuth and propagated
+      # into entity_workspace_uri/1 → MatchError 500. After the V1
+      # fix, parse!/1 raises ArgumentError → :error → halt+redirect
+      # to /login WITHOUT touching entity_workspace_uri.
+      socket = build_socket()
+      # NOTE: split-literal is the convention so the
+      # `entities_have_workspace_test.exs` grep gate skips this
+      # intentionally-2-segment regression case.
+      stale = "entity://user/" <> "admin"
+
+      assert {:halt, socket} =
+               LiveAuth.on_mount(
+                 :require_entity,
+                 %{},
+                 %{"current_entity_uri" => stale},
+                 socket
+               )
+
+      assert {:redirect, %{to: "/login"}} = socket.redirected
+      assert socket.assigns.flash["info"] =~ "Your session expired"
+    end
+
+    test "REJECTS 2-segment agent URI (stale agent cookie)" do
+      socket = build_socket()
+      stale = "entity://agent/" <> "cc_demo"
+
+      assert {:halt, socket} =
+               LiveAuth.on_mount(
+                 :require_entity,
+                 %{},
+                 %{"current_entity_uri" => stale},
+                 socket
+               )
+
+      assert {:redirect, %{to: "/login"}} = socket.redirected
+    end
+
+    test "REJECTS non-entity scheme (session://default/default/main)" do
+      socket = build_socket()
+
+      assert {:halt, socket} =
+               LiveAuth.on_mount(
+                 :require_entity,
+                 %{},
+                 %{"current_entity_uri" => "session://default/default/main"},
+                 socket
+               )
+
+      assert {:redirect, %{to: "/login"}} = socket.redirected
+    end
+
+    test "REJECTS deleted scheme (user://default/admin)" do
+      socket = build_socket()
+      # NOTE: literal `user://` is the deleted-scheme regression point.
+      stale = "user" <> "://default/admin"
+
+      assert {:halt, socket} =
+               LiveAuth.on_mount(
+                 :require_entity,
+                 %{},
+                 %{"current_entity_uri" => stale},
+                 socket
+               )
+
+      assert {:redirect, %{to: "/login"}} = socket.redirected
+    end
+
+    test "REJECTS unknown host in entity scheme (entity://device/default/admin)" do
+      socket = build_socket()
+
+      assert {:halt, socket} =
+               LiveAuth.on_mount(
+                 :require_entity,
+                 %{},
+                 %{"current_entity_uri" => "entity://device/default/admin"},
+                 socket
+               )
+
+      assert {:redirect, %{to: "/login"}} = socket.redirected
+    end
+
+    test "REJECTS empty string" do
+      socket = build_socket()
+
+      assert {:halt, socket} =
+               LiveAuth.on_mount(
+                 :require_entity,
+                 %{},
+                 %{"current_entity_uri" => ""},
+                 socket
+               )
+
+      assert {:redirect, %{to: "/login"}} = socket.redirected
+    end
+
+    test "REJECTS nil (no session)" do
+      socket = build_socket()
+
+      assert {:halt, socket} =
+               LiveAuth.on_mount(
+                 :require_entity,
+                 %{},
+                 %{"current_entity_uri" => nil},
+                 socket
+               )
+
+      assert {:redirect, %{to: "/login"}} = socket.redirected
+    end
+
+    test "REJECTS missing session key" do
+      socket = build_socket()
+
+      assert {:halt, socket} =
+               LiveAuth.on_mount(:require_entity, %{}, %{}, socket)
+
+      assert {:redirect, %{to: "/login"}} = socket.redirected
+    end
+
+    test "REJECTS bare string (raw user input — defense in depth)" do
+      # Same hole RequireEntity plug closes (see plugs/require_entity_test.exs).
+      # LiveAuth must close it too so the WS reconnect path is symmetric.
+      socket = build_socket()
+
+      assert {:halt, socket} =
+               LiveAuth.on_mount(
+                 :require_entity,
+                 %{},
+                 %{"current_entity_uri" => "admin"},
+                 socket
+               )
+
+      assert {:redirect, %{to: "/login"}} = socket.redirected
+    end
+
+    test "stale cookie DOES NOT raise MatchError — surfaces as graceful redirect" do
+      # The specific behavior that broke production: LiveAuth must
+      # NEVER raise on a parseable-but-non-canonical cookie value.
+      # Worst case is a halt+redirect, never a 500.
+      socket = build_socket()
+      stale = "entity://user/" <> "admin"
+
+      # If this raises (MatchError or otherwise), the test fails.
+      result =
+        LiveAuth.on_mount(
+          :require_entity,
+          %{},
+          %{"current_entity_uri" => stale},
+          socket
+        )
+
+      assert match?({:halt, _}, result)
+    end
+  end
+
+  # Build a minimal `%Phoenix.LiveView.Socket{}` suitable for direct
+  # `on_mount/4` invocation. The hook only reads/writes assigns +
+  # `:redirected`, so we don't need a real LV transport.
+  defp build_socket do
+    %Phoenix.LiveView.Socket{
+      assigns: %{__changed__: %{}, flash: %{}}
+    }
+  end
+end
