@@ -69,15 +69,59 @@ defmodule EzagentWeb.Mailer do
   end
 
   # Map the stored smtp_config map into Swoosh.Adapters.SMTP options.
+  #
+  # TLS configuration (Allen Feishu 2026-05-21): Erlang OTP 27/28 enforces
+  # stricter TLS defaults than OTP 26. Without explicit `:tls_options`,
+  # the SMTP TLS handshake fails with `:tls_failed` against many real
+  # providers (Feishu Lark, Gmail, etc.) because:
+  #   - Default cipher list excludes some server-required suites
+  #   - Default `verify: :verify_peer` requires the system CA bundle
+  #     to be loaded explicitly via `:public_key.cacerts_get/0`
+  #   - Default versions list may not include the server's preferred TLS
+  #
+  # The block below is the Phoenix 1.8 + OTP 27/28 standard for SMTP+TLS.
+  # Port semantics:
+  #   - 465 → implicit SSL (set `ssl: true`, `tls: :never`)
+  #   - 587 → STARTTLS (set `ssl: false`, `tls: :always`) — most common
+  #   - 25  → plaintext (set `ssl: false`, `tls: :never`)
   defp smtp_runtime_config(cfg) do
-    [
-      relay: Map.fetch!(cfg, "host"),
-      port: to_int(Map.fetch!(cfg, "port")),
+    port = to_int(Map.fetch!(cfg, "port"))
+    host = Map.fetch!(cfg, "host")
+    use_implicit_ssl = port == 465
+
+    base = [
+      relay: host,
+      port: port,
       username: Map.fetch!(cfg, "username"),
       password: Map.fetch!(cfg, "password"),
       auth: :always,
-      tls: if(Map.get(cfg, "tls", true), do: :always, else: :never),
-      ssl: false
+      tls_options: tls_options(host)
+    ]
+
+    if use_implicit_ssl do
+      base ++ [ssl: true, tls: :never]
+    else
+      # STARTTLS (587 or other non-465 ports with tls=true)
+      tls_mode = if Map.get(cfg, "tls", true), do: :always, else: :never
+      base ++ [ssl: false, tls: tls_mode]
+    end
+  end
+
+  # OTP 27/28-compatible TLS options for SMTP. Loads the system CA bundle,
+  # enforces SNI (Server Name Indication — required by many providers
+  # including Feishu Lark), and restricts to modern TLS versions.
+  defp tls_options(host) do
+    [
+      verify: :verify_peer,
+      cacerts: :public_key.cacerts_get(),
+      server_name_indication: String.to_charlist(host),
+      depth: 3,
+      versions: [:"tlsv1.2", :"tlsv1.3"],
+      # Customize_hostname_check is needed when the SMTP server's cert
+      # CN doesn't exactly match the hostname (e.g., wildcards).
+      customize_hostname_check: [
+        match_fun: :public_key.pkix_verify_hostname_match_fun(:https)
+      ]
     ]
   end
 
