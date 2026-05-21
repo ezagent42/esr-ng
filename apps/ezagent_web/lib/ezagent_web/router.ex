@@ -77,6 +77,11 @@ defmodule EzagentWeb.Router do
       live "/admin/logs", ObservabilityLive
       live "/admin/registry", EntitiesLive
       live "/admin/snapshots", SnapshotsLive
+      # V1 fix (Allen Feishu 2026-05-21 17:44): /settings moved here
+      # from top-level. The page hosts admin-only config (SMTP +
+      # registration domains); belongs under /admin (admin scope),
+      # not the avatar Preference dropdown (personal scope).
+      live "/admin/settings", SettingsLive
 
       # Workspaces Activity.
       live "/workspaces", WorkspacesLive
@@ -115,9 +120,9 @@ defmodule EzagentWeb.Router do
       live "/plugins/auto/:kind", AutoDeriveLive
       live "/plugins/auto/:kind/:uri", AutoDeriveLive
 
-      # Top-level Profile + Settings (reached via avatar dropdown).
+      # Top-level Profile (reached via avatar dropdown — personal
+      # config). Settings moved to /admin/settings above (admin scope).
       live "/profile", ProfileLive
-      live "/settings", SettingsLive
     end
   end
 

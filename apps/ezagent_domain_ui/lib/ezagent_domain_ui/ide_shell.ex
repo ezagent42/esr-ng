@@ -308,7 +308,9 @@ defmodule EzagentDomainUi.IdeShell do
       String.starts_with?(path, "/plugins") -> :plugins
       String.starts_with?(path, "/admin") -> nil
       String.starts_with?(path, "/profile") -> :sessions
-      String.starts_with?(path, "/settings") -> :sessions
+      # V1 fix (Allen Feishu 2026-05-21 17:44): /settings was migrated
+      # to /admin/settings — that branch is caught by the /admin clause
+      # above (no Activity highlight, drawer perspective).
       true -> :sessions
     end
   end
@@ -691,17 +693,13 @@ defmodule EzagentDomainUi.IdeShell do
           >
             Profile
           </a>
-          <%!-- Phase 8c follow-up (Allen 2026-05-20) — renamed
-                "Settings" to "Preferences" to disambiguate from
-                "Admin Settings" below. Preferences = personal
-                config (theme, keyboard, account); Admin =
-                system-level sysadmin pages. --%>
-          <a
-            href="/settings"
-            class="block px-3 py-1.5 text-xs text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800"
-          >
-            Preferences
-          </a>
+          <%!-- V1 fix (Allen Feishu 2026-05-21 17:44) — the former
+                "Preferences" link (→ /settings) was REMOVED. Its
+                target page hosted admin-only config (SMTP +
+                registration domains), so it was migrated to
+                /admin/settings and lives in the admin drawer
+                (AdminSettingsShell sidebar) below. Personal-config
+                settings (display name + avatar) stay on /profile. --%>
           <%!-- Phase 8c PR-F (Allen 2026-05-20) — Admin link opens the
                 AdminSettingsShell drawer (system layer of the 3-layer
                 architecture). Gated on `Ezagent.Identity.admin?/1`;
