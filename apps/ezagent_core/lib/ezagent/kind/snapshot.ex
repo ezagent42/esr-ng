@@ -164,6 +164,14 @@ defmodule Ezagent.Kind.Snapshot do
   @doc """
   Synchronous write — used by `:on_change`, `:on_terminate`, and the
   Writer's flush path. Logs + emits `:failed` telemetry on error.
+
+  Phase 9 PR-6 (SPEC v3 §7) — derives `workspace_uri` for the
+  snapshot row from the Kind URI. For cross-cutting URIs (`system://`,
+  `template://`, `resource://`) which return `:any` from the
+  derivation helper, falls back to the default workspace
+  (`Ezagent.WorkspaceRegistry.default_workspace_uri/0`) so the
+  NOT NULL column can be satisfied — these snapshots are pre-tenant
+  scope by design (they own no workspace-specific data).
   """
   @spec save_now(URI.t() | String.t(), module(), %{atom() => map()}) :: :ok
   def save_now(uri, kind_module, state) do
@@ -171,8 +179,9 @@ defmodule Ezagent.Kind.Snapshot do
     kind_type_str = Atom.to_string(kind_module.type_name())
     version = snapshot_version_of(kind_module)
     binary = :erlang.term_to_binary(state)
+    workspace_uri_str = derive_workspace_uri(uri)
 
-    case KindSnapshot.upsert(uri_str, kind_type_str, binary, version) do
+    case KindSnapshot.upsert(uri_str, kind_type_str, binary, version, workspace_uri_str) do
       {:ok, _row} ->
         :telemetry.execute(
           [:ezagent, :persistence, :written],
@@ -193,6 +202,22 @@ defmodule Ezagent.Kind.Snapshot do
 
         _ = err
         :ok
+    end
+  end
+
+  # Phase 9 PR-6 — derive workspace string for snapshot row. Cross-cutting
+  # schemes fall back to the default workspace to satisfy NOT NULL; they
+  # own no per-tenant data so any non-null choice is structurally correct.
+  defp derive_workspace_uri(uri) do
+    parsed =
+      case uri do
+        %URI{} = u -> u
+        s when is_binary(s) -> URI.parse(s)
+      end
+
+    case Ezagent.Persistence.workspace_uri_for(parsed) do
+      {:ok, ws} -> ws
+      {:error, :no_workspace} -> Ezagent.Persistence.default_workspace_uri()
     end
   end
 

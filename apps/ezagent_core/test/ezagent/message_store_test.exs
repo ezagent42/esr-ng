@@ -22,6 +22,20 @@ defmodule Ezagent.MessageStoreTest do
   setup do
     :ok = Ecto.Adapters.SQL.Sandbox.checkout(Repo)
     Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+    # Phase 9 PR-6 (SPEC v3 §7) — MessageStore.write/2 derives
+    # workspace_uri via WorkspaceRegistry.lookup/1 on session_uri.
+    # Bind both test sessions to the default workspace so writes
+    # don't crash on "no workspace binding".
+    default_ws = URI.new!("workspace://default")
+    :ok = Ezagent.WorkspaceRegistry.bind(@session_a, default_ws)
+    :ok = Ezagent.WorkspaceRegistry.bind(@session_b, default_ws)
+
+    on_exit(fn ->
+      Ezagent.WorkspaceRegistry.unbind(@session_a)
+      Ezagent.WorkspaceRegistry.unbind(@session_b)
+    end)
+
     :ok
   end
 

@@ -185,7 +185,16 @@ defmodule EzagentDomainChat.Integration.WorkspaceIsolationTest do
              "regression in pre-PR-31 behavior (workspace_uri scoping broke global rules)"
   end
 
-  test "unbound session (no WorkspaceRegistry entry) falls back to global semantics" do
+  test "unbound session — Phase 9 PR-6 makes invariant 4 strict (no silent fallback)" do
+    # Pre-Phase-9 behavior: unbound session → workspace_uri nil → rules
+    # with workspace_uri=nil still fired (global scope), the dispatch
+    # silently succeeded. Phase 9 PR-6 (SPEC v3 §7) introduces NOT NULL
+    # `messages.workspace_uri` AND every read/write derives via
+    # `Ezagent.Persistence.workspace_uri_for!/1` which RAISES on
+    # unbound sessions. Invariant 4 (Ezagent-developer skill /
+    # `sessions_have_workspace_test`) becomes strictly enforced:
+    # creating a session without binding is now a structural bug, not
+    # a graceful-degrade edge case.
     ctx = setup_scenario()
 
     suffix = unique("unbound")
@@ -193,26 +202,31 @@ defmodule EzagentDomainChat.Integration.WorkspaceIsolationTest do
     {:ok, _} = Ezagent.SpawnRegistry.spawn(session_unbound)
     # deliberately NO WorkspaceRegistry.bind for this session
 
-    {:ok, _} =
-      RuleStore.add(
-        ctx.table,
-        Matcher.always(),
-        [URI.to_string(ctx.eavesdropper)],
-        URI.to_string(User.admin_uri()),
-        workspace_uri: nil
-      )
-
-    :ok = RuleStore.load_into_registry(ctx.table)
-
+    # The dispatch path crashes inside Chat.invoke(:send) when
+    # MessageStore.write/2 → Persistence.workspace_uri_for!/1 raises.
+    # Because dispatch runs inside the Session Kind's GenServer, the
+    # error surfaces as either a process exit or an `{:error, _}`
+    # tuple depending on whether the call was wrapped — we accept
+    # either form here, since the load-bearing assertion is "no
+    # silent success."
     eavesdropper_before = length(receive_dispatches_to(ctx.eavesdropper))
 
-    _ = dispatch_send(session_unbound, ctx.sender, "from unbound session")
+    _ =
+      try do
+        dispatch_send(session_unbound, ctx.sender, "from unbound session")
+      catch
+        :exit, _ -> :ok
+      rescue
+        _ -> :ok
+      end
 
     eavesdropper_after = length(receive_dispatches_to(ctx.eavesdropper))
 
-    assert eavesdropper_after > eavesdropper_before,
-           "unbound session lookup raised an error that prevented dispatch — " <>
-             "WorkspaceRegistry.lookup :error must transparently fall back to nil scope " <>
-             "(preserves pre-PR-31 behavior for legacy snapshots)"
+    assert eavesdropper_after == eavesdropper_before,
+           "Phase 9 PR-6 invariant 4 strictness regression — an unbound session " <>
+             "must NOT deliver a message; per SPEC v3 §7 + workspace_uri NOT NULL " <>
+             "the write fails closed. If this assertion fails, either invariant 4 " <>
+             "got loosened or someone re-added a silent default workspace at the " <>
+             "MessageStore.write boundary."
   end
 end

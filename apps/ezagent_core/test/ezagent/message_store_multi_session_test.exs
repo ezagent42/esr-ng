@@ -13,6 +13,25 @@ defmodule Ezagent.MessageStoreMultiSessionTest do
   setup do
     :ok = Ecto.Adapters.SQL.Sandbox.checkout(Repo)
     Ecto.Adapters.SQL.Sandbox.mode(Repo, {:shared, self()})
+
+    # Phase 9 PR-6 — MessageStore.write/2 derives workspace via
+    # WorkspaceRegistry.lookup(session_uri). Bind every test session
+    # to default workspace.
+    default_ws = URI.new!("workspace://default")
+
+    sessions = [
+      URI.new!("session://main"),
+      URI.new!("session://oncall"),
+      URI.new!("session://A"),
+      URI.new!("session://B")
+    ]
+
+    for s <- sessions, do: :ok = Ezagent.WorkspaceRegistry.bind(s, default_ws)
+
+    on_exit(fn ->
+      for s <- sessions, do: Ezagent.WorkspaceRegistry.unbind(s)
+    end)
+
     :ok
   end
 

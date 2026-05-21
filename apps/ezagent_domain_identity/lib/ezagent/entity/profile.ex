@@ -21,6 +21,11 @@ defmodule Ezagent.Entity.Profile do
   schema "entity_profiles" do
     field(:display_name, :string)
     field(:email, :string)
+    # Phase 9 PR-6 (SPEC v3 §7) — per-tenant data isolation. NOT NULL;
+    # derived from `entity_uri` at upsert time. Profile rows for
+    # `entity://user/team-alpha/alice` are scoped to workspace://team-alpha
+    # — homonym entities in other workspaces have independent profiles.
+    field(:workspace_uri, :string)
     timestamps(type: :utc_datetime_usec)
   end
 
@@ -33,8 +38,8 @@ defmodule Ezagent.Entity.Profile do
     existing = Repo.get(__MODULE__, attrs.entity_uri) || %__MODULE__{}
 
     existing
-    |> cast(attrs, [:entity_uri, :display_name, :email])
-    |> validate_required([:entity_uri, :display_name])
+    |> cast(attrs, [:entity_uri, :display_name, :email, :workspace_uri])
+    |> validate_required([:entity_uri, :display_name, :workspace_uri])
     |> unique_constraint(:email, name: :entity_profiles_email_index)
     |> Repo.insert_or_update()
   end
@@ -62,6 +67,24 @@ defmodule Ezagent.Entity.Profile do
       case Map.get(m, :email) do
         e when is_binary(e) and e != "" -> Map.put(m, :email, String.downcase(String.trim(e)))
         _ -> Map.put(m, :email, nil)
+      end
+    end)
+    # Phase 9 PR-6 — derive workspace_uri from entity_uri if not
+    # already supplied. Tests / callers may pre-set it; the derivation
+    # is the canonical default for entity URIs.
+    |> then(fn m ->
+      case Map.get(m, :workspace_uri) do
+        nil ->
+          case Map.get(m, :entity_uri) do
+            uri when is_binary(uri) and uri != "" ->
+              Map.put(m, :workspace_uri, Ezagent.Persistence.workspace_uri_for!(uri))
+
+            _ ->
+              m
+          end
+
+        _already_set ->
+          m
       end
     end)
   end

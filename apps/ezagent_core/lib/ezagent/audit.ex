@@ -84,10 +84,13 @@ defmodule Ezagent.Audit do
   # the SQLite row uses the column shape required by the migrations.
 
   defp build_row([:ezagent, :invoke, :stop], %{duration_us: us}, meta) do
+    caller = uri_to_str(Map.get(meta, :caller))
+    target = uri_to_str(Map.get(meta, :target))
+
     %{
       trace_id: nil,
-      caller: uri_to_str(Map.get(meta, :caller)),
-      target: uri_to_str(Map.get(meta, :target)),
+      caller: caller,
+      target: target,
       action: stringify(Map.get(meta, :action)),
       args: nil,
       result: nil,
@@ -98,12 +101,18 @@ defmodule Ezagent.Audit do
       # because dispatch short-circuits with {:error, :unauthorized}.
       authz: "granted",
       exception: nil,
+      # Phase 9 PR-6 (SPEC v3 §7) — audit row is scoped to the caller's
+      # workspace (the "tenant on whose behalf the action ran") with
+      # fallback to target then default.
+      workspace_uri: derive_workspace(caller, target),
       inserted_at: DateTime.utc_now()
     }
   end
 
   defp build_row([:ezagent, :invoke, :error], %{duration_us: us}, meta) do
     reason = Map.get(meta, :reason)
+    caller = uri_to_str(Map.get(meta, :caller))
+    target = uri_to_str(Map.get(meta, :target))
 
     # Distinguish authz denied from other errors so the audit row's
     # authz column is meaningful for operators debugging permissions.
@@ -120,8 +129,8 @@ defmodule Ezagent.Audit do
 
     %{
       trace_id: nil,
-      caller: uri_to_str(Map.get(meta, :caller)),
-      target: uri_to_str(Map.get(meta, :target)),
+      caller: caller,
+      target: target,
       action: nil,
       args: nil,
       result: nil,
@@ -129,6 +138,7 @@ defmodule Ezagent.Audit do
       authz: authz,
       # JSON-encode for ecto_sqlite3 schemaless insert_all (see Ezagent.DLQ).
       exception: Jason.encode!(%{reason: inspect(reason)}),
+      workspace_uri: derive_workspace(caller, target),
       inserted_at: DateTime.utc_now()
     }
   end
@@ -136,16 +146,20 @@ defmodule Ezagent.Audit do
   # Phase 3d: :authz events also persist a row so the audit log shows
   # the granted/denied decision separately from invoke success/error.
   defp build_row([:ezagent, :authz, decision], _measurements, meta) do
+    caller = uri_to_str(Map.get(meta, :caller))
+    target = uri_to_str(Map.get(meta, :target))
+
     %{
       trace_id: nil,
-      caller: uri_to_str(Map.get(meta, :caller)),
-      target: uri_to_str(Map.get(meta, :target)),
+      caller: caller,
+      target: target,
       action: stringify(Map.get(meta, :action)),
       args: nil,
       result: nil,
       duration_us: 0,
       authz: Atom.to_string(decision),
       exception: nil,
+      workspace_uri: derive_workspace(caller, target),
       inserted_at: DateTime.utc_now()
     }
   end
@@ -154,10 +168,13 @@ defmodule Ezagent.Audit do
   # targeting a non-existent session). Persisted so admin can see why a
   # claude reply silently disappeared.
   defp build_row([:ezagent, :chat, :reply_dispatch_failed], _measurements, meta) do
+    agent = Map.get(meta, :agent)
+    target = "#{Map.get(meta, :target_session)}?action=chat.send"
+
     %{
       trace_id: nil,
-      caller: Map.get(meta, :agent),
-      target: "#{Map.get(meta, :target_session)}?action=chat.send",
+      caller: agent,
+      target: target,
       action: "send",
       args: nil,
       result: nil,
@@ -168,6 +185,7 @@ defmodule Ezagent.Audit do
           reason: inspect(Map.get(meta, :reason)),
           message_id: Map.get(meta, :message_id)
         }),
+      workspace_uri: derive_workspace(agent, target),
       inserted_at: DateTime.utc_now()
     }
   end
@@ -178,10 +196,12 @@ defmodule Ezagent.Audit do
   # (NOT NULL constraint on invocations.target).
   defp build_row([:ezagent, :persistence, phase], measurements, meta)
        when phase in [:restored, :written, :failed] do
+    target = Map.get(meta, :uri) || "snapshot://unknown"
+
     %{
       trace_id: nil,
       caller: nil,
-      target: Map.get(meta, :uri) || "snapshot://unknown",
+      target: target,
       action: "snapshot.#{phase}",
       args: nil,
       result:
@@ -199,6 +219,7 @@ defmodule Ezagent.Audit do
         else
           nil
         end,
+      workspace_uri: derive_workspace(nil, target),
       inserted_at: DateTime.utc_now()
     }
   end
@@ -206,18 +227,53 @@ defmodule Ezagent.Audit do
   # Phase 4-plus follow-up: CC bridge hook reports persist as audit
   # rows so an operator can grep history beyond the LV in-memory buffer.
   defp build_row([:ezagent, :cc_bridge, :event], _measurements, meta) do
+    bridge_id = Map.get(meta, :bridge_id, "unknown")
+
     %{
       trace_id: nil,
-      caller: "cc-bridge://#{Map.get(meta, :bridge_id, "unknown")}",
-      target: "cc-bridge://#{Map.get(meta, :bridge_id, "unknown")}/event",
+      caller: "cc-bridge://#{bridge_id}",
+      target: "cc-bridge://#{bridge_id}/event",
       action: "cc.#{Map.get(meta, :type, "event")}",
       args: nil,
       result: nil,
       duration_us: 0,
       authz: Map.get(meta, :level, "info"),
       exception: Map.get(meta, :text),
+      # cc-bridge:// is a synthetic identifier — workspace_uri is
+      # derived from the bridge's owning agent via a future indirection
+      # (out of scope for PR-6); for now we default to keep the audit
+      # log writable.
+      workspace_uri: Ezagent.Persistence.default_workspace_uri(),
       inserted_at: DateTime.utc_now()
     }
+  end
+
+  # Phase 9 PR-6 (SPEC v3 §7) — derive the workspace_uri for an audit
+  # row given the caller and target URI strings. Priority:
+  # 1. Caller's workspace (the principal on whose behalf the action ran)
+  # 2. Target's workspace
+  # 3. Default workspace (audit log must never have NULL workspace_uri)
+  #
+  # `caller` may be nil (system events have no human principal); `target`
+  # is always set per the build_row contract.
+  defp derive_workspace(caller, target) do
+    [caller, target]
+    |> Enum.reject(&is_nil/1)
+    |> Enum.find_value(fn uri ->
+      case Ezagent.Persistence.workspace_uri_for(uri) do
+        {:ok, ws} -> ws
+        {:error, :no_workspace} -> nil
+      end
+    end)
+    |> case do
+      nil -> Ezagent.Persistence.default_workspace_uri()
+      ws -> ws
+    end
+  rescue
+    # Any failure deriving (malformed URI, registry miss, etc.) →
+    # default workspace. The audit log is the catch-all observability
+    # surface — it must never be the cause of a write failure.
+    _ -> Ezagent.Persistence.default_workspace_uri()
   end
 
   defp serialise_metadata(meta) do

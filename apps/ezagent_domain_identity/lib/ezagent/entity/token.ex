@@ -46,6 +46,13 @@ defmodule Ezagent.Entity.Token do
     field(:label, :string)
     field(:expires_at, :utc_datetime_usec)
     field(:last_used_at, :utc_datetime_usec)
+    # Phase 9 PR-6 (SPEC v3 §7) — per-tenant data isolation. NOT NULL;
+    # derived from `entity_uri` at mint time (the 3-segment URI carries
+    # the workspace name as its first path segment). Token operations
+    # are scoped to the workspace the entity belongs to — a CLI token
+    # for `entity://user/team-alpha/alice` can only authenticate as
+    # alice in team-alpha, never the homonym in workspace://default.
+    field(:workspace_uri, :string)
     timestamps(type: :utc_datetime_usec)
   end
 
@@ -68,13 +75,17 @@ defmodule Ezagent.Entity.Token do
   def mint(%URI{scheme: "entity"} = uri, opts) do
     plain = generate_token()
     hash = Bcrypt.hash_pwd_salt(plain)
+    workspace_uri = Ezagent.Persistence.workspace_uri_for!(uri)
 
     %__MODULE__{}
     |> Ecto.Changeset.change(%{
       entity_uri: URI.to_string(uri),
       token_hash: hash,
       label: Keyword.get(opts, :label),
-      expires_at: Keyword.get(opts, :expires_at)
+      expires_at: Keyword.get(opts, :expires_at),
+      # Phase 9 PR-6 (SPEC v3 §7) — workspace_uri tracks the entity's
+      # tenant so SELECTs can scope by workspace at audit time.
+      workspace_uri: workspace_uri
     })
     |> Repo.insert!()
     |> then(&{plain, &1})
@@ -112,6 +123,12 @@ defmodule Ezagent.Entity.Token do
   List all (non-revoked) tokens for `entity_uri`, sorted by
   `inserted_at` descending. Does not include the plain token (it
   was returned once at mint time and is not recoverable).
+
+  **Workspace-scoped via URI key** (Phase 9 PR-6 / SPEC v3 §7.2) —
+  filters by `entity_uri` which is 3-segment workspace-bound; an
+  entity in workspace://default cannot leak its tokens to a
+  homonym in workspace://team-alpha. Same exemption pattern as
+  `Ezagent.EntityPresenter`.
   """
   @spec list(URI.t() | String.t()) :: [t()]
   def list(uri) do
