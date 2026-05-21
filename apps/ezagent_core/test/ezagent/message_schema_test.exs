@@ -36,7 +36,10 @@ defmodule Ezagent.MessageSchemaTest do
 
     # session_uri set at MessageStore.write boundary (caller-supplied);
     # for this test we set it directly.
-    msg_with_session = %{msg | session_uri: session}
+    # Phase 9 PR-6 — workspace_uri is NOT NULL; set inline for the direct
+    # `Repo.insert` test (MessageStore.write/2 derives it, but this is a
+    # raw schema round-trip test).
+    msg_with_session = %{msg | session_uri: session, workspace_uri: "workspace://default"}
 
     {:ok, _inserted} = Repo.insert(msg_with_session)
     loaded = Repo.get(Message, msg.id)
@@ -57,7 +60,7 @@ defmodule Ezagent.MessageSchemaTest do
     session = URI.new!("session://main")
 
     msg = Message.new(sender, %{text: "no mentions", attachments: []})
-    msg_with_session = %{msg | session_uri: session}
+    msg_with_session = %{msg | session_uri: session, workspace_uri: "workspace://default"}
 
     {:ok, _} = Repo.insert(msg_with_session)
     loaded = Repo.get(Message, msg.id)
@@ -70,7 +73,7 @@ defmodule Ezagent.MessageSchemaTest do
     session = URI.new!("session://main")
 
     msg = Message.new(sender, %{text: "no reply", attachments: []})
-    msg_with_session = %{msg | session_uri: session}
+    msg_with_session = %{msg | session_uri: session, workspace_uri: "workspace://default"}
 
     {:ok, _} = Repo.insert(msg_with_session)
     loaded = Repo.get(Message, msg.id)

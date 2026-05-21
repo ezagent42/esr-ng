@@ -25,6 +25,15 @@ defmodule Ezagent.Users do
     field(:uri, :string)
     field(:password_hash, :string)
     field(:caps_json, :string)
+    # Phase 9 PR-6 (SPEC v3 §7) — per-tenant data isolation. NOT NULL.
+    # Derived from `uri` at create-time (the 3-segment entity URI
+    # carries the workspace name as its first path segment). The
+    # serialized caps in `caps_json` inherit scope via this column —
+    # we do not split caps into a separate per-cap workspace column
+    # because every cap minted for a user is bounded by the user's
+    # workspace (admin's cross-workspace cap is the documented
+    # exception per SPEC §4.4, stored on admin's row).
+    field(:workspace_uri, :string)
     # PR #142: per-user `cli_token` field removed — bearer tokens now
     # live in `entity_tokens` (entity-agnostic, supports agents too).
     # See `Ezagent.Entity.Token`.
@@ -72,7 +81,10 @@ defmodule Ezagent.Users do
       |> Ecto.Changeset.change(%{
         uri: uri_str,
         password_hash: hash,
-        caps_json: encode_caps(final_caps)
+        caps_json: encode_caps(final_caps),
+        # Phase 9 PR-6 (SPEC v3 §7) — derive the workspace_uri column
+        # from the entity URI so SELECTs can scope by workspace.
+        workspace_uri: URI.to_string(user_workspace)
       })
       |> Ecto.Changeset.unique_constraint(:uri, name: :users_uri_index)
 
@@ -124,6 +136,15 @@ defmodule Ezagent.Users do
 
   # --- read paths ----------------------------------------------------
 
+  @doc """
+  Look up a user by full URI.
+
+  **System-scope read** — does not apply `Ezagent.Persistence.scope_by_workspace/2`
+  because the URI itself is already 3-segment (carries the workspace),
+  so the unique-on-`uri` index serves as the workspace partition. A
+  caller asking for `entity://user/team-alpha/alice` cannot
+  accidentally receive `entity://user/default/alice`.
+  """
   @spec get_by_uri(URI.t() | String.t()) :: decoded() | nil
   def get_by_uri(uri) do
     case Repo.get_by(__MODULE__, uri: uri_to_str(uri)) do
@@ -132,9 +153,32 @@ defmodule Ezagent.Users do
     end
   end
 
+  @doc """
+  List ALL users across all workspaces.
+
+  **System-scope read** — intentional cross-workspace listing for the
+  Application boot path (every User Kind is hydrated from this table
+  via `SpawnRegistry.spawn`) and the admin user management UI. Per
+  SPEC v3 §7.2 documented exception: bypasses `scope_by_workspace/2`
+  by design. Per-workspace listing is `list_in_workspace/1`.
+  """
   @spec list_all() :: [decoded()]
   def list_all do
     Repo.all(from(u in __MODULE__, order_by: u.uri))
+    |> Enum.map(&decode/1)
+  end
+
+  @doc """
+  List users scoped to a single workspace. Per SPEC v3 §7.2 — the
+  standard workspace-scoped read path. Use this for per-tenant admin
+  UI, NOT `list_all/0`.
+  """
+  @spec list_in_workspace(URI.t() | String.t()) :: [decoded()]
+  def list_in_workspace(workspace_uri) do
+    __MODULE__
+    |> Ezagent.Persistence.scope_by_workspace(workspace_uri)
+    |> order_by([u], u.uri)
+    |> Repo.all()
     |> Enum.map(&decode/1)
   end
 

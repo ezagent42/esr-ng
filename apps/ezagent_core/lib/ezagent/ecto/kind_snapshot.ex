@@ -27,6 +27,11 @@ defmodule Ezagent.Ecto.KindSnapshot do
     field :state_binary, :binary
     field :state, :map
     field :version, :integer, default: 0
+    # Phase 9 PR-6 (SPEC v3 §7) — per-tenant data isolation. NOT NULL at
+    # the DB layer; derived by `Ezagent.Kind.Snapshot.save_now/3` from
+    # the snapshotted Kind URI via `Ezagent.Persistence.workspace_uri_for!/1`.
+    # Stored as canonical `workspace://<name>` string.
+    field :workspace_uri, :string
     field :inserted_at, :utc_datetime_usec
     field :updated_at, :utc_datetime_usec
   end
@@ -40,6 +45,12 @@ defmodule Ezagent.Ecto.KindSnapshot do
   @doc """
   List all snapshot rows (for `/admin/snapshots` LV + `mix ezagent.snapshot.list`).
   Ordered by `updated_at` desc so most-recently-active Kinds appear first.
+
+  **System-scope read** — boot-time `ReadyGate` replays EVERY snapshot
+  via this listing so each Kind is hydrated regardless of workspace.
+  Per SPEC v3 §7.2 documented exception: bypasses
+  `scope_by_workspace/2` by design. Per-workspace listings should call
+  `list_in_workspace/1`.
   """
   @spec list_all() :: [%__MODULE__{}]
   def list_all do
@@ -48,13 +59,33 @@ defmodule Ezagent.Ecto.KindSnapshot do
   end
 
   @doc """
-  Upsert (insert or update) the snapshot for `uri_str`.
+  List snapshot rows scoped to a single workspace. Per SPEC v3 §7.2 —
+  the standard workspace-scoped read path. Use this for per-tenant
+  admin UI (e.g. workspace dashboard showing only that tenant's
+  Kinds), NOT `list_all/0`.
   """
-  @spec upsert(String.t(), String.t(), binary(), non_neg_integer()) ::
+  @spec list_in_workspace(URI.t() | String.t()) :: [%__MODULE__{}]
+  def list_in_workspace(workspace_uri) do
+    __MODULE__
+    |> Ezagent.Persistence.scope_by_workspace(workspace_uri)
+    |> order_by([s], desc: s.updated_at)
+    |> Repo.all()
+  end
+
+  @doc """
+  Upsert (insert or update) the snapshot for `uri_str`.
+
+  Phase 9 PR-6 (SPEC v3 §7) — `workspace_uri_str` is the canonical
+  `workspace://<name>` string the snapshot belongs to, derived by the
+  caller from the Kind URI (entity URI carries it as path segment;
+  session URI looked up via `WorkspaceRegistry`; workspace URI is
+  itself). The column is NOT NULL — caller MUST supply.
+  """
+  @spec upsert(String.t(), String.t(), binary(), non_neg_integer(), String.t()) ::
           {:ok, %__MODULE__{}} | {:error, term()}
-  def upsert(uri_str, kind_type_str, binary, version)
+  def upsert(uri_str, kind_type_str, binary, version, workspace_uri_str)
       when is_binary(uri_str) and is_binary(kind_type_str) and is_binary(binary) and
-             is_integer(version) do
+             is_integer(version) and is_binary(workspace_uri_str) do
     now = DateTime.utc_now()
 
     attrs = %{
@@ -63,6 +94,7 @@ defmodule Ezagent.Ecto.KindSnapshot do
       state_binary: binary,
       # Keep state as nil for new rows; legacy rows may have JSON
       version: version,
+      workspace_uri: workspace_uri_str,
       updated_at: now
     }
 

@@ -65,7 +65,18 @@ defmodule Ezagent.MessageStore do
   """
   @spec write(Message.t(), URI.t()) :: {:ok, Message.t()} | {:error, term()}
   def write(%Message{} = msg, %URI{} = session_uri) do
-    msg_with_session = Map.put(msg, :session_uri, session_uri)
+    # Phase 9 PR-6 (SPEC v3 §7) — derive the workspace from the session
+    # binding (invariant 4). `workspace_uri_for!/1` raises if the session
+    # is unbound, which means a Template Class skipped
+    # `WorkspaceRegistry.bind/2` after spawn — the proper fix is at the
+    # spawn site, not a silent default here.
+    workspace_uri_str = Ezagent.Persistence.workspace_uri_for!(session_uri)
+
+    msg_with_session =
+      msg
+      |> Map.put(:session_uri, session_uri)
+      |> Map.put(:workspace_uri, workspace_uri_str)
+
     now = msg.inserted_at || DateTime.utc_now()
 
     # Two-step write: messages (upsert) + message_routings (insert).
@@ -99,15 +110,24 @@ defmodule Ezagent.MessageStore do
   Ascending order. Used for rejoin replay.
 
   JOINs message_routings → messages. Bounded to `@replay_cap` rows.
+
+  Phase 9 PR-6 — adds explicit `workspace_uri` filter derived from the
+  session's binding (invariant 4). Defense in depth: the existing
+  `session_uri` filter already partitions, but this filter pins the
+  workspace dimension so an accidental session-uri collision across
+  workspaces can never leak.
   """
   @spec in_session_since(URI.t(), DateTime.t()) :: [Message.t()]
   def in_session_since(%URI{} = session_uri, %DateTime{} = since) do
     session_str = URI.to_string(session_uri)
+    workspace_str = Ezagent.Persistence.workspace_uri_for!(session_uri)
 
     from(m in Message,
       join: r in MessageRouting,
       on: r.message_id == m.id,
-      where: r.session_uri == ^session_str and r.inserted_at > ^since,
+      where:
+        r.session_uri == ^session_str and r.inserted_at > ^since and
+          m.workspace_uri == ^workspace_str,
       order_by: [asc: r.inserted_at],
       limit: @replay_cap
     )
@@ -118,15 +138,19 @@ defmodule Ezagent.MessageStore do
   N most-recent messages in `session_uri`, descending.
 
   JOINs message_routings → messages. Returns at most `limit`.
+
+  Phase 9 PR-6 — adds explicit `workspace_uri` filter (see
+  `in_session_since/2` moduledoc).
   """
   @spec recent_in_session(URI.t(), pos_integer()) :: [Message.t()]
   def recent_in_session(%URI{} = session_uri, limit) when is_integer(limit) and limit > 0 do
     session_str = URI.to_string(session_uri)
+    workspace_str = Ezagent.Persistence.workspace_uri_for!(session_uri)
 
     from(m in Message,
       join: r in MessageRouting,
       on: r.message_id == m.id,
-      where: r.session_uri == ^session_str,
+      where: r.session_uri == ^session_str and m.workspace_uri == ^workspace_str,
       order_by: [desc: r.inserted_at],
       limit: ^limit
     )
@@ -148,11 +172,14 @@ defmodule Ezagent.MessageStore do
   def older_than(%URI{} = session_uri, %DateTime{} = cursor, limit)
       when is_integer(limit) and limit > 0 do
     session_str = URI.to_string(session_uri)
+    workspace_str = Ezagent.Persistence.workspace_uri_for!(session_uri)
 
     from(m in Message,
       join: r in MessageRouting,
       on: r.message_id == m.id,
-      where: r.session_uri == ^session_str and r.inserted_at < ^cursor,
+      where:
+        r.session_uri == ^session_str and r.inserted_at < ^cursor and
+          m.workspace_uri == ^workspace_str,
       order_by: [desc: r.inserted_at],
       limit: ^limit
     )

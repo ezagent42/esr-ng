@@ -21,6 +21,16 @@ defmodule Ezagent.Behavior.ChatTest do
     :ok
   end
 
+  # Phase 9 PR-6 — `MessageStore.write/2` requires the session to be
+  # bound to a workspace via WorkspaceRegistry (invariant 4 + SPEC v3
+  # §7). Helper binds + queues teardown so tests calling Chat.invoke(:send)
+  # or :join don't hit the "no workspace binding" raise.
+  defp bind_to_default(session_uri) do
+    :ok = Ezagent.WorkspaceRegistry.bind(session_uri, URI.new!("workspace://default"))
+    on_exit(fn -> Ezagent.WorkspaceRegistry.unbind(session_uri) end)
+    :ok
+  end
+
   describe "Behavior contract surface" do
     test "actions/0 returns the 4 K-path actions" do
       assert Chat.actions() == [:send, :receive, :join, :leave]
@@ -43,6 +53,7 @@ defmodule Ezagent.Behavior.ChatTest do
   describe "invoke(:send, ...) routing (Phase 3c-step 1)" do
     test "with no routing rules → falls through to in-session members fan-out" do
       session_uri = URI.new!("session://chat-fallback-#{System.unique_integer([:positive])}")
+      bind_to_default(session_uri)
       sender = URI.new!("entity://user/default/admin")
       other_member = URI.new!("entity://user/default/other-#{System.unique_integer([:positive])}")
       msg = Message.new(sender, %{text: "no rules here", attachments: []})
@@ -79,6 +90,8 @@ defmodule Ezagent.Behavior.ChatTest do
 
       target_session = URI.new!("session://chat-routed-#{System.unique_integer([:positive])}")
       session_uri = URI.new!("session://current")
+      bind_to_default(session_uri)
+      bind_to_default(target_session)
       sender = URI.new!("entity://user/default/admin")
       msg = Message.new(sender, %{text: "urgent help", attachments: []})
 
@@ -106,6 +119,7 @@ defmodule Ezagent.Behavior.ChatTest do
   describe "invoke(:send, ...)" do
     test "writes to MessageStore + broadcasts on session events topic + returns {:ok, slice, %{stored: true}}" do
       session_uri = URI.new!("session://chat-test-#{System.unique_integer([:positive])}")
+      bind_to_default(session_uri)
       sender = URI.new!("entity://user/default/admin")
       msg = Message.new(sender, %{text: "hello world", attachments: []})
 
@@ -129,6 +143,7 @@ defmodule Ezagent.Behavior.ChatTest do
 
     test "fan-out :receive on members when no mentions" do
       session_uri = URI.new!("session://chat-fanout-#{System.unique_integer([:positive])}")
+      bind_to_default(session_uri)
       sender = URI.new!("entity://user/default/admin")
       member_2 = URI.new!("entity://agent/default/test_test-bot-#{System.unique_integer([:positive])}")
       msg = Message.new(sender, %{text: "everyone hi", attachments: []})
@@ -338,6 +353,7 @@ defmodule Ezagent.Behavior.ChatTest do
 
     test "replays missed messages on rejoin (last_seen populated)" do
       session_uri = URI.new!("session://replay-#{System.unique_integer([:positive])}")
+      bind_to_default(session_uri)
       member_uri = URI.new!("entity://user/default/rejoin-#{System.unique_integer([:positive])}")
       sender = URI.new!("entity://user/default/other")
 

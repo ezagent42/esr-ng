@@ -56,6 +56,7 @@ defmodule Ezagent.Message do
   @type t :: %__MODULE__{
           id: String.t(),
           session_uri: URI.t() | nil,
+          workspace_uri: String.t() | nil,
           sender: URI.t(),
           mentions: [URI.t()],
           body: body_shape(),
@@ -73,6 +74,11 @@ defmodule Ezagent.Message do
     # session_uri is routing metadata (not part of identity invariant per
     # §3.5); caller supplies at MessageStore.write/2 boundary.
     field :session_uri, Ezagent.Ecto.URI
+    # Phase 9 PR-6 (SPEC v3 §7) — per-tenant data isolation. NOT NULL at
+    # the DB layer; populated by `MessageStore.write/2` via
+    # `Ezagent.Persistence.workspace_uri_for!/1` on the session's URI.
+    # Stored as canonical `workspace://<name>` string.
+    field :workspace_uri, :string
     field :sender, Ezagent.Ecto.URI
     # mentions stored as JSON array of strings (each URI dumped via
     # Ezagent.Ecto.URI.dump → string). ecto_sqlite3 JSON-encodes arrays
