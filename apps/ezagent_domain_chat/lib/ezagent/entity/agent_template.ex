@@ -88,4 +88,10 @@ defmodule Ezagent.Entity.AgentTemplate do
 
   @impl Ezagent.Kind
   def persistence, do: {:snapshot, :on_change}
+
+  # V1 prevention (Allen 2026-05-21): AgentTemplate Kinds live under
+  # the chat domain's AgentTemplateSupervisor. `Ezagent.Kind.spawn/2`
+  # reads this.
+  @impl Ezagent.Kind
+  def supervisor, do: EzagentDomainChat.AgentTemplateSupervisor
 end

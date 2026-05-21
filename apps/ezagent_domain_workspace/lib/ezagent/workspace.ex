@@ -42,10 +42,10 @@ defmodule Ezagent.Workspace do
         {:error, {:already_started, pid}}
 
       :error ->
-        DynamicSupervisor.start_child(
-          Ezagent.Workspace.Supervisor,
-          {Ezagent.Kind.Server, {WK, Map.put(args, :uri, uri)}}
-        )
+        # V1 prevention (Allen 2026-05-21): route via Ezagent.Kind.spawn/2.
+        # Workspace Kind declares `Ezagent.Workspace.Supervisor` via its
+        # supervisor/0 callback so the destination is preserved.
+        Ezagent.Kind.spawn(WK, Map.put(args, :uri, uri))
     end
   end
 

@@ -110,11 +110,15 @@ defmodule Ezagent.Entity do
         # The spawn fn registered in EzagentDomainIdentity.Application
         # uses `MapSet.new()`, which is correct for "no row to hydrate
         # from" but wrong for our freshly-provisioned user.
-        DynamicSupervisor.start_child(
-          EzagentDomainIdentity.Application.UserSupervisor,
-          {Ezagent.Kind.Server,
-           {Ezagent.Entity.User, %{uri: uri, initial_caps: MapSet.new(caps_list)}}}
-        )
+        #
+        # V1 prevention (Allen 2026-05-21): route via Ezagent.Kind.spawn/2.
+        # User Kind's supervisor/0 callback points at
+        # `EzagentDomainIdentity.Application.UserSupervisor` so the
+        # destination is preserved without naming it here.
+        Ezagent.Kind.spawn(Ezagent.Entity.User, %{
+          uri: uri,
+          initial_caps: MapSet.new(caps_list)
+        })
         |> case do
           {:ok, _pid} -> :ok
           {:error, {:already_started, _pid}} -> :ok

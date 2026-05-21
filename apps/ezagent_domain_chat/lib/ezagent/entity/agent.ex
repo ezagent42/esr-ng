@@ -27,13 +27,16 @@ defmodule Ezagent.Entity.Agent do
   Both paths land at:
 
       Ezagent.SpawnRegistry.spawn(agent_uri)
-        → DynamicSupervisor.start_child(EzagentDomainChat.AgentSupervisor,
-            {Ezagent.Kind.Server, {Ezagent.Entity.Agent, %{uri: agent_uri}}})
+        → Ezagent.Kind.spawn(Ezagent.Entity.Agent, %{uri: agent_uri})
+
+  (V1 prevention, Allen 2026-05-21: `Ezagent.Kind.spawn/2` is the sole
+  entry; Agent declares `EzagentDomainChat.AgentSupervisor` via its
+  `supervisor/0` callback.)
 
   This is the realization of memory `feedback_north_star_plugin_isolation`:
   the Agent module knows nothing about bridges; the bridge plugin
-  knows nothing about Chat internals. The DynamicSupervisor +
-  Ezagent.Kind.Server are the only contact points, and they're both
+  knows nothing about Chat internals. `Ezagent.Kind.spawn/2` +
+  `Ezagent.Kind.Server` are the only contact points, and they're both
   `ezagent_core` machinery.
 
   ## URI shape (PR #141 SPEC v2)
@@ -64,6 +67,13 @@ defmodule Ezagent.Entity.Agent do
   # `:on_change` in Phase 5 once Agent caps see real promotion volume.
   @impl Ezagent.Kind
   def persistence, do: :on_terminate
+
+  # V1 prevention (Allen 2026-05-21): Agent Kinds (including Echo —
+  # chat's `spawn_agent/1` flavor-resolver routes echo here too) live
+  # under the chat domain's AgentSupervisor. `Ezagent.Kind.spawn/2`
+  # reads this.
+  @impl Ezagent.Kind
+  def supervisor, do: EzagentDomainChat.AgentSupervisor
 
   @doc """
   Phase 7 PR 40 — Spawn a worker agent from an AgentTemplate.

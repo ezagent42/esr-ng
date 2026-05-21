@@ -377,10 +377,11 @@ defmodule EzagentDomainChat.Application do
                 MapSet.new()
               end
 
-            DynamicSupervisor.start_child(
-              EzagentDomainIdentity.Application.UserSupervisor,
-              {Ezagent.Kind.Server, {User, %{uri: uri, initial_caps: initial_caps}}}
-            )
+            # V1 prevention (Allen 2026-05-21): route via Ezagent.Kind.spawn/2.
+            # User Kind's supervisor/0 callback resolves the destination
+            # (EzagentDomainIdentity.Application.UserSupervisor) — chat
+            # plugin no longer needs to name a sibling domain's supervisor.
+            Ezagent.Kind.spawn(User, %{uri: uri, initial_caps: initial_caps})
 
           "agent" ->
             spawn_agent(uri)
@@ -392,10 +393,8 @@ defmodule EzagentDomainChat.Application do
 
     :ok =
       Ezagent.SpawnRegistry.register("session", fn uri ->
-        DynamicSupervisor.start_child(
-          EzagentDomainChat.SessionSupervisor,
-          {Ezagent.Kind.Server, {Session, %{uri: uri}}}
-        )
+        # V1 prevention (Allen 2026-05-21): route via Ezagent.Kind.spawn/2.
+        Ezagent.Kind.spawn(Session, %{uri: uri})
       end)
 
     # Phase 7 PR 37: template:// scheme dispatches on host segment.
@@ -408,16 +407,12 @@ defmodule EzagentDomainChat.Application do
       Ezagent.SpawnRegistry.register("template", fn uri ->
         case uri.host do
           "agent" ->
-            DynamicSupervisor.start_child(
-              EzagentDomainChat.AgentTemplateSupervisor,
-              {Ezagent.Kind.Server, {AgentTemplate, %{uri: uri}}}
-            )
+            # V1 prevention (Allen 2026-05-21): route via Ezagent.Kind.spawn/2.
+            Ezagent.Kind.spawn(AgentTemplate, %{uri: uri})
 
           "session" ->
-            DynamicSupervisor.start_child(
-              EzagentDomainChat.SessionTemplateSupervisor,
-              {Ezagent.Kind.Server, {SessionTemplate, %{uri: uri}}}
-            )
+            # V1 prevention (Allen 2026-05-21): route via Ezagent.Kind.spawn/2.
+            Ezagent.Kind.spawn(SessionTemplate, %{uri: uri})
 
           other ->
             {:error, {:unknown_template_host, other}}
@@ -487,10 +482,12 @@ defmodule EzagentDomainChat.Application do
   defp spawn_agent(%URI{} = uri) do
     case lookup_kind_module_for_agent(uri) do
       {:ok, kind_module} ->
-        DynamicSupervisor.start_child(
-          EzagentDomainChat.AgentSupervisor,
-          {Ezagent.Kind.Server, {kind_module, %{uri: uri}}}
-        )
+        # V1 prevention (Allen 2026-05-21): route via Ezagent.Kind.spawn/2.
+        # Each agent Kind (Agent / CurlAgent / Echo) declares its own
+        # supervisor/0 callback; chat plugin no longer hardcodes
+        # `EzagentDomainChat.AgentSupervisor` (CurlAgent in particular
+        # has its own InstanceSupervisor under the curl_agent plugin).
+        Ezagent.Kind.spawn(kind_module, %{uri: uri})
 
       :error ->
         {:error, {:no_kind_module_for_agent, URI.to_string(uri)}}

@@ -63,6 +63,11 @@ defmodule Ezagent.Entity.Workspace do
   @impl Ezagent.Kind
   def uri_from_args(args), do: Map.fetch!(args, :uri)
 
+  # V1 prevention (Allen 2026-05-21): Workspace Kinds live under the
+  # workspace domain's supervisor. `Ezagent.Kind.spawn/2` reads this.
+  @impl Ezagent.Kind
+  def supervisor, do: Ezagent.Workspace.Supervisor
+
   @doc """
   Build a `workspace://<name>` URI from a short name.
 

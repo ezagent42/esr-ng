@@ -110,6 +110,12 @@ defmodule Ezagent.Entity.SessionTemplate do
   @impl Ezagent.Kind
   def persistence, do: {:snapshot, :on_change}
 
+  # V1 prevention (Allen 2026-05-21): SessionTemplate Kinds live under
+  # the chat domain's SessionTemplateSupervisor. `Ezagent.Kind.spawn/2`
+  # reads this.
+  @impl Ezagent.Kind
+  def supervisor, do: EzagentDomainChat.SessionTemplateSupervisor
+
   @doc """
   Compute the deterministic version hash for a slice content map.
 

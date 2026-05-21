@@ -56,6 +56,11 @@ defmodule Ezagent.Entity.Session do
   # is lost on restart, accepted in dev / acceptable for v1 demo.
   def persistence, do: :ephemeral
 
+  # V1 prevention (Allen 2026-05-21): Session Kinds live under the
+  # chat domain's SessionSupervisor. `Ezagent.Kind.spawn/2` reads this.
+  @impl Ezagent.Kind
+  def supervisor, do: EzagentDomainChat.SessionSupervisor
+
   @doc """
   URI of the default Session instance spawned at boot.
 
