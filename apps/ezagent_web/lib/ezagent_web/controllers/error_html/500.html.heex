@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <title>Something went wrong · ezagent</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+    />
+    <style>
+      /* Phase 8c boundary-page CSS — error pages don't load app.css
+         (cascading failure risk on 500 paths). Self-contained per
+         ezagent-developer skill UI Contract. Mirrors 404.html.heex
+         dark-mode + brand pattern. */
+      :root {
+        --font-sans: 'Geist', ui-sans-serif, system-ui, -apple-system, sans-serif;
+        --font-mono: 'JetBrains Mono', ui-monospace, Menlo, monospace;
+        --ink: #0a0a0a;
+        --ink-dim: #525252;
+        --ink-faint: #a3a3a3;
+        --line: #e5e5e5;
+        --accent: #ea580c;
+        --accent-hover: #c2410c;
+        --bg-top: #fafafa;
+        --bg-bottom: #ffffff;
+        --btn-bg: #ffffff;
+        --code-bg: #f5f5f5;
+      }
+      :root[data-theme="dark"] {
+        --ink: #fafafa;
+        --ink-dim: #a3a3a3;
+        --ink-faint: #525252;
+        --line: #27272a;
+        --accent: #f97316;
+        --accent-hover: #ea580c;
+        --bg-top: #09090b;
+        --bg-bottom: #18181b;
+        --btn-bg: #18181b;
+        --code-bg: #0a0a0a;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root:not([data-theme="light"]) {
+          --ink: #fafafa;
+          --ink-dim: #a3a3a3;
+          --ink-faint: #525252;
+          --line: #27272a;
+          --accent: #f97316;
+          --accent-hover: #ea580c;
+          --bg-top: #09090b;
+          --bg-bottom: #18181b;
+          --btn-bg: #18181b;
+          --code-bg: #0a0a0a;
+        }
+      }
+      * { box-sizing: border-box; }
+      html, body { margin: 0; padding: 0; }
+      body {
+        font-family: var(--font-sans);
+        background: linear-gradient(180deg, var(--bg-top) 0%, var(--bg-bottom) 100%);
+        color: var(--ink);
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 24px;
+      }
+      .container { max-width: 520px; width: 100%; }
+      .brand {
+        font-family: var(--font-mono);
+        font-size: 11px;
+        color: var(--ink-faint);
+        letter-spacing: 2px;
+        margin-bottom: 18px;
+      }
+      h1 {
+        font-size: 26px;
+        font-weight: 600;
+        margin: 0 0 12px;
+        letter-spacing: -0.01em;
+      }
+      .lead {
+        color: var(--ink-dim);
+        line-height: 1.6;
+        margin: 8px 0;
+        font-size: 14px;
+      }
+      .actions {
+        margin: 32px 0;
+        display: flex;
+        gap: 10px;
+        flex-wrap: wrap;
+      }
+      .btn {
+        padding: 9px 16px;
+        border-radius: 6px;
+        font-size: 13px;
+        font-weight: 500;
+        text-decoration: none;
+        display: inline-block;
+        transition: background 120ms, color 120ms, border-color 120ms;
+        border: 1px solid transparent;
+      }
+      .btn-primary {
+        background: var(--accent);
+        color: #fff;
+      }
+      .btn-primary:hover {
+        background: var(--accent-hover);
+      }
+      .btn-secondary {
+        background: var(--btn-bg);
+        color: var(--ink);
+        border-color: var(--line);
+      }
+      .btn-secondary:hover {
+        border-color: var(--ink-faint);
+      }
+      details {
+        margin-top: 32px;
+        padding: 12px 14px;
+        background: var(--btn-bg);
+        border: 1px solid var(--line);
+        border-radius: 6px;
+      }
+      details summary {
+        cursor: pointer;
+        font-size: 12px;
+        color: var(--ink-dim);
+        font-weight: 500;
+        font-family: var(--font-mono);
+        outline: none;
+        user-select: none;
+      }
+      details summary:hover { color: var(--ink); }
+      details pre {
+        font-family: var(--font-mono);
+        font-size: 11px;
+        overflow: auto;
+        margin: 12px 0 4px;
+        padding: 12px;
+        background: var(--code-bg);
+        border-radius: 4px;
+        color: var(--ink);
+        line-height: 1.5;
+        max-height: 320px;
+      }
+      .debug-label {
+        margin-top: 10px;
+        font-size: 11px;
+        color: var(--ink-faint);
+        font-family: var(--font-mono);
+        text-transform: uppercase;
+        letter-spacing: 1px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="brand">EZAGENT</div>
+      <h1>Something went wrong</h1>
+      <p class="lead">An unexpected error occurred while loading this page.</p>
+      <p class="lead">
+        You can try again, return to your sessions, or sign in again if your session expired.
+      </p>
+
+      <div class="actions">
+        <a href="/sessions" class="btn btn-primary">Go to sessions</a>
+        <a href="/login" class="btn btn-secondary">Sign in again</a>
+      </div>
+
+      <%= if EzagentWeb.ErrorHTML.show_debug?(@conn) do %>
+        <details open={EzagentWeb.ErrorHTML.debug_open?(@conn)}>
+          <summary>Debug info (visible because: {EzagentWeb.ErrorHTML.debug_reason(@conn)})</summary>
+          <%= if assigns[:reason] do %>
+            <div class="debug-label">Exception</div>
+            <pre>{inspect(@reason, pretty: true, limit: :infinity)}</pre>
+          <% end %>
+          <%= if assigns[:stack] do %>
+            <div class="debug-label">Stacktrace</div>
+            <pre>{Exception.format_stacktrace(@stack)}</pre>
+          <% end %>
+          <%= if assigns[:conn] do %>
+            <div class="debug-label">Request</div>
+            <pre>{@conn.method} {@conn.request_path}</pre>
+          <% end %>
+        </details>
+      <% end %>
+    </div>
+  </body>
+</html>
