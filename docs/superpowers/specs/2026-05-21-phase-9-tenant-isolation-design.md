@@ -48,14 +48,18 @@ architectural one.
 - **No `user://` / `agent://` URI revival.** SPEC v2 deletion stands.
 - **No back-compat shim for pre-Phase-9 URI shapes.** Wipe + rebuild
   per memory `feedback_let_it_crash_no_workarounds`.
-- **No session/template URI shape change.** Phase 9 touches `entity://`
-  only. Sessions stay bound via `WorkspaceRegistry`; unifying all
-  schemes to a single 3-segment shape is SPEC v4 / Phase 10.
-- **No "system-scoped" sentinel workspace.** Every entity lives in a
-  real workspace; system-wide privileges flow through caps, not URI.
-- **No multi-workspace membership.** A given entity URI belongs to
-  exactly one workspace. To act in two workspaces, create two
-  entities (or hold a cross-workspace cap from one).
+- ~~**No session/template URI shape change.** Phase 9 touches
+  `entity://` only.~~ **Amendment 2 (Allen 2026-05-21): URI scheme
+  unification IS in scope.** session/template/resource gain workspace
+  segment too (§3.6). Reason: without unification, workspace migration
+  is incomplete — sessions still need an out-of-band
+  `WorkspaceRegistry` lookup to determine workspace, contradicting
+  the "URI tells you everything" principle.
+- **No multi-workspace membership EVER** (Allen 2026-05-21
+  confirmed). Keycloak-realm model: an entity belongs to exactly
+  one workspace permanently. `workspace://system` members have
+  cross-workspace authority but are NOT members of those other
+  workspaces — they act ON them, not IN them. See §13.
 
 ## 3. URI shape — SPEC v3 (entity scheme only)
 
@@ -119,6 +123,54 @@ Used by:
   workspace memberships, message authorship, etc.) store the full
   3-segment string. No migration scripts that "split" old data —
   wipe + rebuild.
+
+### 3.6 URI scheme unification (Amendment 2 — Allen 2026-05-21)
+
+**Original SPEC scoped Phase 9 to entity scheme only.** Allen
+corrected: unification across `session://`, `template://`,
+`resource://` MUST happen in Phase 9. Otherwise sessions still
+require an out-of-band `WorkspaceRegistry` lookup to determine
+workspace — contradicting "URI tells you everything."
+
+New SPEC v3 shape for all per-tenant schemes:
+
+| Scheme | Today (v2) | Phase 9 (v3) |
+|--------|------------|--------------|
+| `entity://` | `entity://user/admin` | `entity://user/default/admin` |
+| `session://` | `session://default/main` | `session://default/default/main` (template/workspace/name) |
+| `template://` | `template://agent/cc-orch` | `template://agent/default/cc-orch` |
+| `resource://` | `resource://uploads/x` | `resource://uploads/default/x` |
+| `workspace://` | `workspace://default` | UNCHANGED (workspace is the tenant root) |
+| `system://` | `system://routing/default` | UNCHANGED (system is cross-cutting) |
+
+For `session://`:
+- The first path segment was previously the template name
+  (`default` in `session://default/main`). It stays as the template
+  name.
+- The new second segment is the workspace name.
+- The third segment is the session instance name.
+
+For `template://`:
+- The first path segment is the template type (`agent`, `session`).
+- The second is the workspace where the template lives.
+- The third is the template name.
+
+For `resource://`:
+- First segment is the resource kind (`uploads`, etc.).
+- Second is the workspace owning the resource.
+- Third is the resource instance.
+
+After unification:
+- `WorkspaceRegistry` is demoted from authoritative source to
+  consistency cache. New invariant test: every `WorkspaceRegistry`
+  binding equals the workspace segment of the bound session URI.
+- The dispatch step 5.6 `workspace_of/1` resolver becomes
+  purely structural — extracts workspace from URI string in O(1),
+  no ETS lookup. The `:cross_workspace_denied` error remains.
+- All entity creation paths (sessions, templates, resources)
+  require an explicit workspace argument; no implicit "default"
+  fallback at the data-layer boundary (only at the user-input
+  parsing boundary — see SessionPrincipal §6.2 for the analogy).
 
 ### 3.5 Why URI-carries-workspace (Option A) not ambient context (Option B)
 
@@ -666,11 +718,124 @@ After all 6 PRs land, the following must hold:
 - Workspace-level quotas (max sessions, max API keys, etc.).
 - Multi-workspace membership (a user appearing in two workspaces
   with one identity).
-- Unifying URI shape across all schemes (session://, template://,
-  resource:// also gain workspace segment) — SPEC v4.
+- ~~Unifying URI shape across all schemes — SPEC v4.~~
+  **PROMOTED TO IN-SCOPE (Amendment 2 — Allen 2026-05-21).**
+  See §3.6.
 - Workspace billing / usage reporting.
 
 ---
+
+## 13. System workspace + Keycloak-realm membership (Amendment 2)
+
+Allen 2026-05-21 invoked the Keycloak realm-admin model. Two
+structural changes from the original SPEC:
+
+### 13.1 `workspace://system` is a real workspace
+
+The bootstrap admin (`entity://user/system/admin`, NOT
+`entity://user/default/admin` as PR-2 seeded) lives in the
+`workspace://system` workspace. This workspace is created at boot
+alongside `workspace://default` and is structurally privileged:
+
+- `workspace://system` members hold the bootstrap admin cap
+  (`workspace_uri: :any`) by virtue of membership, not by explicit
+  per-cap grant.
+- `workspace://system` is NOT visible in the regular workspace
+  selector UI for non-system members (it's not "a workspace you
+  could be in").
+- Migration: existing `entity://user/default/admin` (from PR-2)
+  becomes `entity://user/system/admin`. Bootstrap seed updated.
+
+### 13.2 Workspace-switch UX divergence (system vs. regular)
+
+The §6.4 amendment (workspace switch = logout) applies to
+**regular users only**. For `workspace://system` members:
+
+- The "workspace selector" in the UI is renamed to
+  "Operate on workspace" (or 操作 workspace in Chinese).
+- Clicking another workspace does NOT log out — it updates
+  `:current_workspace_uri` to the target while keeping
+  `:current_entity_uri` as `entity://user/system/admin`.
+- `:current_workspace_uri` for a system member can be ANY
+  workspace; the §6.5 invariant
+  (`current_workspace_uri == entity_workspace_uri(current_entity_uri)`)
+  is **relaxed** for system members.
+- All UI surfaces show "Operating on `<workspace>` as
+  `system/admin`" so the system admin always knows which workspace
+  their actions affect.
+
+This matches Keycloak's master-realm admin model — they stay
+authenticated as themselves, but the "current realm" context
+switches as they navigate.
+
+### 13.3 Cap-loading flow
+
+Step 5.6 dispatch (`Capability.cross_workspace?/1`) is extended:
+
+```elixir
+def cross_workspace?(%Capability{workspace_uri: :any}), do: true
+def cross_workspace?(%Capability{} = cap, %URI{} = caller_uri) do
+  # Membership-based cross-workspace: caller is a member of
+  # workspace://system
+  caller_workspace = Ezagent.URI.entity_workspace_uri(caller_uri)
+  URI.to_string(caller_workspace) == "workspace://system"
+end
+```
+
+The dispatch step queries `cross_workspace?(cap, caller_uri)`
+instead of `cross_workspace?(cap)`. Existing tests preserved by
+arity overload.
+
+### 13.4 Bootstrap seed change
+
+`apps/ezagent_core/priv/repo/seeds/*` (or equivalent boot-time
+`Application.start/2` seeding):
+
+```elixir
+# Create system workspace first
+{:ok, _} = Ezagent.Workspace.create("system", %{visible: false})
+
+# Create default workspace
+{:ok, _} = Ezagent.Workspace.create("default", %{})
+
+# Create admin in system workspace (not default)
+{:ok, _} = Ezagent.Users.create("entity://user/system/admin", "<password>", [])
+```
+
+The `visible: false` field on workspaces is NEW — defaults to true;
+set to false for `workspace://system` so it doesn't appear in regular
+workspace dropdowns.
+
+### 13.5 Migration impact (relative to PR-2 already merged)
+
+- PR-2 seeded admin as `entity://user/default/admin`. Amendment 2
+  requires it to be `entity://user/system/admin`. PR-7 (URI
+  unification) will include this re-seeding as a wipe + rebuild
+  step.
+- Any cap grants `granted_by: entity://user/default/admin` need
+  re-keying. Because we're wipe-rebuilding, this is automatic.
+- LV `Ezagent.Identity.admin?/1` check stays — just compares
+  against `entity://user/system/admin` instead.
+
+## 14. PR sequence (Amendment 2 — supersedes §9)
+
+| # | Title | Status |
+|---|-------|--------|
+| 1 | SPEC + framing-doc updates | ✅ merged #158 |
+| 2 | URI v3 parser + entity migration (entity scheme only) | ✅ merged #159 |
+| 2.5 | SPEC amendment — workspace switch = logout | ✅ merged #160 |
+| 3 | Capability workspace dimension | ✅ merged #161 |
+| 4 | Cross-workspace dispatch enforcement | ✅ merged #162 |
+| 5 | Tenant-aware auth + workspace switcher | ✅ merged #163 |
+| 6 | Per-tenant data isolation columns | ✅ merged #164 |
+| 6.5 | Test pool size fix (root cause: dispatch concurrency) | ✅ merged #165 |
+| 6.6 | SPEC amendment 2 (this file's amendments) | ← in flight |
+| 7 | URI scheme unification (session/template/resource gain workspace) | pending |
+| 8 | System workspace + Keycloak-realm membership model | pending |
+| 9 | Demo recording (admin + cc + echo + routing) | pending |
+
+PR-7 is the biggest remaining change. After PR-8 lands, the
+amended Phase 9 closes.
 
 ## Implementation pointer
 
