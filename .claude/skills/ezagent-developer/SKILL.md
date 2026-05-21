@@ -102,20 +102,39 @@ When an inbound message from a human-facing transport (Feishu, future Slack/Disc
 
 SessionTemplate stores agent_slots + routing_rules + orchestrator_template_uri + workspace + parent_template_uri + version_hash. It does NOT store message history. Forking copies config only; instantiated sessions start with empty chat. Three-way merge of running sessions' working-copies is explicitly out of scope.
 
-### 11. **URI shape — 2-segment authority + query-string action + 6-scheme allowlist** (SPEC v2 §5.1, §5.2, §5.6 — PRs #140, #145, #146)
+### 11. **URI shape — 3-segment authority for per-tenant schemes + query-string action + 6-scheme allowlist** (SPEC v3 §5.15 — Phase 9 PRs #159, #167; SPEC v2 §5.1, §5.2, §5.6 — PRs #140, #145, #146)
 
-Every URI in the system follows ONE shape:
+**Updated by Phase 9 (SPEC v3).** Per-tenant URIs (entity/session/template/resource) are 3-segment authority. `workspace://` and `system://` stay 2-segment.
 
-    <scheme>://<type>/<name>[?action=<behavior>.<action>]
+**Per-tenant schemes** (3-segment):
 
+    <scheme>://<type>/<workspace>/<name>[?action=<behavior>.<action>]
+
+| Scheme | Shape | Example |
+|--------|-------|---------|
+| `entity://` | `entity://<user|agent>/<workspace>/<name>` | `entity://user/default/admin`, `entity://agent/team-alpha/cc_demo` |
+| `session://` | `session://<template>/<workspace>/<name>` | `session://default/default/main` |
+| `template://` | `template://<type>/<workspace>/<name>` | `template://agent/default/cc-orch` |
+| `resource://` | `resource://<type>/<workspace>/<name>` | `resource://uploads/default/file-abc` |
+
+**Workspace + system schemes** (2-segment, unchanged):
+
+| Scheme | Shape | Example |
+|--------|-------|---------|
+| `workspace://` | `workspace://<name>` | `workspace://default`, `workspace://system` |
+| `system://` | `system://<type>/<name>` | `system://routing/default`, `system://bootstrap/default` |
+
+**Rules**:
 - `<scheme>` is one of exactly six values: `entity, workspace, session, template, resource, system`. Enforced at parse time by `Ezagent.URI.SchemeRegistry` (PR #145). Plugin-owned top-level schemes are forbidden (§5.8); plugins extend existing schemes via type segment or register Behaviors on core Kinds.
-- `<type>` is the scheme's type axis (e.g. `entity://user/`, `entity://agent/`, `template://session/`, `template://agent/`, `workspace://default/`, `session://<template>/`, `resource://uploads/`, `system://routing/`).
-- `<name>` is the instance identity within `<scheme>/<type>`.
+- `<workspace>` MUST match `^[a-z][a-z0-9_-]*$` (workspace creation enforces; URI parser cross-checks).
 - Actions are query-string: `?action=chat.send`, `?action=routing.add_rule`, `?action=pty.write` (PR #146). The previous `/behavior/<kind>/<action>` path syntax is removed — no transitional shim.
+- 2-segment forms for per-tenant schemes (`entity://user/admin`, `session://default/main`) RAISE at parse time: `ArgumentError: <scheme> URI must include workspace segment` (Phase 9 PRs #159 + #167).
 
 Deleted schemes (do NOT reintroduce): `user://`, `agent://`, `message://`, `feishu://`, `routing-admin://`, `pty-input://`. They were merged or dissolved in PRs #141 (entity://), #143 (feishu plugin re-shape), #144 (synthetic singletons), #149 (Message.uri → Message.id).
 
-CI gate: `Ezagent.URI.parse!/1` test suite + `Ezagent.URI.SchemeRegistry` ETS lockdown rejects non-canonical URIs at parse time.
+**Helper for extracting workspace from any per-tenant URI**: `Ezagent.URI.entity_workspace_uri/1` (entity scheme) or `Ezagent.Capability.workspace_of/1` (any scheme; raises on per-tenant URI with bad shape).
+
+CI gates: `Ezagent.URI.parse!/1` test suite + `Ezagent.URI.SchemeRegistry` ETS lockdown; new Phase 9 invariants `entities_have_workspace_test.exs` + `all_per_tenant_uris_have_workspace_test.exs` reject 2-segment forms.
 
 ### 12. **Synthetic singletons are dissolved — Behaviors live on the actual scope-owning Kind** (SPEC v2 §5.7, PR #144)
 
@@ -124,6 +143,52 @@ There is no longer a singleton "admin" Kind for cross-cutting actions. Instead:
 - PTY input dispatches to the target agent: `entity://agent/cc_X?action=pty.write`.
 
 When adding a new "global" action, find the Kind whose scope the action naturally belongs to and add a Behavior there. Do NOT introduce a new `*-admin://default` singleton.
+
+### 13. **Cross-workspace dispatch requires structural authority** (SPEC v3 §5 + §13, Phase 9 PRs #162 + #169)
+
+Phase 9's dispatch step 5.6 (in `Ezagent.Kind.Runtime.handle_dispatch/4`, inserted between CapBAC step 5.5 and target-resolution) enforces workspace isolation. A dispatch is allowed when:
+1. **Intra-workspace**: caller workspace == target workspace, OR
+2. **System target**: target is `:any` workspace (template/system/resource schemes are cross-cutting), OR
+3. **System caller**: caller is `:system` (bootstrap operations), OR
+4. **Cross-workspace cap**: caller holds a cap with `workspace_uri: :any` (`Ezagent.Capability.cross_workspace?(cap)` returns true), OR
+5. **System workspace member**: caller's workspace is `workspace://system` (Keycloak realm-admin model — `Ezagent.Capability.cross_workspace?(cap, caller_uri)` arity-2)
+
+Otherwise: returns `{:error, :cross_workspace_denied}` (distinct error atom from `:unauthorized`).
+
+**Inbound transports MUST surface `:cross_workspace_denied` distinctly** (invariant 9). Feishu plugin uses `NO` reaction (vs `THUMBSDOWN` for `:unauthorized`); LV flash messages and CLI exit codes differ.
+
+**`workspace://system` is the structural sink for cross-workspace authority** (SPEC §13.1): it's a real workspace with `visible: false`. Its members hold cross-workspace authority by membership, not via explicit cap grant. The bootstrap admin (`entity://user/system/admin`) is the canonical system member.
+
+**Workspace switcher UX is permission-gated** (SPEC §6.4 amendment 3):
+- System members → context swap (no logout); `:current_workspace_uri` updates while `:current_entity_uri` stays
+- Regular users → denial page with "Sign in to <ws>" prompt; user explicitly chooses to logout + re-auth (no silent session loss)
+
+CI gates: `cross_workspace_isolation_test.exs` (PR-4) + `system_workspace_membership_test.exs` (PR-8). Gate-verified by temporarily disabling step 5.6 → 2/6 invariant tests fail.
+
+### 14. **Per-tenant DB tables MUST carry `workspace_uri` NOT NULL column** (SPEC v3 §7, Phase 9 PR #164)
+
+Every per-tenant table has a `workspace_uri TEXT NOT NULL` column (with index). Read paths scope via `Ezagent.Persistence.scope_by_workspace/2`. Write paths derive workspace from the entity URI's workspace segment (or session URI via WorkspaceRegistry — though that registry is now a consistency cache per §5.15).
+
+**Per-tenant tables** (6 physical tables; the SPEC §7.1 logical list of 8 collapsed because caps live in `users.caps_json` and sessions/agents/templates multiplex on `kind_snapshots`):
+
+- `messages` — message store
+- `invocations` — audit log
+- `users` — User Kind base
+- `kind_snapshots` — per-Kind on-change snapshots (sessions/agents/templates multiplexed)
+- `entity_tokens` — agent bearer tokens
+- `entity_profiles` — display name + avatar metadata
+
+**Exempt tables** (documented in migration + invariant test): `workspaces` (workspace IS tenant root), `routing_rules` (had `workspace_uri` since PR #146), `message_routings`, `dlq`, `app_settings`, `magic_link_tokens`, `feishu_user_bindings`, `feishu_session_bindings`.
+
+**Migration pattern for SQLite**: CREATE-NEW/INSERT-SELECT/DROP/RENAME (SQLite doesn't support ALTER COLUMN). See `phase9_pr6_workspace_uri_columns.exs` for the canonical template.
+
+**Read-path enforcement**: `Ezagent.Persistence.scope_by_workspace/2` wraps Ecto queryables. Audit any new query against per-tenant tables for the call — grep gate enforces.
+
+**Write-path enforcement**: Changeset `validate_required([:workspace_uri])` + grep gate against `Repo.insert(... %{workspace_uri: nil})` patterns.
+
+**System-scope reads** (admin listing all users across workspaces): intentional bypass; documented in function moduledoc + exemption list in `per_tenant_tables_have_workspace_column_test.exs`.
+
+CI gates: `per_tenant_tables_have_workspace_column_test.exs` + `no_nil_workspace_writes_test.exs` + `no_nil_workspace_writes_identity_test.exs`.
 
 ---
 

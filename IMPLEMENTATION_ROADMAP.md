@@ -484,6 +484,65 @@ Phase 7 是 Allen 亲手驱动的最后一个 phase + **Ezagent v1 official rele
 
 ---
 
+## 9d. Phase 9 — Workspace = deployment unit(2026-05-21 完成,14 PR)
+
+**1. 目标**(`docs/notes/workspace-as-deployment-unit.md` framing):workspace 从 Phase 8c 的"配置 bundle(70% 隔离)"升级到完整 deployment unit,关闭 4 个剩余 gap(entity URI / cap / dispatch / 数据列)+ 引入 Keycloak realm-admin 风格的 system workspace。
+
+**2. SPEC**(`docs/superpowers/specs/2026-05-21-phase-9-tenant-isolation-design.md`,双语 + 3 个 amendment):
+- §3 URI SPEC v3:`<scheme>://<type>/<workspace>/<name>` 强制 3-segment(entity + session + template + resource;workspace/system 不变)
+- §4 Capability 加 `workspace_uri` 维度(`@enforce_keys`,matcher 严格)
+- §5 Dispatch step 5.6 cross-workspace isolation
+- §6 Tenant-aware auth(`:current_workspace_uri` derived;workspace 选择器权限分支)
+- §7 per-tenant 表 `workspace_uri` NOT NULL 列
+- §13 Keycloak system workspace(`workspace://system` visible: false;admin 移到 system;成员身份给跨 workspace 权限)
+
+**3. 14 PR 序列**(全部 admin-merge 到 main):
+| # | PR | 内容 | LOC |
+|---|----|------|-----|
+| 158 | SPEC v3 设计 | 1189 doc |
+| 159 | URI v3 entity + 163 文件迁移 | 1231 |
+| 160 | SPEC amend 1(workspace switch correction) | 103 doc |
+| 161 | Cap workspace 维度 | 1037 |
+| 162 | Dispatch step 5.6 + invariant test | 593 |
+| 163 | Tenant auth + switcher | 464 |
+| 164 | 数据隔离列(6 表 + 3 invariant test) | 1200+ |
+| 165 | Test pool 配置 fix(根因:Phase 9 dispatch concurrency) | 18 |
+| 166 | SPEC amend 2(URI 统一进入 scope) | 315 doc |
+| 167 | URI 统一 session/template/resource | 999 |
+| 168 | SPEC amend 3(权限分支 switcher) | 109 doc |
+| 169 | System workspace + Keycloak | 1131 |
+| 170 | Legacy default/admin seed 修复 | 58 |
+| 171 | Demo 文档(双语 + 7 截图) | 600+ doc |
+
+**4. 7 个新 invariant test**(`feedback_completion_requires_invariant_test` 标准):
+- `entities_have_workspace_test.exs` — 2-segment entity URI 拒
+- `cap_has_workspace_test.exs` — Cap struct 6 字段强制
+- `cross_workspace_isolation_test.exs` — step 5.6 gate(临时禁用 → 2/6 失败)
+- `all_per_tenant_uris_have_workspace_test.exs` — 2-segment session/template/resource 拒
+- `per_tenant_tables_have_workspace_column_test.exs` — Schema + DB column
+- `no_nil_workspace_writes_test.exs` — Changeset 拒 nil + grep gate
+- `system_workspace_membership_test.exs` — system workspace 存在 + cross_workspace?/2 行为
+
+**5. 实施期反馈循环**(Allen 3 次 Feishu 纠正驱动 3 个 amendment):
+- Amendment 1(SPEC #160):workspace switch 不是 "always logout",entity URI workspace-bound 决定了 switch = 换 entity
+- Amendment 2(SPEC #166):URI 统一不能 defer 到 SPEC v4,Phase 9 必须做 — 否则迁移不完整(sessions 仍要 out-of-band WorkspaceRegistry lookup)
+- Amendment 3(SPEC #168):workspace switch 是**权限分支**不是 "always logout" — system 成员 in-place,普通 user 拒绝 + 提示
+
+每个 amendment 都先 SPEC update + commit + push + admin merge,再用更新后的 SPEC 写下一个 PR。
+
+**6. Phase 9 demo**(`docs/notes/phase-9-demo-2026-05-21.md` 双语)— 7 截图(login/sessions/workspaces/identities/users/routing/admin)+ 每张配 Phase 9 证据 + 文档化"演示中发现 + 当场修复的 bug"(legacy admin seed PR #170)。Demo 用 headless Chrome via CDP cookie injection(`/tmp/phase9-demo/take_screenshots.py`)。
+
+**7. Ezagent v1 验收阶段**(2026-05-21 begin)—— Phase 9 落地后 Allen 进入手动 V1 验收;反馈记录到 `docs/futures/v2-feedback-log.md`(原话 + 抽象本质原因 + V2 影响)。V2 规划基于累积反馈。
+
+**8. 关键架构发现**(subagent 在实施期抓到):
+- CapBAC step 5.5 实际住在 `Kind.Runtime.handle_dispatch/4`,不是 `Invocation.dispatch/1`(PR-4 subagent 找到)
+- PR-3 的 `workspace_match?/2` 已经在 step 5.5 做 cap-workspace 匹配;step 5.6 的**独立**作用是 caller↔target workspace 检查(admin 在 default 持 team-alpha-scoped cap 的边角情况)
+- SPEC §7.1 logical tables vs physical:caps 在 `users.caps_json`,sessions/agents/templates 多路复用在 `kind_snapshots`(实际只有 6 张物理表加列)
+- SQLite 不支持 ALTER COLUMN → CREATE-NEW/INSERT-SELECT/DROP/RENAME 模式重建 6 张表
+- "Pre-existing sandbox failures" 实际是 Phase 9 dispatch concurrency 把 pool 5 推到瓶颈以上 → bump 到 20 解决
+
+---
+
 ## 10. 文件清单
 
 phase 0 起 ezagent repo 里应该有：
