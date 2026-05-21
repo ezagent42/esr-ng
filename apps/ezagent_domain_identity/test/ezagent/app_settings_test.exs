@@ -35,4 +35,62 @@ defmodule Ezagent.AppSettingsTest do
 
     assert AppSettings.smtp_configured?()
   end
+
+  # V1 regression — Allen Feishu 2026-05-21 17:44:
+  # saved SMTP via the LV form, badge said "Configured", clicking
+  # "Send test email" surfaced "SMTP not configured" — i.e.
+  # smtp_configured?/0 returned false despite a complete row in
+  # `app_settings`. These cases exercise the exact map shape the LV
+  # produces (all-string keys, string `"port"` because the input is
+  # `<input type="number">` which Phoenix delivers as a string param)
+  # AND the bytewise-identical JSON the DB actually contains so the
+  # JSON round-trip can't quietly drift.
+  describe "smtp_configured?/0 — string-keyed map written by LV form (V1 regression)" do
+    test "all-string-key map with stringified port (as LV form submits it) → true" do
+      :ok =
+        AppSettings.put("smtp_config", %{
+          "host" => "smtp.feishu.cn",
+          "port" => "587",
+          "username" => "lin.yilun@h2oslabs.com",
+          "password" => "tKBu7hEa1x4RVjNR",
+          "from_address" => "ezagent@h2oslabs.com",
+          "tls" => true
+        })
+
+      assert AppSettings.smtp_configured?()
+    end
+
+    test "the exact JSON shape Allen observed in the DB on 2026-05-21 → true" do
+      # Bytewise reproduction of the row dumped via `sqlite3 ... SELECT
+      # value FROM app_settings WHERE key='smtp_config'`.
+      :ok =
+        AppSettings.put("smtp_config", %{
+          "from_address" => "ezagent@h2oslabs.com",
+          "host" => "smtp.feishu.cn",
+          "password" => "tKBu7hEa1x4RVjNR",
+          "port" => "587",
+          "tls" => true,
+          "username" => "lin.yilun@h2oslabs.com"
+        })
+
+      assert AppSettings.smtp_configured?()
+    end
+
+    test "any one required field as empty string → false" do
+      base = %{
+        "host" => "smtp.x.com",
+        "port" => "587",
+        "username" => "u@x.com",
+        "password" => "pw",
+        "from_address" => "noreply@x.com",
+        "tls" => true
+      }
+
+      for empty_field <- ~w(host port username password from_address) do
+        :ok = AppSettings.put("smtp_config", Map.put(base, empty_field, ""))
+        refute AppSettings.smtp_configured?(),
+               "expected false when #{empty_field}=\"\""
+      end
+    end
+  end
 end
