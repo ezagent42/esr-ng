@@ -381,24 +381,39 @@ socket
 
 LV scope（live_session :require_entity）自动继承两个。
 
-### 6.4 Workspace 选择器 = 登出 + 重新登录（Allen 纠正 2026-05-21）
+### 6.4 Workspace 选择器 = 权限分支（Amendments 1 + 3）
 
-**对原 SPEC 的修正。** Allen 的结构性纠正：如果 entity URI 是
-workspace-bound（3-segment），那么 `entity://user/default/admin` 和
-`entity://user/team-alpha/admin` 是**两个不同的 entity**。这个设计
-下没有"保持身份 + 换 workspace"的语义 —— 换 workspace 就**是**
-换 entity。
+**经过两次修正。** 原 SPEC 的"保持身份 + 换 workspace"结构性不
+通。Amendment 1（2026-05-21 上午）说"统一 logout + 重登"。
+Amendment 3（2026-05-21 下午）进一步：行为按 caller 权限分支：
 
-avatar 下拉里的 workspace 选择器行为：
+**统一流程**（点选其它 workspace）:
 
-- 点击另一个 workspace → POST `/workspaces/switch` 带 target ws。
-- Controller 同时清掉 `:current_entity_uri` 和
-  `:current_workspace_uri`。
-- 重定向到 `/login?workspace=<target_ws>`，登录表单里预填
-  workspace。
-- User 在该 workspace 下重新认证为对应 entity
-  （`<handle>` 通过 `SessionPrincipal.canonicalize/1` 路径解析为
-  `entity://user/<target_ws>/<handle>`，但带 workspace-override 选项）。
+1. POST `/workspaces/switch` 带 target ws。
+2. Controller 检查: caller 是 `workspace://system` 成员吗?
+   - **是（system 成员）** → 上下文切换。更新
+     `:current_workspace_uri` 到 target；**保留**
+     `:current_entity_uri`。LV 在新 workspace scope 下重 mount；
+     UI 显示 "Operating on `<target_ws>` as `system/admin`"。
+     （详见 §13.2 系统成员视图。）
+   - **否（普通 user）** → 拒绝。渲染提示页:
+     "您无权查看 workspace `<target_ws>`。请以该 workspace 成员
+     身份登录。" 提供 "登录到 `<target_ws>`" 按钮 → 重定向到
+     `/login?workspace=<target_ws>`，清当前 session 并预填
+     workspace。
+
+普通 user 路径**不**自动 logout；user 必须显式选择登出 + 重登。
+避免普通 user 误点不属于自己的 workspace 时丢失 session。
+
+**为什么权限分支而不是统一 logout（Amendment 3 理由）**:
+
+- system 成员**应该**无缝切换上下文 —— 这就是 Keycloak realm-admin
+  模型 (§13) 的精髓。
+- 普通 user **应该**被告知为什么不能，不是被静默登出。Phase 8c
+  bare-handle bounce bug 教训：静默 session 变化是最糟糕的 UX
+  （user 无法判断发生了什么）。
+- 权限检查在 cap 层；controller 不需要预判 "switch vs re-login"
+  —— 评估 cap 后再分支。
 
 为什么这是对的：
 
@@ -614,14 +629,16 @@ Bootstrap admin (`entity://user/system/admin`，**不是** PR-2 seed 的
 
 ### 13.2 Workspace 切换 UX 分支（system vs. 普通）
 
-§6.4 amendment（workspace 切换 = logout）**只**对普通 user 生效。
+**Amendment 3 进一步澄清。** §6.4 权限分支 switcher 按 caller 成员
+身份双分支:
+
 对 `workspace://system` 成员:
 
-- UI 里的"workspace 选择器"改名为"Operate on workspace"
+- UI 里的"workspace 选择器"标签为"Operate on workspace"
   （或"操作 workspace"）。
-- 点其它 workspace **不**登出 — 更新 `:current_workspace_uri`
-  到 target，`:current_entity_uri` 保持
-  `entity://user/system/admin`。
+- 点其它 workspace → 上下文切换（不登出）。更新
+  `:current_workspace_uri` 到 target；**保留**
+  `:current_entity_uri` 为 `entity://user/system/admin`。
 - 系统成员的 `:current_workspace_uri` 可以是任何 workspace；
   §6.5 invariant
   (`current_workspace_uri == entity_workspace_uri(current_entity_uri)`)
@@ -629,8 +646,16 @@ Bootstrap admin (`entity://user/system/admin`，**不是** PR-2 seed 的
 - 所有 UI surface 显示"Operating on `<workspace>` as `system/admin`"，
   让系统管理员始终知道操作影响哪个 workspace。
 
-这就是 Keycloak master-realm admin 模型 — 保持以自己身份认证，但
-"当前 realm" 上下文随导航切换。
+对普通 workspace 成员（不在 `workspace://system` 里）:
+
+- Workspace 选择器显示所有 workspace，但除自己 workspace 外都加
+  锁视觉标记。点击锁定 workspace → "登录到 `<workspace>`" 提示
+  （按 §6.4 Amendment 3）。
+- 自己的 workspace 高亮为"当前"。
+- 永远看不到 `workspace://system`（§13.1 隐藏）。
+
+这就是 Keycloak master-realm admin 模型 — 系统管理员保持自己身份
++ 上下文切换；普通用户固定在自己的 workspace，除非显式重新认证。
 
 ### 13.3 Cap-loading flow
 
