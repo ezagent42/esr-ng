@@ -50,7 +50,7 @@ defmodule EzagentWeb.Plugs.RequireEntityTest do
     test "rejects malformed (non-entity scheme) session URI" do
       conn =
         conn(:get, "/admin")
-        |> init_test_session(%{"current_entity_uri" => "session://default/main"})
+        |> init_test_session(%{"current_entity_uri" => "session://default/default/main"})
         |> RequireEntity.call([])
 
       assert conn.halted

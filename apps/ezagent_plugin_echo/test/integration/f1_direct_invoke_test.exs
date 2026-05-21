@@ -107,16 +107,16 @@ defmodule EzagentPluginEcho.Integration.F1DirectInvokeTest do
   end
 
   test "PR-J regression: echo :receive replies via chat.send back to originating session" do
-    # The bug Allen flagged 2026-05-20: Echo agent in session://main
+    # The bug Allen flagged 2026-05-20: Echo agent in session://default/default/main
     # never replied. Root cause: `:receive` was not registered in
     # BehaviorRegistry — `chat.send` fan-out dispatched `chat.receive`
     # to the Echo Kind and got `:not_registered`.
     #
-    # This test joins the default Echo agent into session://main,
+    # This test joins the default Echo agent into session://default/default/main,
     # subscribes to the session's chat-stream PubSub topic, dispatches
     # `chat.send` from admin, and asserts an "echo: <text>" reply
     # message lands within 500ms.
-    session_uri = URI.new!("session://main")
+    session_uri = URI.new!("session://default/default/main")
     echo_agent_uri = EchoApp.default_uri()
     admin_uri = Ezagent.Entity.User.admin_uri()
 

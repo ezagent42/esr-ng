@@ -83,7 +83,7 @@ defmodule Ezagent.Orchestrator.ToolsTest do
     end
 
     test "add_agent_slot/4 surfaces :missing_opt for required ctx — proves body is wired" do
-      template_uri = URI.parse("template://agent/cc-orchestrator")
+      template_uri = URI.parse("template://agent/default/cc-orchestrator")
 
       assert {:error, {:missing_opt, :workspace_uri}} =
                Tools.add_agent_slot("test-slot", template_uri, nil, [])
@@ -96,7 +96,7 @@ defmodule Ezagent.Orchestrator.ToolsTest do
 
     test "update_agent_template/3 surfaces :missing_opt without full ctx" do
       assert {:error, {:missing_opt, :workspace_uri}} =
-               Tools.update_agent_template("x", URI.parse("template://agent/x"), [])
+               Tools.update_agent_template("x", URI.parse("template://agent/default/x"), [])
     end
 
     test "write_matcher/3 surfaces :missing_opt without workspace_uri" do
@@ -120,10 +120,10 @@ defmodule Ezagent.Orchestrator.ToolsTest do
       results = [
         {:list_templates, Tools.list_templates()},
         {:add_agent_slot,
-         Tools.add_agent_slot("x", URI.parse("template://agent/x"), nil, [])},
+         Tools.add_agent_slot("x", URI.parse("template://agent/default/x"), nil, [])},
         {:remove_agent_slot, Tools.remove_agent_slot("x")},
         {:update_agent_template,
-         Tools.update_agent_template("x", URI.parse("template://agent/x"), [])},
+         Tools.update_agent_template("x", URI.parse("template://agent/default/x"), [])},
         {:write_matcher, Tools.write_matcher({:mention, "x"}, ["x"], [])},
         {:update_template, Tools.update_template([])},
         {:save_template_as, Tools.save_template_as("x", [])}
@@ -138,11 +138,11 @@ defmodule Ezagent.Orchestrator.ToolsTest do
   end
   describe "PR 48 — in-flight template deletion semantics" do
     test "update_template returns :parent_template_deleted when parent hash is gone" do
-      parent_uri = URI.parse("template://session/never-registered@deadbeefdeadbeef")
+      parent_uri = URI.parse("template://session/default/never-registered@deadbeefdeadbeef")
 
       assert {:error, :parent_template_deleted} =
                Tools.update_template(
-                 session_uri: URI.parse("session://pr48-test"),
+                 session_uri: URI.parse("session://default/default/pr48-test"),
                  workspace_uri: URI.parse("workspace://pr48-test"),
                  caller: URI.parse("entity://agent/default/test_pr48-orchestrator"),
                  parent_template_uri: parent_uri

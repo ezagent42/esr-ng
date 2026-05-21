@@ -257,7 +257,7 @@ defmodule EzagentDomainUi.Primitives do
 
       <.tree_list>
         <:section title="Direct Sessions">
-          <:item>session://default/dm-1</:item>
+          <:item>session://default/default/dm-1</:item>
         </:section>
       </.tree_list>
 

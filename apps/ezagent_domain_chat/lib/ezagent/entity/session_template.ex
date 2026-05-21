@@ -14,14 +14,17 @@ defmodule Ezagent.Entity.SessionTemplate do
   - what workspace newly-instantiated sessions land in
   - lineage back to a parent template (for fork tracking)
 
-  ## URI shape (D7-10 git-style versioning)
+  ## URI shape (D7-10 git-style versioning, SPEC v3 §3.6 PR-7)
 
-  `template://session/<name>@<version_hash>` where `version_hash`
-  is **SHA-256 over the slice content** (canonical encoding,
-  excluding timestamps + created_by). Two rows with identical
-  config produce identical hashes — content-addressable. The hash
-  is **immutable per row**. `orchestrator.update_template()`
+  `template://session/<workspace>/<name>@<version_hash>` where
+  `version_hash` is **SHA-256 over the slice content** (canonical
+  encoding, excluding timestamps + created_by). Two rows with
+  identical config produce identical hashes — content-addressable.
+  The hash is **immutable per row**. `orchestrator.update_template()`
   produces a new row with a new hash.
+
+  PR-7 added the workspace segment so SessionTemplate URIs follow
+  the same unified 3-segment shape as every other per-tenant URI.
 
   Tags (`v1.0`, `stable`, etc.) live in a separate `template_tags`
   registry mapping `(name, tag) → version_hash`. Tags are
@@ -130,9 +133,15 @@ defmodule Ezagent.Entity.SessionTemplate do
 
   @doc """
   Build the URI for a SessionTemplate given name + version hash.
+
+  SPEC v3 §3.6 (Phase 9 PR-7) — defaults the workspace segment to
+  `default`. Callers needing a different workspace can pass
+  `workspace:` (string, no scheme prefix).
   """
-  @spec build_uri(String.t(), String.t()) :: URI.t()
-  def build_uri(name, version_hash) when is_binary(name) and is_binary(version_hash) do
-    URI.new!("template://session/#{name}@#{version_hash}")
+  @spec build_uri(String.t(), String.t(), keyword()) :: URI.t()
+  def build_uri(name, version_hash, opts \\ [])
+      when is_binary(name) and is_binary(version_hash) do
+    workspace = Keyword.get(opts, :workspace, "default")
+    URI.new!("template://session/#{workspace}/#{name}@#{version_hash}")
   end
 end

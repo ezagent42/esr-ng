@@ -108,7 +108,7 @@ defmodule Ezagent.CapabilityTest do
                needed(
                  kind: :session,
                  behavior: :any,
-                 instance: URI.parse("session://default/main"),
+                 instance: URI.parse("session://default/default/main"),
                  workspace_uri: URI.new!("workspace://team-beta")
                )
              ),
@@ -132,7 +132,7 @@ defmodule Ezagent.CapabilityTest do
                needed(
                  kind: :session,
                  behavior: :any,
-                 instance: URI.parse("session://default/main"),
+                 instance: URI.parse("session://default/default/main"),
                  workspace_uri: URI.new!("workspace://team-alpha")
                )
              )
@@ -226,9 +226,11 @@ defmodule Ezagent.CapabilityTest do
       assert n.behavior == :unknown
     end
 
-    test "session://main?action=chat.send → workspace from WorkspaceRegistry" do
-      session_uri = URI.new!("session://test-cap-for-action-#{System.unique_integer([:positive])}")
-      :ok = Ezagent.WorkspaceRegistry.bind(session_uri, "workspace://default")
+    test "session://default/default/main?action=chat.send → workspace from URI path (SPEC v3 §3.6 PR-7)" do
+      session_uri =
+        URI.new!(
+          "session://default/default/test-cap-for-action-#{System.unique_integer([:positive])}"
+        )
 
       target = URI.new!("#{URI.to_string(session_uri)}?action=chat.send")
       n = Capability.cap_for_action(Ezagent.Entity.Session, :send, target)
@@ -238,13 +240,19 @@ defmodule Ezagent.CapabilityTest do
       assert URI.to_string(n.workspace_uri) == "workspace://default"
     end
 
-    test "session URI without WorkspaceRegistry binding raises (invariant 4)" do
-      unbound = URI.new!("session://never-bound-#{System.unique_integer([:positive])}")
-      target = URI.new!("#{URI.to_string(unbound)}?action=chat.send")
+    test "session URI workspace derivation is structural — no registry lookup (SPEC v3 §3.6 PR-7)" do
+      # PR-7: workspace derivation moved from WorkspaceRegistry lookup
+      # to structural URI extraction. An unbound session URI is fine —
+      # the workspace comes from the path segment.
+      unbound =
+        URI.new!(
+          "session://default/team-alpha/never-bound-#{System.unique_integer([:positive])}"
+        )
 
-      assert_raise RuntimeError, ~r/no workspace binding/, fn ->
-        Capability.cap_for_action(Ezagent.Entity.Session, :send, target)
-      end
+      target = URI.new!("#{URI.to_string(unbound)}?action=chat.send")
+      n = Capability.cap_for_action(Ezagent.Entity.Session, :send, target)
+
+      assert URI.to_string(n.workspace_uri) == "workspace://team-alpha"
     end
 
     test "workspace://X URI → workspace_uri is X itself" do
@@ -269,7 +277,7 @@ defmodule Ezagent.CapabilityTest do
 
     test "admin all-cap matches the needed shape (closed-loop integration)" do
       [admin_cap] = MapSet.to_list(Ezagent.Entity.User.admin_caps())
-      session_uri = URI.new!("session://admin-closeloop-#{System.unique_integer([:positive])}")
+      session_uri = URI.new!("session://default/default/admin-closeloop-#{System.unique_integer([:positive])}")
       :ok = Ezagent.WorkspaceRegistry.bind(session_uri, "workspace://default")
 
       target = URI.new!("#{URI.to_string(session_uri)}?action=chat.send")
@@ -292,14 +300,14 @@ defmodule Ezagent.CapabilityTest do
     end
 
     defp needed_session(target_str) do
+      # SPEC v3 §3.6 (Phase 9 PR-7) — workspace derivation is
+      # structural; no WorkspaceRegistry.bind needed.
       %URI{} = uri = URI.new!(target_str)
-      session_uri = %URI{uri | query: nil, fragment: nil}
-      :ok = Ezagent.WorkspaceRegistry.bind(session_uri, "workspace://default")
       Capability.cap_for_action(Ezagent.Entity.Session, :send, uri)
     end
 
     test "{:within_session, S} matches needed targeting URI exactly equal to S" do
-      session_uri = URI.new!("session://main-w1-#{System.unique_integer([:positive])}")
+      session_uri = URI.new!("session://default/default/main-w1-#{System.unique_integer([:positive])}")
       c = scoped_cap({:within_session, session_uri})
       assert Capability.matches?(c, needed_session("#{URI.to_string(session_uri)}?action=chat.send"))
     end
@@ -309,7 +317,7 @@ defmodule Ezagent.CapabilityTest do
       # `instance/1` extractor strips the path entirely, so this
       # sub-URI test exercises the {:within_session, _} string-prefix
       # check directly via a manually-constructed `needed` map.
-      session_uri = URI.new!("session://main-w2-#{System.unique_integer([:positive])}")
+      session_uri = URI.new!("session://default/default/main-w2-#{System.unique_integer([:positive])}")
       c = scoped_cap({:within_session, session_uri})
 
       needed_subpath =
@@ -325,12 +333,12 @@ defmodule Ezagent.CapabilityTest do
 
     test "{:within_session, S} does NOT match needed in a different session (V3.2 scope leak)" do
       uniq = System.unique_integer([:positive])
-      c = scoped_cap({:within_session, URI.new!("session://main-w3-#{uniq}")})
-      refute Capability.matches?(c, needed_session("session://other-w3-#{uniq}?action=chat.send"))
+      c = scoped_cap({:within_session, URI.new!("session://default/default/main-w3-#{uniq}")})
+      refute Capability.matches?(c, needed_session("session://default/default/other-w3-#{uniq}?action=chat.send"))
     end
 
-    test "{:within_session, session://main} does NOT false-match session://main2 (prefix boundary)" do
-      session_uri = URI.new!("session://main-w4-#{System.unique_integer([:positive])}")
+    test "{:within_session, session://default/default/main} does NOT false-match session://default/default/main2 (prefix boundary)" do
+      session_uri = URI.new!("session://default/default/main-w4-#{System.unique_integer([:positive])}")
       c = scoped_cap({:within_session, session_uri})
 
       needed_neighbor =
@@ -342,7 +350,7 @@ defmodule Ezagent.CapabilityTest do
         )
 
       refute Capability.matches?(c, needed_neighbor),
-             "{:within_session, session://main-w4} must not match session://main-w42 — " <>
+             "{:within_session, session://default/default/main-w4} must not match session://default/default/main-w42 — " <>
                "prefix check requires '/' boundary, not raw startsWith"
     end
 
@@ -465,7 +473,7 @@ defmodule Ezagent.CapabilityTest do
     end
 
     test "scope tuple cap with wrong kind does NOT match (scope only narrows, never broadens)" do
-      session_uri = URI.new!("session://wrong-kind-#{System.unique_integer([:positive])}")
+      session_uri = URI.new!("session://default/default/wrong-kind-#{System.unique_integer([:positive])}")
       :ok = Ezagent.WorkspaceRegistry.bind(session_uri, "workspace://default")
 
       c =

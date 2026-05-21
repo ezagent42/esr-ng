@@ -110,11 +110,11 @@ defmodule Ezagent.Capability do
     session_str = URI.to_string(session_uri)
 
     # Match if needed URI is the session URI itself, or a sub-URI of
-    # it (e.g. `session://main?action=chat.send` is within
-    # `session://main`). String prefix is sufficient given URI
+    # it (e.g. `session://default/default/main?action=chat.send` is within
+    # `session://default/default/main`). String prefix is sufficient given URI
     # canonical form; we add a `/` boundary check to avoid false
-    # positives like `session://main2` matching `{:within_session,
-    # session://main}`.
+    # positives like `session://default/default/main2` matching `{:within_session,
+    # session://default/default/main}`.
     needed_str == session_str or
       String.starts_with?(needed_str, session_str <> "/")
   end
@@ -203,42 +203,49 @@ defmodule Ezagent.Capability do
   keeping the two sides in lock-step structurally.
 
   - `entity://<type>/<workspace>/<name>` →
-    `Ezagent.URI.entity_workspace_uri/1`
-  - `session://<template>/<name>` →
-    `Ezagent.WorkspaceRegistry.lookup/1` (raises if unbound —
-    invariant 4)
+    `Ezagent.URI.entity_workspace_uri/1` (PR-2 — structural)
+  - `session://<template>/<workspace>/<name>` →
+    workspace path segment (PR-7 — structural, no registry lookup)
+  - `template://<type>/<workspace>/<name>` →
+    workspace path segment (PR-7)
+  - `resource://<type>/<workspace>/<name>` →
+    workspace path segment (PR-7)
   - `workspace://<name>` → the URI itself
-  - `system://`, `template://`, `resource://`, unknown schemes →
-    `:any` (cross-cutting; workspace boundary doesn't apply)
+  - `system://`, unknown schemes → `:any`
+    (cross-cutting; workspace boundary doesn't apply)
 
   `:any` for a target means "cross-workspace by structural design"
   — step 5.6 should skip the isolation check for these.
+
+  ## PR-7 — WorkspaceRegistry demoted to consistency cache
+
+  Before PR-7, `workspace_of/1` for `session://` consulted
+  `Ezagent.WorkspaceRegistry`. After URI unification, the workspace
+  is in the URI path — extraction is O(1) string split. The registry
+  is retained for back-edge lookups by code that hasn't migrated yet
+  (e.g. tooling that holds a session URI and wants to know its
+  workspace without re-parsing). Per SPEC v3 §3.6, every registry
+  binding MUST equal the workspace segment of the URI it's bound
+  for — guarded by `all_per_tenant_uris_have_workspace_test.exs`.
   """
   @spec workspace_of(URI.t()) :: URI.t() | :any
   def workspace_of(%URI{scheme: "entity"} = uri) do
     Ezagent.URI.entity_workspace_uri(%URI{uri | query: nil, fragment: nil})
   end
 
-  def workspace_of(%URI{scheme: "session"} = uri) do
-    bare = %URI{uri | query: nil, fragment: nil}
+  def workspace_of(%URI{scheme: "session"} = uri),
+    do: workspace_from_3seg_path(%URI{uri | query: nil, fragment: nil})
 
-    case Ezagent.WorkspaceRegistry.lookup(bare) do
-      {:ok, ws} ->
-        ws
+  def workspace_of(%URI{scheme: "template"} = uri),
+    do: workspace_from_3seg_path(%URI{uri | query: nil, fragment: nil})
 
-      :error ->
-        raise "session #{URI.to_string(bare)} has no workspace binding " <>
-                "(invariant 4 violated — Template Class must call " <>
-                "Ezagent.WorkspaceRegistry.bind/2 after SpawnRegistry.spawn)"
-    end
-  end
+  def workspace_of(%URI{scheme: "resource"} = uri),
+    do: workspace_from_3seg_path(%URI{uri | query: nil, fragment: nil})
 
   def workspace_of(%URI{scheme: "workspace"} = uri),
     do: %URI{uri | query: nil, fragment: nil}
 
   def workspace_of(%URI{scheme: "system"}), do: :any
-  def workspace_of(%URI{scheme: "template"}), do: :any
-  def workspace_of(%URI{scheme: "resource"}), do: :any
 
   # Catch-all for test-only schemes (e.g. `probecli://`, `test://`)
   # and any future scheme not yet wired through workspace derivation.
@@ -248,6 +255,33 @@ defmodule Ezagent.Capability do
   # SPEC v2 §5.8, so this only fires for test fixtures using
   # unregistered schemes.
   def workspace_of(%URI{}), do: :any
+
+  # SPEC v3 §3.6 (Phase 9 PR-7) — extract the workspace URI from a
+  # 3-segment per-tenant URI path. Shared by session/template/resource
+  # scheme handlers above. parse!/1 guarantees the 3-segment shape;
+  # hand-constructed URIs bypassing parse!/1 raise here (structural
+  # programming error — let it crash rather than mask).
+  #
+  # NB: a URI like `session://default/default/main` parses to
+  # `%URI{host: "default", path: "/default/main"}`. The path's first
+  # segment is the workspace name; the second is the instance name.
+  # The `<type>` axis lives in `host`, NOT in the path.
+  defp workspace_from_3seg_path(%URI{path: "/" <> rest}) do
+    case String.split(rest, "/", parts: 2) do
+      [workspace_name, _name] when workspace_name != "" ->
+        URI.new!("workspace://" <> workspace_name)
+
+      _ ->
+        raise ArgumentError,
+              "URI does not have a 3-segment authority — expected " <>
+                "<scheme>://<type>/<workspace>/<name>, got path: #{inspect("/" <> rest)}"
+    end
+  end
+
+  defp workspace_from_3seg_path(%URI{} = uri) do
+    raise ArgumentError,
+          "URI has no path; cannot extract workspace segment: #{inspect(URI.to_string(uri))}"
+  end
 
   @doc """
   Serialize a Capability to a JSON-safe map (for `users.caps_json`
@@ -332,8 +366,8 @@ defmodule Ezagent.Capability do
   target URI) tuple — for dispatch step 5.5 to feed into `matches?/2`.
 
   Phase 3d (P3-D6 hard flip + #P1-8): the target URI is required so
-  we can extract the `instance` part (e.g. `session://main` from
-  `session://main?action=chat.send`). `behavior` is looked up via
+  we can extract the `instance` part (e.g. `session://default/default/main` from
+  `session://default/default/main?action=chat.send`). `behavior` is looked up via
   `BehaviorRegistry.lookup(kind_module, action)` — same lookup
   `Kind.Runtime` does for invoke routing.
 

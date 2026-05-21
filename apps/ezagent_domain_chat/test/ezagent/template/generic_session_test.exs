@@ -76,7 +76,7 @@ defmodule Ezagent.Template.GenericSessionTest do
   end
 
   describe "instantiate/3" do
-    test "spawns a Session at session://<name> + dispatches join for each member" do
+    test "spawns a Session at session://generic/<workspace>/<name> + dispatches join for each member (SPEC v3 §3.6 PR-7)" do
       session_name = "gs-test-#{System.unique_integer([:positive])}"
       workspace_uri = URI.parse("workspace://test")
 
@@ -89,7 +89,7 @@ defmodule Ezagent.Template.GenericSessionTest do
       assert {:ok, [session_uri]} =
                GenericSession.instantiate("main", tmpl, workspace_uri)
 
-      assert URI.to_string(session_uri) == "session://#{session_name}"
+      assert URI.to_string(session_uri) == "session://generic/test/#{session_name}"
 
       # Session Kind alive in KindRegistry
       assert {:ok, _pid} = Ezagent.KindRegistry.lookup(session_uri)

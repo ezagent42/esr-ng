@@ -39,41 +39,41 @@ defmodule Ezagent.Routing.ResolverTest do
 
   describe "resolve/2" do
     test "returns [] when no rule matches → caller falls through to in-session default" do
-      assert [] = Resolver.resolve(msg(), URI.new!("session://main"))
+      assert [] = Resolver.resolve(msg(), URI.new!("session://default/default/main"))
     end
 
     test "mention(X) rule fires when message mentions X — returns receivers", %{table: t} do
       target = URI.new!("entity://agent/default/test_cc-builder")
-      :ok = RoutingRegistry.put(t, Matcher.mention(target), ["session://oncall"])
+      :ok = RoutingRegistry.put(t, Matcher.mention(target), ["session://default/default/oncall"])
 
-      result = Resolver.resolve(msg("hi", [target]), URI.new!("session://main"))
-      assert result == [URI.new!("session://oncall")]
+      result = Resolver.resolve(msg("hi", [target]), URI.new!("session://default/default/main"))
+      assert result == [URI.new!("session://default/default/oncall")]
     end
 
     test "additive: multiple rules matching → union receivers, deduplicated", %{table: t} do
       target = URI.new!("entity://agent/default/test_X")
 
-      :ok = RoutingRegistry.put(t, Matcher.mention(target), ["session://A", "session://B"])
-      :ok = RoutingRegistry.put(t, Matcher.always(), ["session://B", "session://C"])
+      :ok = RoutingRegistry.put(t, Matcher.mention(target), ["session://default/default/A", "session://default/default/B"])
+      :ok = RoutingRegistry.put(t, Matcher.always(), ["session://default/default/B", "session://default/default/C"])
 
-      result = Resolver.resolve(msg("hi", [target]), URI.new!("session://main"))
+      result = Resolver.resolve(msg("hi", [target]), URI.new!("session://default/default/main"))
       uris = result |> Enum.map(&URI.to_string/1) |> Enum.sort()
-      assert uris == ["session://A", "session://B", "session://C"]
+      assert uris == ["session://default/default/A", "session://default/default/B", "session://default/default/C"]
     end
 
     test "text_contains rule matches body", %{table: t} do
-      :ok = RoutingRegistry.put(t, Matcher.text_contains("urgent"), ["session://oncall"])
+      :ok = RoutingRegistry.put(t, Matcher.text_contains("urgent"), ["session://default/default/oncall"])
 
-      assert Resolver.resolve(msg("server urgent down"), URI.new!("session://main")) ==
-               [URI.new!("session://oncall")]
+      assert Resolver.resolve(msg("server urgent down"), URI.new!("session://default/default/main")) ==
+               [URI.new!("session://default/default/oncall")]
 
       # No match if word absent
-      assert Resolver.resolve(msg("all green"), URI.new!("session://main")) == []
+      assert Resolver.resolve(msg("all green"), URI.new!("session://default/default/main")) == []
     end
 
     test "table not declared in app env → silently skip (returns [])" do
       Application.put_env(:ezagent_core, :routing_tables, [:nonexistent_table])
-      assert [] = Resolver.resolve(msg(), URI.new!("session://main"))
+      assert [] = Resolver.resolve(msg(), URI.new!("session://default/default/main"))
     end
   end
 end

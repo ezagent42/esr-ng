@@ -3,11 +3,11 @@ defmodule Mix.Tasks.Ezagent.Feishu.Chat.Bind do
   @moduledoc """
   PR #144 SPEC v2 §5.8 — admin CLI for Feishu chat ↔ session bindings.
 
-      mix ezagent.feishu.chat.bind oc_abc123 session://main
+      mix ezagent.feishu.chat.bind oc_abc123 session://default/default/main
 
   Writes a row into `feishu_session_bindings` (chat_id PK). Inbound
-  Feishu messages on `oc_abc123` will dispatch into `session://main`;
-  outbound chat sends in `session://main` will mirror to `oc_abc123`
+  Feishu messages on `oc_abc123` will dispatch into `session://default/default/main`;
+  outbound chat sends in `session://default/default/main` will mirror to `oc_abc123`
   via `EzagentPluginFeishu.Behavior.FeishuOutbound`.
 
   Replaces the pre-PR-144 `mix ezagent.template.instantiate

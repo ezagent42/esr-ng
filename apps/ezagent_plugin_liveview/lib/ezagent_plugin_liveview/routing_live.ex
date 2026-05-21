@@ -486,7 +486,7 @@ defmodule EzagentPluginLiveview.RoutingLive do
             <input
               type="text"
               name="rule[receivers]"
-              placeholder="session://oncall,session://emergency"
+              placeholder="session://default/default/oncall,session://default/default/emergency"
               style="width: 100%; padding: 6px 10px; border: 1px solid #d1d5da; border-radius: 4px; font-family: monospace;"
             />
           </div>

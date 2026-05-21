@@ -34,7 +34,7 @@ defmodule Ezagent.Entity.TokenTest do
     end
 
     test "rejects non-entity URIs" do
-      assert {:error, _} = Token.mint(URI.parse("session://default/main"))
+      assert {:error, _} = Token.mint(URI.parse("session://default/default/main"))
     end
   end
 

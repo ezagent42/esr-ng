@@ -63,7 +63,7 @@ defmodule EzagentWeb.MixProject do
       {:ezagent_domain_identity, in_umbrella: true},
       {:ezagent_domain_workspace, in_umbrella: true},
       # PR-J — HomeLive's first-login wizard calls
-      # `EzagentDomainChat.create_session/2` to spawn session://main on
+      # `EzagentDomainChat.create_session/2` to spawn session://default/default/main on
       # demand (replacing the static boot child). domain_ui supplies
       # the shared atom palette (button / card / page_header) for the
       # wizard layout.

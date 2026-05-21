@@ -48,7 +48,7 @@ defmodule EzagentPluginLiveview.AdminLiveTest do
     {:ok, _lv, html} = live(conn, "/sessions")
 
     # Section header
-    assert html =~ "session://main"
+    assert html =~ "session://default/default/main"
     # admin URI listed
     assert html =~ "entity://user/default/admin"
     # admin is online (boot post-spawn dispatched chat/join)
@@ -91,8 +91,8 @@ defmodule EzagentPluginLiveview.AdminLiveTest do
 
     Phoenix.PubSub.broadcast(
       EzagentCore.PubSub,
-      Ezagent.Behavior.Chat.session_events_topic(URI.new!("session://main")),
-      {:chat_message, URI.new!("session://main"), agent_msg}
+      Ezagent.Behavior.Chat.session_events_topic(URI.new!("session://default/default/main")),
+      {:chat_message, URI.new!("session://default/default/main"), agent_msg}
     )
 
     assert wait_until_html(lv, "agent reply test")
@@ -116,7 +116,7 @@ defmodule EzagentPluginLiveview.AdminLiveTest do
   end
 
   test "Load older button paginates history (Phase 5 PR 5 invariant)", %{conn: conn} do
-    session_uri = URI.new!("session://main")
+    session_uri = URI.new!("session://default/default/main")
     base = ~U[2026-05-17 09:00:00.000000Z]
 
     for i <- 1..100 do

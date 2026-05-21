@@ -7,7 +7,7 @@ defmodule Ezagent.Routing.WorkspaceScopeTest do
   alias Ezagent.{Message, RoutingRegistry}
   alias Ezagent.Routing.{Matcher, Resolver, RuleStore}
 
-  @session_uri URI.new!("session://test")
+  @session_uri URI.new!("session://default/default/test")
   @user_a URI.new!("entity://user/default/alice")
   @recv URI.new!("entity://user/default/recv")
   @ws_alpha URI.new!("workspace://alpha")

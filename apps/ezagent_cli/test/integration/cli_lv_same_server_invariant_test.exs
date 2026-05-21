@@ -33,7 +33,8 @@ defmodule EzagentCli.Integration.CliLvSameServerInvariantTest do
 
   test "CLI server-side exec changes Session.chat.members IN THIS BEAM" do
     session_name = "cli-same-server-test-#{System.unique_integer([:positive])}"
-    session_uri = URI.parse("session://" <> session_name)
+    # SPEC v3 §3.6 (Phase 9 PR-7) — sessions are 3-segment.
+    session_uri = URI.parse("session://default/default/" <> session_name)
     # PR-A: agent URIs include a type segment.
     member_uri = URI.parse("entity://agent/default/cc_cli-test-member-#{System.unique_integer([:positive])}")
 

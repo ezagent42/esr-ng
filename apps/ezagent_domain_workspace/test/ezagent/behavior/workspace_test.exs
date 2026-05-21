@@ -69,7 +69,7 @@ defmodule Ezagent.Behavior.WorkspaceTest do
   describe "routing_rules actions" do
     test "set + list round-trip" do
       slice = WB.init_slice(%{})
-      rules = [%{matcher: %{type: "always"}, receivers: ["session://main"]}]
+      rules = [%{matcher: %{type: "always"}, receivers: ["session://default/default/main"]}]
 
       {:ok, slice2} = WB.invoke(:set_routing_rules, slice, %{rules: rules}, %{})
 

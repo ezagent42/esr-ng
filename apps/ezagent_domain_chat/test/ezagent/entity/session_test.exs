@@ -24,9 +24,9 @@ defmodule Ezagent.Entity.SessionTest do
   end
 
   describe "default_uri/0" do
-    test "returns session://main as a %URI{} struct" do
+    test "returns session://default/default/main as a %URI{} struct (SPEC v3 §3.6 PR-7)" do
       uri = Session.default_uri()
-      assert %URI{scheme: "session", host: "main"} = uri
+      assert %URI{scheme: "session", host: "default", path: "/default/main"} = uri
     end
   end
 end

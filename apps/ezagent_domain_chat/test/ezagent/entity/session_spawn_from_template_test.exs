@@ -25,10 +25,12 @@ defmodule Ezagent.Entity.SessionSpawnFromTemplateTest do
 
   test "default_uri/0 still works (pre-PR-41 contract preserved)" do
     # Regression guard — adding Generator function must not break
-    # the existing default Session URI.
+    # the existing default Session URI. SPEC v3 §3.6 (Phase 9 PR-7)
+    # promoted the URI to 3-segment shape.
     uri = Session.default_uri()
     assert uri.scheme == "session"
-    assert uri.host == "main"
+    assert uri.host == "default"
+    assert uri.path == "/default/main"
   end
 
   test "Generator module is Session itself (not a separate Generator module)" do

@@ -23,7 +23,7 @@ defmodule EzagentDomainChat.Integration.ChatRoutingTest do
     :ok
   end
 
-  test "admin User landed in session://main members after boot" do
+  test "admin User landed in session://default/default/main members after boot" do
     {:ok, session_pid} = KindRegistry.lookup(Session.default_uri())
 
     %{state: %{chat: chat_slice}} = :sys.get_state(session_pid)

@@ -15,7 +15,7 @@ defmodule EzagentDomainChat.Integration.DynamicSessionTest do
   test "create_session spawns Session Kind + joins creator" do
     short = "dyn-#{System.unique_integer([:positive])}"
     assert {:ok, session_uri} = EzagentDomainChat.create_session(short)
-    assert URI.to_string(session_uri) == "session://#{short}"
+    assert URI.to_string(session_uri) == "session://default/default/#{short}"
 
     # KindRegistry has it
     assert {:ok, pid} = KindRegistry.lookup(session_uri)
@@ -49,8 +49,8 @@ defmodule EzagentDomainChat.Integration.DynamicSessionTest do
     {:ok, _} = EzagentDomainChat.create_session(short)
 
     uris = EzagentDomainChat.list_sessions() |> Enum.map(&URI.to_string/1)
-    assert "session://main" in uris
-    assert "session://#{short}" in uris
+    assert "session://default/default/main" in uris
+    assert "session://default/default/#{short}" in uris
   end
 
   defp wait_until(fun, retries \\ 50) do
