@@ -56,7 +56,7 @@ defmodule Ezagent.Integration.RoutingCapTest do
                args: %{
                  table: MentionRouting,
                  matcher_json: Matcher.to_json(matcher),
-                 receivers: ["session://cap-test"]
+                 receivers: ["session://default/default/cap-test"]
                },
                ctx: admin_ctx()
              })
@@ -72,7 +72,7 @@ defmodule Ezagent.Integration.RoutingCapTest do
                args: %{
                  table: MentionRouting,
                  matcher_json: Matcher.to_json(Matcher.always()),
-                 receivers: ["session://x"]
+                 receivers: ["session://default/default/x"]
                },
                ctx: non_admin_ctx()
              })

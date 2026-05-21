@@ -42,7 +42,7 @@ defmodule EzagentPluginFeishu.Behavior.FeishuOutboundTest do
   end
 
   test "invoke :notify_external on a session WITHOUT a binding → no-op skip" do
-    session_uri = URI.parse("session://outbound-test-#{System.unique_integer([:positive])}")
+    session_uri = URI.parse("session://default/default/outbound-test-#{System.unique_integer([:positive])}")
 
     msg =
       Message.new(
@@ -62,7 +62,7 @@ defmodule EzagentPluginFeishu.Behavior.FeishuOutboundTest do
   end
 
   test "invoke :notify_external on body tagged _feishu_origin → self-echo skip" do
-    session_uri = URI.parse("session://echo-test-#{System.unique_integer([:positive])}")
+    session_uri = URI.parse("session://default/default/echo-test-#{System.unique_integer([:positive])}")
     chat_id = "oc_echo_#{System.unique_integer([:positive])}"
     {:ok, _} = SessionBinding.bind(chat_id, URI.to_string(session_uri))
 
@@ -85,7 +85,7 @@ defmodule EzagentPluginFeishu.Behavior.FeishuOutboundTest do
   end
 
   test "self-echo guard also matches string-keyed body (post MessageStore round-trip)" do
-    session_uri = URI.parse("session://string-key-#{System.unique_integer([:positive])}")
+    session_uri = URI.parse("session://default/default/string-key-#{System.unique_integer([:positive])}")
     chat_id = "oc_strkey_#{System.unique_integer([:positive])}"
     {:ok, _} = SessionBinding.bind(chat_id, URI.to_string(session_uri))
 

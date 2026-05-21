@@ -74,7 +74,7 @@ defmodule Ezagent.PluginCc.Template.CcAgentTest do
       assert {:error, {:bad_agent_uri, _}} =
                CcAgent.validate(%{
                  "class" => "cc.agent",
-                 "agent_uri" => "session://main",
+                 "agent_uri" => "session://default/default/main",
                  "cwd" => "/tmp"
                })
     end

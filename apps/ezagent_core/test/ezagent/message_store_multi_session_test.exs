@@ -20,10 +20,10 @@ defmodule Ezagent.MessageStoreMultiSessionTest do
     default_ws = URI.new!("workspace://default")
 
     sessions = [
-      URI.new!("session://main"),
-      URI.new!("session://oncall"),
-      URI.new!("session://A"),
-      URI.new!("session://B")
+      URI.new!("session://default/default/main"),
+      URI.new!("session://default/default/oncall"),
+      URI.new!("session://default/default/A"),
+      URI.new!("session://default/default/B")
     ]
 
     for s <- sessions, do: :ok = Ezagent.WorkspaceRegistry.bind(s, default_ws)
@@ -39,8 +39,8 @@ defmodule Ezagent.MessageStoreMultiSessionTest do
     sender = URI.new!("entity://agent/default/test_cc-builder")
     msg = Message.new(sender, %{text: "reply to both", attachments: []})
 
-    session_a = URI.new!("session://main")
-    session_b = URI.new!("session://oncall")
+    session_a = URI.new!("session://default/default/main")
+    session_b = URI.new!("session://default/default/oncall")
 
     assert {:ok, _} = MessageStore.write(msg, session_a)
     assert {:ok, _} = MessageStore.write(msg, session_b)
@@ -51,13 +51,13 @@ defmodule Ezagent.MessageStoreMultiSessionTest do
 
     # but sessions_for_message returns both
     sessions = MessageStore.sessions_for_message(msg.id)
-    assert MapSet.new(sessions) == MapSet.new(["session://main", "session://oncall"])
+    assert MapSet.new(sessions) == MapSet.new(["session://default/default/main", "session://default/default/oncall"])
   end
 
   test "recent_in_session scoped via JOIN — message in both sessions appears in both queries" do
     sender = URI.new!("entity://agent/default/test_cc-builder")
-    session_a = URI.new!("session://A")
-    session_b = URI.new!("session://B")
+    session_a = URI.new!("session://default/default/A")
+    session_b = URI.new!("session://default/default/B")
 
     # 3 messages, only msg2 spans both sessions
     {:ok, _} =
@@ -87,11 +87,11 @@ defmodule Ezagent.MessageStoreMultiSessionTest do
   test "write is idempotent on (message_id, session_uri) — duplicate write doesn't fail or double-insert routing" do
     sender = URI.new!("entity://user/default/admin")
     msg = Message.new(sender, %{text: "once", attachments: []})
-    session = URI.new!("session://main")
+    session = URI.new!("session://default/default/main")
 
     {:ok, _} = MessageStore.write(msg, session)
     {:ok, _} = MessageStore.write(msg, session)
 
-    assert MessageStore.sessions_for_message(msg.id) == ["session://main"]
+    assert MessageStore.sessions_for_message(msg.id) == ["session://default/default/main"]
   end
 end

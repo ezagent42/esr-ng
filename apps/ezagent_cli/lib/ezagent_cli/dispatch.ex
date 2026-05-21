@@ -87,8 +87,15 @@ defmodule EzagentCli.Dispatch do
     behavior_seg = behavior_module.state_slice() |> to_string()
 
     # SPEC v2 §5.2 (PR #148): action lives in ?action=<behavior>.<action> query.
+    # SPEC v3 §3.6 (Phase 9 PR-7): session/template/resource URIs are
+    # 3-segment; if the caller passed a bare instance name (e.g.
+    # `--session foo`), promote it to the default-template + default-
+    # workspace form (`session://default/default/foo`). Operators
+    # needing a different workspace can pass the full URI form.
+    promoted_instance = promote_to_3seg(scheme, instance)
+
     URI.parse(
-      "#{scheme}://#{instance}?action=#{behavior_seg}.#{to_string(action)}"
+      "#{scheme}://#{promoted_instance}?action=#{behavior_seg}.#{to_string(action)}"
     )
   end
 
@@ -96,6 +103,23 @@ defmodule EzagentCli.Dispatch do
   # by using `entity://agent/` for instances — but for CLI we use type_name
   # consistently. Phase 5+ can add scheme/0 callback on Kind if needed.
   defp scheme_for(type_name), do: to_string(type_name)
+
+  # SPEC v3 §3.6 (Phase 9 PR-7) — fill in missing template/workspace
+  # segments for the unified per-tenant schemes when the operator
+  # passed a bare name on the CLI.
+  defp promote_to_3seg("session", instance), do: fill_default("default", instance)
+  defp promote_to_3seg("template", instance), do: fill_default("default", instance)
+  defp promote_to_3seg("resource", instance), do: fill_default("default", instance)
+  defp promote_to_3seg(_scheme, instance), do: instance
+
+  defp fill_default(type_default, instance) do
+    case String.split(instance, "/") do
+      [bare] -> "#{type_default}/default/#{bare}"
+      [type, bare] -> "#{type}/default/#{bare}"
+      [_type, _ws, _name | _rest] -> instance
+      _ -> instance
+    end
+  end
 
   defp derive_caller(options) do
     # Phase 6 PR 7: per-process override set by `EzagentCli.Exec.exec/2`

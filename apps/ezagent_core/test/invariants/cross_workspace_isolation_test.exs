@@ -118,8 +118,14 @@ defmodule EzagentCore.Invariants.CrossWorkspaceIsolationTest do
     # Two sessions, one per workspace. Use SpawnRegistry to follow the
     # plugin-isolation contract (Loader / Session.spawn_from_template
     # both go through this).
-    default_session_uri = URI.new!("session://#{suffix}-default-main")
-    team_alpha_session_uri = URI.new!("session://#{suffix}-team-alpha-main")
+    # SPEC v3 §3.6 (Phase 9 PR-7) — 3-segment session URIs carry
+    # workspace as the second path segment. The first segment is the
+    # template; we use `default` here since these test sessions don't
+    # spawn from a template class.
+    default_session_uri = URI.new!("session://default/default/#{suffix}-main")
+
+    team_alpha_session_uri =
+      URI.new!("session://default/#{team_alpha_name}/#{suffix}-main")
 
     {:ok, _} = SpawnRegistry.spawn(default_session_uri)
     {:ok, _} = SpawnRegistry.spawn(team_alpha_session_uri)

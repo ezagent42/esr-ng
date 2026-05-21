@@ -8,7 +8,7 @@ defmodule EzagentPluginFeishu.SessionBindingTest do
 
   test "bind then resolve" do
     chat_id = "oc_sb_#{System.unique_integer([:positive])}"
-    session_uri = "session://sb-#{System.unique_integer([:positive])}"
+    session_uri = "session://default/default/sb-#{System.unique_integer([:positive])}"
 
     assert {:ok, _row} = SessionBinding.bind(chat_id, session_uri)
     assert {:ok, %URI{} = uri} = SessionBinding.resolve(chat_id)
@@ -23,15 +23,15 @@ defmodule EzagentPluginFeishu.SessionBindingTest do
 
   test "rebind replaces session_uri silently" do
     chat_id = "oc_rebind_#{System.unique_integer([:positive])}"
-    {:ok, _} = SessionBinding.bind(chat_id, "session://first")
-    {:ok, _} = SessionBinding.bind(chat_id, "session://second")
+    {:ok, _} = SessionBinding.bind(chat_id, "session://default/default/first")
+    {:ok, _} = SessionBinding.bind(chat_id, "session://default/default/second")
 
     {:ok, uri} = SessionBinding.resolve(chat_id)
-    assert URI.to_string(uri) == "session://second"
+    assert URI.to_string(uri) == "session://default/default/second"
   end
 
   test "chat_ids_for returns all enabled chat_ids for a session" do
-    session = "session://multi_#{System.unique_integer([:positive])}"
+    session = "session://default/default/multi_#{System.unique_integer([:positive])}"
     {:ok, _} = SessionBinding.bind("oc_a_#{System.unique_integer([:positive])}", session)
     {:ok, _} = SessionBinding.bind("oc_b_#{System.unique_integer([:positive])}", session)
 
@@ -41,7 +41,7 @@ defmodule EzagentPluginFeishu.SessionBindingTest do
 
   test "unbind removes the row" do
     chat_id = "oc_unbind_#{System.unique_integer([:positive])}"
-    {:ok, _} = SessionBinding.bind(chat_id, "session://x")
+    {:ok, _} = SessionBinding.bind(chat_id, "session://default/default/x")
     assert :ok = SessionBinding.unbind(chat_id)
     assert :error = SessionBinding.resolve(chat_id)
   end

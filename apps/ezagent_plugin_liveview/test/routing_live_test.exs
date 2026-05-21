@@ -37,7 +37,7 @@ defmodule EzagentPluginLiveview.RoutingLiveTest do
         table: "Elixir.EzagentDomainChat.Routing.MentionRouting",
         matcher_type: "mention",
         matcher_arg: "entity://agent/default/test_lv-test-#{System.unique_integer([:positive])}",
-        receivers: "session://lv-rcv-#{System.unique_integer([:positive])}"
+        receivers: "session://default/default/lv-rcv-#{System.unique_integer([:positive])}"
       }
     )
     |> render_submit()
@@ -83,7 +83,7 @@ defmodule EzagentPluginLiveview.RoutingLiveTest do
       rule: %{
         table: "Elixir.EzagentDomainChat.Routing.MentionRouting",
         matcher_json: combinator_json,
-        receivers: "session://oncall"
+        receivers: "session://default/default/oncall"
       }
     )
     |> render_submit()

@@ -7,7 +7,7 @@ defmodule Ezagent.Entity.Session do
   Session handles `:send / :join / :leave` actions; the member-side
   `:receive` action runs on the recipient Kind (User / Agent).
 
-  Phase 2 spawns exactly one default instance — `session://main` —
+  Phase 2 spawns exactly one default instance — `session://default/default/main` —
   at `EzagentDomainChat.Application.start/2`. Multi-Session support is
   intentionally out of scope (Phase 3+).
 
@@ -56,9 +56,16 @@ defmodule Ezagent.Entity.Session do
   # is lost on restart, accepted in dev / acceptable for v1 demo.
   def persistence, do: :ephemeral
 
-  @doc "URI of the default Session instance spawned at boot."
+  @doc """
+  URI of the default Session instance spawned at boot.
+
+  SPEC v3 §3.6 (Phase 9 PR-7) — sessions are 3-segment:
+  `session://<template>/<workspace>/<name>`. The default session is
+  the canonical entry point and lives in `workspace://default` under
+  the `default` template name.
+  """
   @spec default_uri() :: URI.t()
-  def default_uri, do: URI.new!("session://main")
+  def default_uri, do: URI.new!("session://default/default/main")
 
   @doc """
   Phase 7 PR 41 — the **Generator**: instantiate a Session from a
@@ -130,10 +137,14 @@ defmodule Ezagent.Entity.Session do
   end
 
   defp spawn_fresh_session do
-    # Timestamped session URI; instance_name = `gen-<unix-ms>-<rand>`
-    # so concurrent Generator calls don't collide.
+    # SPEC v3 §3.6 (Phase 9 PR-7) — sessions are 3-segment:
+    # session://<template>/<workspace>/<name>. The Generator path
+    # builds `session://generic/default/gen-<unique>` so dispatch can
+    # extract workspace structurally without a registry lookup.
     unique_suffix = "#{System.system_time(:millisecond)}-#{System.unique_integer([:positive])}"
-    session_uri = URI.new!("session://gen-#{unique_suffix}")
+    {:ok, workspace_uri} = Ezagent.WorkspaceRegistry.default_workspace_uri()
+    workspace_name = workspace_uri.host
+    session_uri = URI.new!("session://generic/#{workspace_name}/gen-#{unique_suffix}")
 
     case Ezagent.SpawnRegistry.spawn(session_uri) do
       {:ok, _pid} -> {:ok, session_uri}
@@ -152,9 +163,23 @@ defmodule Ezagent.Entity.Session do
 
   defp spawn_orchestrator(session_uri, workspace_uri, owner_uri) do
     # Spawn the cc-orchestrator (PR 45 seed) under a fresh instance
-    # name keyed to this session for traceability.
-    template_uri = URI.parse("template://agent/cc-orchestrator")
-    instance_name = "orchestrator-#{session_uri.host}"
+    # name keyed to this session for traceability. SPEC v3 §3.6 PR-7
+    # — orchestrator template is workspace-scoped to `default`.
+    template_uri = URI.parse("template://agent/default/cc-orchestrator")
+    # session_uri.path = "/<workspace>/<name>" → use name as suffix
+    session_name =
+      case session_uri.path do
+        "/" <> rest ->
+          case String.split(rest, "/", parts: 2) do
+            [_ws, name] -> name
+            _ -> session_uri.host
+          end
+
+        _ ->
+          session_uri.host
+      end
+
+    instance_name = "orchestrator-#{session_name}"
 
     Ezagent.Entity.Agent.spawn(template_uri, instance_name, workspace_uri, owner_uri)
   end

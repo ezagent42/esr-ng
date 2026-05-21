@@ -89,8 +89,12 @@ defmodule Ezagent.Template.GenericSession do
   end
 
   @impl Ezagent.Kind.Template
-  def instantiate(_tmpl_name, %{"session_name" => session_name} = tmpl, _workspace_uri) do
-    session_uri = URI.parse("session://#{session_name}")
+  def instantiate(_tmpl_name, %{"session_name" => session_name} = tmpl, workspace_uri) do
+    # SPEC v3 §3.6 (Phase 9 PR-7) — sessions are 3-segment
+    # `session://<template>/<workspace>/<name>`. GenericSession is
+    # itself the template (template name `generic`).
+    workspace_name = workspace_uri.host
+    session_uri = URI.parse("session://generic/#{workspace_name}/#{session_name}")
 
     with {:ok, _session_pid} <- spawn_session(session_uri),
          :ok <- join_members(session_uri, Map.get(tmpl, "members", [])),
@@ -169,7 +173,7 @@ defmodule Ezagent.Template.GenericSession do
         type: :text,
         label: "Session name",
         required: true,
-        placeholder: "architect-review (becomes session://X)"
+        placeholder: "architect-review (becomes session://default/default/X)"
       },
       %{
         name: "members_csv",

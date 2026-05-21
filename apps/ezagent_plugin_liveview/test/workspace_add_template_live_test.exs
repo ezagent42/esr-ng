@@ -56,8 +56,12 @@ defmodule EzagentPluginLiveview.WorkspaceAddTemplateLiveTest do
     assert tmpl["class"] == "session.generic"
     assert tmpl["session_name"] == session_name
 
-    # Wait for the Session Kind to be alive in KindRegistry
-    session_uri = URI.parse("session://#{session_name}")
+    # Wait for the Session Kind to be alive in KindRegistry. SPEC v3
+    # §3.6 (Phase 9 PR-7) — sessions live at
+    # `session://generic/<workspace>/<session_name>` (the
+    # GenericSession Class places its instances under its own
+    # `generic` template segment).
+    session_uri = URI.parse("session://generic/#{ws_name}/#{session_name}")
     Process.sleep(100)
     assert {:ok, _pid} = Ezagent.KindRegistry.lookup(session_uri)
   end

@@ -14,7 +14,7 @@ defmodule EzagentDomainChat.ApplicationTest do
   dev/prod it spawns lazily via SpawnRegistry on first dispatch
   reference (login, session join, cap lookup). The chat test-env
   seed `maybe_seed_main_session_for_tests/0` pre-spawns admin before
-  joining it to session://main (chat.join requires the member's Kind
+  joining it to session://default/default/main (chat.join requires the member's Kind
   alive in KindRegistry), so admin is up by the time these
   boot-invariant tests run. No per-test setup needed.
   """
@@ -22,13 +22,13 @@ defmodule EzagentDomainChat.ApplicationTest do
   use ExUnit.Case
   alias Ezagent.{KindRegistry, ReadyGate}
 
-  test "session://main is registered in KindRegistry" do
+  test "session://default/default/main is registered in KindRegistry" do
     uri = Ezagent.Entity.Session.default_uri()
     assert {:ok, pid} = KindRegistry.lookup(uri)
     assert Process.alive?(pid)
   end
 
-  test "session://main is marked :ready in ReadyGate" do
+  test "session://default/default/main is marked :ready in ReadyGate" do
     uri_str = URI.to_string(Ezagent.Entity.Session.default_uri())
     assert :ready = ReadyGate.status(uri_str)
   end

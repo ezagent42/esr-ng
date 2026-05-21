@@ -30,9 +30,10 @@ defmodule Ezagent.Ecto.URITest do
 
   describe "load/1" do
     test "DB string → %URI{} struct" do
-      assert {:ok, %URI{} = uri} = URIType.load("session://main")
+      assert {:ok, %URI{} = uri} = URIType.load("session://default/default/main")
       assert uri.scheme == "session"
-      assert uri.host == "main"
+      assert uri.host == "default"
+      assert uri.path == "/default/main"
     end
 
     test "rejects non-string" do
@@ -48,7 +49,7 @@ defmodule Ezagent.Ecto.URITest do
     end
 
     test "accepts already-string (idempotent)" do
-      assert {:ok, "session://main"} = URIType.dump("session://main")
+      assert {:ok, "session://default/default/main"} = URIType.dump("session://default/default/main")
     end
 
     test "rejects others" do

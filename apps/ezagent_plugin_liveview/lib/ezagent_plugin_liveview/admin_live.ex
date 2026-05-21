@@ -42,7 +42,7 @@ defmodule EzagentPluginLiveview.AdminLive do
   alias EzagentDomainUi.IdeShell
   alias Ezagent.UI.SessionViewRegistry
 
-  @main_session_uri URI.new!("session://main")
+  @main_session_uri URI.new!("session://default/default/main")
   @message_limit 50
 
   @impl true
@@ -55,13 +55,13 @@ defmodule EzagentPluginLiveview.AdminLive do
     :ok = SessionViewRegistry.init()
     :ok = SessionViewRegistry.register(ConversationView)
 
-    # Phase 8c follow-up (Allen 2026-05-20) — auto-spawn session://main
+    # Phase 8c follow-up (Allen 2026-05-20) — auto-spawn session://default/default/main
     # if missing. Without this the LV mounts with a hardcoded
     # `current_session_uri` for a session that doesn't exist; the right
     # panel shows "No members — Chat plugin failed to start?" which is
     # misleading copy AND blames the wrong subsystem.
     #
-    # Root cause: PR-J removed session://main from the boot static
+    # Root cause: PR-J removed session://default/default/main from the boot static
     # children (workspace://default seeds it via Workspace.Loader). On
     # cold start before any session-creating action, KindRegistry has
     # no session://main. The wizard at `/` creates one, but the
@@ -187,6 +187,16 @@ defmodule EzagentPluginLiveview.AdminLive do
 
     File.mkdir_p!(Ezagent.Home.path("uploads"))
 
+    # SPEC v3 §3.6 (Phase 9 PR-7) — resource URIs are 3-segment
+    # `resource://<type>/<workspace>/<name>`. Use the caller's
+    # workspace so the resource belongs to the same tenant as the
+    # session that owns it.
+    workspace_name =
+      case Ezagent.Capability.workspace_of(socket.assigns.current_entity_uri) do
+        %URI{host: ws_name} when is_binary(ws_name) -> ws_name
+        _ -> "default"
+      end
+
     attachments =
       consume_uploaded_entries(socket, :attachments, fn %{path: tmp_path}, entry ->
         uuid = Ecto.UUID.generate()
@@ -194,7 +204,7 @@ defmodule EzagentPluginLiveview.AdminLive do
         stored_name = "#{uuid}-#{safe_name}"
         dest = Path.join(Ezagent.Home.path("uploads"), stored_name)
         File.cp!(tmp_path, dest)
-        {:ok, URI.parse("resource://uploads/#{stored_name}")}
+        {:ok, URI.parse("resource://uploads/#{workspace_name}/#{stored_name}")}
       end)
 
     if String.trim(text) == "" and attachments == [] do
@@ -432,7 +442,7 @@ defmodule EzagentPluginLiveview.AdminLive do
       |> assign_new(:view_render_fn, fn -> resolve_view_render(assigns) end)
       # Phase 8c PR-F: top-left `ezagent / <workspace>` label +
       # avatar dropdown "Admin" link gate. workspace_name reads the
-      # current session's bound workspace (PR-E #2 binds session://main
+      # current session's bound workspace (PR-E #2 binds session://default/default/main
       # to workspace://default, so this typically resolves to "default").
       |> assign_new(:workspace_name, fn ->
         workspace_name_for(assigns.current_session_uri)

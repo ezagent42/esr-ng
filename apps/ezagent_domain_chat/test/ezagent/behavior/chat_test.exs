@@ -52,7 +52,7 @@ defmodule Ezagent.Behavior.ChatTest do
 
   describe "invoke(:send, ...) routing (Phase 3c-step 1)" do
     test "with no routing rules → falls through to in-session members fan-out" do
-      session_uri = URI.new!("session://chat-fallback-#{System.unique_integer([:positive])}")
+      session_uri = URI.new!("session://default/default/chat-fallback-#{System.unique_integer([:positive])}")
       bind_to_default(session_uri)
       sender = URI.new!("entity://user/default/admin")
       other_member = URI.new!("entity://user/default/other-#{System.unique_integer([:positive])}")
@@ -88,8 +88,8 @@ defmodule Ezagent.Behavior.ChatTest do
         end
       end)
 
-      target_session = URI.new!("session://chat-routed-#{System.unique_integer([:positive])}")
-      session_uri = URI.new!("session://current")
+      target_session = URI.new!("session://default/default/chat-routed-#{System.unique_integer([:positive])}")
+      session_uri = URI.new!("session://default/default/current")
       bind_to_default(session_uri)
       bind_to_default(target_session)
       sender = URI.new!("entity://user/default/admin")
@@ -118,7 +118,7 @@ defmodule Ezagent.Behavior.ChatTest do
 
   describe "invoke(:send, ...)" do
     test "writes to MessageStore + broadcasts on session events topic + returns {:ok, slice, %{stored: true}}" do
-      session_uri = URI.new!("session://chat-test-#{System.unique_integer([:positive])}")
+      session_uri = URI.new!("session://default/default/chat-test-#{System.unique_integer([:positive])}")
       bind_to_default(session_uri)
       sender = URI.new!("entity://user/default/admin")
       msg = Message.new(sender, %{text: "hello world", attachments: []})
@@ -142,7 +142,7 @@ defmodule Ezagent.Behavior.ChatTest do
     end
 
     test "fan-out :receive on members when no mentions" do
-      session_uri = URI.new!("session://chat-fanout-#{System.unique_integer([:positive])}")
+      session_uri = URI.new!("session://default/default/chat-fanout-#{System.unique_integer([:positive])}")
       bind_to_default(session_uri)
       sender = URI.new!("entity://user/default/admin")
       member_2 = URI.new!("entity://agent/default/test_test-bot-#{System.unique_integer([:positive])}")
@@ -222,7 +222,7 @@ defmodule Ezagent.Behavior.ChatTest do
     test "to_claude payload meta values are all strings (no list/map smuggling)" do
       agent_uri = URI.new!("entity://agent/default/test_cc-meta-string-#{System.unique_integer([:positive])}")
       sender = URI.new!("entity://user/default/admin")
-      session_uri = URI.new!("session://meta-#{System.unique_integer([:positive])}")
+      session_uri = URI.new!("session://default/default/meta-#{System.unique_integer([:positive])}")
 
       msg = Message.new(sender, %{text: "plain text", attachments: []})
 
@@ -253,7 +253,7 @@ defmodule Ezagent.Behavior.ChatTest do
     test "attachment → meta.file_path is the first attachment's local_path string" do
       agent_uri = URI.new!("entity://agent/default/test_cc-meta-att-#{System.unique_integer([:positive])}")
       sender = URI.new!("entity://user/default/admin")
-      session_uri = URI.new!("session://meta-att-#{System.unique_integer([:positive])}")
+      session_uri = URI.new!("session://default/default/meta-att-#{System.unique_integer([:positive])}")
 
       msg =
         Message.new(sender, %{
@@ -289,7 +289,7 @@ defmodule Ezagent.Behavior.ChatTest do
       # body_attachments + first_attachment_path must tolerate either shape.
       agent_uri = URI.new!("entity://agent/default/test_cc-meta-stringkey-#{System.unique_integer([:positive])}")
       sender = URI.new!("entity://user/default/admin")
-      session_uri = URI.new!("session://meta-stringkey-#{System.unique_integer([:positive])}")
+      session_uri = URI.new!("session://default/default/meta-stringkey-#{System.unique_integer([:positive])}")
 
       string_keyed_body = %{
         "text" => "from db",
@@ -318,7 +318,7 @@ defmodule Ezagent.Behavior.ChatTest do
 
   describe "invoke(:join, ...)" do
     test "Process.monitor target Kind + add to members + returns members list" do
-      session_uri = URI.new!("session://join-#{System.unique_integer([:positive])}")
+      session_uri = URI.new!("session://default/default/join-#{System.unique_integer([:positive])}")
       member_uri = URI.new!("entity://user/default/transient-#{System.unique_integer([:positive])}")
 
       # Spawn a minimal GenServer to play the member role; it self-registers
@@ -341,7 +341,7 @@ defmodule Ezagent.Behavior.ChatTest do
     end
 
     test "returns error when member URI not in KindRegistry" do
-      session_uri = URI.new!("session://join-missing-#{System.unique_integer([:positive])}")
+      session_uri = URI.new!("session://default/default/join-missing-#{System.unique_integer([:positive])}")
       missing_uri = URI.new!("entity://user/default/does-not-exist-#{System.unique_integer([:positive])}")
 
       slice = Chat.init_slice(%{})
@@ -352,7 +352,7 @@ defmodule Ezagent.Behavior.ChatTest do
     end
 
     test "replays missed messages on rejoin (last_seen populated)" do
-      session_uri = URI.new!("session://replay-#{System.unique_integer([:positive])}")
+      session_uri = URI.new!("session://default/default/replay-#{System.unique_integer([:positive])}")
       bind_to_default(session_uri)
       member_uri = URI.new!("entity://user/default/rejoin-#{System.unique_integer([:positive])}")
       sender = URI.new!("entity://user/default/other")
@@ -389,7 +389,7 @@ defmodule Ezagent.Behavior.ChatTest do
 
   describe "invoke(:leave, ...)" do
     test "drops member + demonitors + clears last_seen" do
-      session_uri = URI.new!("session://leave-#{System.unique_integer([:positive])}")
+      session_uri = URI.new!("session://default/default/leave-#{System.unique_integer([:positive])}")
       member_uri = URI.new!("entity://user/default/leaver-#{System.unique_integer([:positive])}")
       ref = make_ref()
 
@@ -420,7 +420,7 @@ defmodule Ezagent.Behavior.ChatTest do
         last_seen: %{}
       }
 
-      ctx = %{self_uri: URI.new!("session://x"), kind_module: Ezagent.Entity.Session}
+      ctx = %{self_uri: URI.new!("session://default/default/x"), kind_module: Ezagent.Entity.Session}
 
       down_msg = {:DOWN, ref, :process, self(), :normal}
 
@@ -432,7 +432,7 @@ defmodule Ezagent.Behavior.ChatTest do
 
     test "ignores unknown refs" do
       slice = %{members: %{}, monitors: %{}, last_seen: %{}}
-      ctx = %{self_uri: URI.new!("session://y"), kind_module: Ezagent.Entity.Session}
+      ctx = %{self_uri: URI.new!("session://default/default/y"), kind_module: Ezagent.Entity.Session}
 
       assert :ignore =
                Chat.handle_kind_message(
@@ -444,7 +444,7 @@ defmodule Ezagent.Behavior.ChatTest do
 
     test "ignores non-:DOWN messages" do
       slice = Chat.init_slice(%{})
-      ctx = %{self_uri: URI.new!("session://z"), kind_module: Ezagent.Entity.Session}
+      ctx = %{self_uri: URI.new!("session://default/default/z"), kind_module: Ezagent.Entity.Session}
 
       assert :ignore = Chat.handle_kind_message(:tick, slice, ctx)
       assert :ignore = Chat.handle_kind_message({:any, "thing"}, slice, ctx)

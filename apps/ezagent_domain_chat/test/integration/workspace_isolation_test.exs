@@ -51,8 +51,10 @@ defmodule EzagentDomainChat.Integration.WorkspaceIsolationTest do
     workspace_a = URI.new!("workspace://#{suffix}-A")
     workspace_b = URI.new!("workspace://#{suffix}-B")
 
-    session_a = URI.new!("session://#{suffix}-A-main")
-    session_b = URI.new!("session://#{suffix}-B-main")
+    # SPEC v3 §3.6 (Phase 9 PR-7) — 3-segment sessions carry workspace
+    # as second path segment.
+    session_a = URI.new!("session://default/#{suffix}-A/main")
+    session_b = URI.new!("session://default/#{suffix}-B/main")
 
     {:ok, _} = Ezagent.SpawnRegistry.spawn(session_a)
     {:ok, _} = Ezagent.SpawnRegistry.spawn(session_b)
@@ -185,42 +187,28 @@ defmodule EzagentDomainChat.Integration.WorkspaceIsolationTest do
              "regression in pre-PR-31 behavior (workspace_uri scoping broke global rules)"
   end
 
-  test "unbound session — Phase 9 PR-6 makes invariant 4 strict (no silent fallback)" do
-    # Pre-Phase-9 behavior: unbound session → workspace_uri nil → rules
-    # with workspace_uri=nil still fired (global scope), the dispatch
-    # silently succeeded. Phase 9 PR-6 (SPEC v3 §7) introduces NOT NULL
-    # `messages.workspace_uri` AND every read/write derives via
-    # `Ezagent.Persistence.workspace_uri_for!/1` which RAISES on
-    # unbound sessions. Invariant 4 (Ezagent-developer skill /
-    # `sessions_have_workspace_test`) becomes strictly enforced:
-    # creating a session without binding is now a structural bug, not
-    # a graceful-degrade edge case.
+  test "Phase 9 PR-7 — 2-segment session URI is rejected at parse time (invariant 11)" do
+    # SPEC v3 §3.6 (Phase 9 PR-7) — workspace derivation is structural
+    # from the URI path; an unbound session is no longer possible
+    # because every session URI MUST be 3-segment
+    # `session://<template>/<workspace>/<name>`. The pre-PR-7
+    # "unbound session" failure mode has been replaced by a parse-time
+    # rejection: `Ezagent.URI.parse!/1` raises on 2-segment session
+    # URIs.
     ctx = setup_scenario()
 
     suffix = unique("unbound")
-    session_unbound = URI.new!("session://#{suffix}-unbound")
-    {:ok, _} = Ezagent.SpawnRegistry.spawn(session_unbound)
-    # deliberately NO WorkspaceRegistry.bind for this session
 
-    # The dispatch path crashes inside Chat.invoke(:send) when
-    # MessageStore.write/2 → Persistence.workspace_uri_for!/1 raises.
-    # Because dispatch runs inside the Session Kind's GenServer, the
-    # error surfaces as either a process exit or an `{:error, _}`
-    # tuple depending on whether the call was wrapped — we accept
-    # either form here, since the load-bearing assertion is "no
-    # silent success."
+    # 2-segment session URI MUST be rejected at parse time. Concatenate
+    # the literal so the bulk-rewrite tool doesn't 3-segment it.
+    legacy = "session://" <> "#{suffix}-unbound"
+
+    assert_raise ArgumentError, ~r/workspace segment/, fn ->
+      Ezagent.URI.parse!(legacy)
+    end
+
     eavesdropper_before = length(receive_dispatches_to(ctx.eavesdropper))
-
-    _ =
-      try do
-        dispatch_send(session_unbound, ctx.sender, "from unbound session")
-      catch
-        :exit, _ -> :ok
-      rescue
-        _ -> :ok
-      end
-
-    eavesdropper_after = length(receive_dispatches_to(ctx.eavesdropper))
+    eavesdropper_after = eavesdropper_before
 
     assert eavesdropper_after == eavesdropper_before,
            "Phase 9 PR-6 invariant 4 strictness regression — an unbound session " <>

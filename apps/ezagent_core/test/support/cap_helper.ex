@@ -54,7 +54,7 @@ defmodule Ezagent.Test.CapHelper do
   ## Examples
 
       cap(kind: :session, behavior: Ezagent.Behavior.Chat,
-          instance: URI.new!("session://default/main"))
+          instance: URI.new!("session://default/default/main"))
 
       cap(kind: :any, behavior: :any, instance: :any,
           workspace_uri: :any)  # cross-workspace cap (admin pattern)
@@ -86,7 +86,7 @@ defmodule Ezagent.Test.CapHelper do
   ## Examples
 
       needed(kind: :session, behavior: Ezagent.Behavior.Chat,
-             instance: URI.new!("session://default/main"))
+             instance: URI.new!("session://default/default/main"))
   """
   @spec needed(keyword() | map()) :: %{
           kind: atom(),

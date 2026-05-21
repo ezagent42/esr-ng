@@ -24,10 +24,52 @@ defmodule Ezagent.URITest do
       assert uri.path == "/team-alpha/cc_demo"
     end
 
-    test "parses legacy 1-seg session:// URI (kept alive until later PR)" do
-      uri = Ezagent.URI.parse!("session://main")
+    test "parses 3-segment session:// URI (SPEC v3 §3.6 PR-7)" do
+      uri = Ezagent.URI.parse!("session://default/default/main")
       assert uri.scheme == "session"
-      assert uri.host == "main"
+      assert uri.host == "default"
+      assert uri.path == "/default/main"
+    end
+
+    test "parses 3-segment template:// URI (SPEC v3 §3.6 PR-7)" do
+      uri = Ezagent.URI.parse!("template://agent/default/cc-orchestrator")
+      assert uri.scheme == "template"
+      assert uri.host == "agent"
+      assert uri.path == "/default/cc-orchestrator"
+    end
+
+    test "parses 3-segment resource:// URI (SPEC v3 §3.6 PR-7)" do
+      uri = Ezagent.URI.parse!("resource://uploads/default/file-abc")
+      assert uri.scheme == "resource"
+      assert uri.host == "uploads"
+      assert uri.path == "/default/file-abc"
+    end
+
+    test "rejects 2-segment session:// URI (SPEC v3 §3.6 PR-7)" do
+      # NOTE: literal `session://default/default/main` — the rejected 2-seg form is the point.
+      legacy = "session://default/" <> "main"
+
+      assert_raise ArgumentError, ~r/workspace segment/, fn ->
+        Ezagent.URI.parse!(legacy)
+      end
+    end
+
+    test "rejects 2-segment template:// URI (SPEC v3 §3.6 PR-7)" do
+      # NOTE: literal `template://agent/default/cc-orch` — the rejected 2-seg form is the point.
+      legacy = "template://agent/" <> "cc-orch"
+
+      assert_raise ArgumentError, ~r/workspace segment/, fn ->
+        Ezagent.URI.parse!(legacy)
+      end
+    end
+
+    test "rejects 2-segment resource:// URI (SPEC v3 §3.6 PR-7)" do
+      # NOTE: literal `resource://uploads/default/abc` — the rejected 2-seg form is the point.
+      legacy = "resource://uploads/" <> "abc"
+
+      assert_raise ArgumentError, ~r/workspace segment/, fn ->
+        Ezagent.URI.parse!(legacy)
+      end
     end
 
     test "raises on missing scheme" do
@@ -110,18 +152,32 @@ defmodule Ezagent.URITest do
     end
   end
 
-  describe "instance/1 — legacy 1-seg schemes (pre-uniform-2seg transitional)" do
-    test "legacy 1-seg session:// strips query" do
-      uri = Ezagent.URI.parse!("session://main?action=chat.send")
+  describe "instance/1 — unified 3-seg schemes (SPEC v3 §3.6 PR-7)" do
+    test "session:// strips query and keeps full 3-segment path" do
+      uri = Ezagent.URI.parse!("session://default/default/main?action=chat.send")
       inst = Ezagent.URI.instance(uri)
       assert inst.scheme == "session"
-      assert inst.host == "main"
-      assert inst.path == nil
+      assert inst.host == "default"
+      assert inst.path == "/default/main"
       assert inst.query == nil
-      assert URI.to_string(inst) == "session://main"
+      assert URI.to_string(inst) == "session://default/default/main"
     end
 
-    test "instance of already-instance legacy URI is itself" do
+    test "template:// strips query and keeps full 3-segment path" do
+      uri = Ezagent.URI.parse!("template://agent/default/cc-orchestrator?action=identity.list_caps")
+      inst = Ezagent.URI.instance(uri)
+      assert inst.scheme == "template"
+      assert inst.host == "agent"
+      assert inst.path == "/default/cc-orchestrator"
+      assert inst.query == nil
+    end
+
+    test "resource:// strips query and keeps full 3-segment path" do
+      uri = Ezagent.URI.parse!("resource://uploads/default/file-abc")
+      assert Ezagent.URI.instance(uri) == uri
+    end
+
+    test "instance of workspace:// is unchanged (1-seg root scheme)" do
       uri = Ezagent.URI.parse!("workspace://default")
       assert Ezagent.URI.instance(uri) == uri
     end
@@ -167,8 +223,8 @@ defmodule Ezagent.URITest do
       assert {:ok, {:echo, :say}} = Ezagent.URI.behavior_action(uri)
     end
 
-    test "extracts from legacy 1-seg session:// scheme" do
-      uri = Ezagent.URI.parse!("session://main?action=chat.send")
+    test "extracts from 3-seg session:// scheme (SPEC v3 §3.6 PR-7)" do
+      uri = Ezagent.URI.parse!("session://default/default/main?action=chat.send")
       assert {:ok, {:chat, :send}} = Ezagent.URI.behavior_action(uri)
     end
 

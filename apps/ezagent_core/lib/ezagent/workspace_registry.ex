@@ -2,13 +2,26 @@ defmodule Ezagent.WorkspaceRegistry do
   @moduledoc """
   Session → Workspace back-edge.
 
-  Phase 7 PR 31 (IMPL-7-1): production routing dispatch via
-  `Ezagent.Behavior.Chat.invoke(:send, ...)` needs to know which workspace
-  a session belongs to so it can pass `workspace_uri:` to
-  `Ezagent.Routing.Resolver.resolve/4`. Without this lookup,
-  workspace-scoped routing rules never fire — the chat.ex:116 call
-  site previously used 3-arg `resolve/3` which forwards with
-  `opts = []`.
+  ## Phase 9 PR-7 — demoted to consistency cache (SPEC v3 §3.6)
+
+  After URI scheme unification, every session URI carries its
+  workspace as the second path segment
+  (`session://<template>/<workspace>/<name>`). Workspace derivation
+  is now structural / O(1) via `Ezagent.Capability.workspace_of/1` —
+  the registry is no longer the authoritative source for sessions.
+
+  The registry is retained as a consistency cache for code paths
+  that hold a session URI and want to look up its workspace without
+  re-parsing. The
+  `all_per_tenant_uris_have_workspace_test` invariant pins that
+  every binding equals the workspace segment of its bound URI.
+
+  Phase 7 PR 31 (IMPL-7-1) — historical context: production routing
+  dispatch via `Ezagent.Behavior.Chat.invoke(:send, ...)` needed to
+  know which workspace a session belongs to so it could pass
+  `workspace_uri:` to `Ezagent.Routing.Resolver.resolve/4`. PR-7
+  replaces that lookup with structural extraction; the routing
+  Resolver still accepts the bound workspace as an `opts` field.
 
   ## Why an ETS Registry, not a Chat slice field
 
@@ -49,7 +62,7 @@ defmodule Ezagent.WorkspaceRegistry do
   Returns `{:ok, URI.t()}` always (current impl is constant; future
   override could read app config). The default workspace is the
   implicit owner for sessions that aren't created via a SessionTemplate
-  with its own `default_workspace_uri` field (e.g. session://main).
+  with its own `default_workspace_uri` field (e.g. session://default/default/main).
   """
   @spec default_workspace_uri() :: {:ok, URI.t()}
   def default_workspace_uri do

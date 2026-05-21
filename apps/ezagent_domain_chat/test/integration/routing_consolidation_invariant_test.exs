@@ -61,7 +61,7 @@ defmodule EzagentDomainChat.Integration.RoutingConsolidationInvariantTest do
       Application.put_env(:ezagent_core, :routing_tables, [empty_table])
 
       try do
-        recipients = Resolver.resolve(build_msg(), URI.parse("session://test"), [])
+        recipients = Resolver.resolve(build_msg(), URI.parse("session://default/default/test"), [])
 
         assert recipients == [],
                "no rules + no members must produce zero recipients — " <>
@@ -95,7 +95,7 @@ defmodule EzagentDomainChat.Integration.RoutingConsolidationInvariantTest do
         ]
 
         msg = build_msg("hi", [], "entity://user/default/admin")
-        recipients = Resolver.resolve(msg, URI.parse("session://test"), members)
+        recipients = Resolver.resolve(msg, URI.parse("session://default/default/test"), members)
 
         # admin is sender → excluded; remaining 2 → recipients
         assert length(recipients) == 2
@@ -117,14 +117,14 @@ defmodule EzagentDomainChat.Integration.RoutingConsolidationInvariantTest do
       Application.put_env(:ezagent_core, :routing_tables, [table])
 
       try do
-        current = URI.parse("session://main")
+        current = URI.parse("session://default/default/main")
 
         # Rule routes to current session — Resolver MUST exclude it
         Ezagent.RoutingRegistry.put(table, Matcher.always(), [URI.to_string(current)])
 
         recipients = Resolver.resolve(build_msg(), current, [])
 
-        refute Enum.any?(recipients, fn r -> URI.to_string(r) == "session://main" end),
+        refute Enum.any?(recipients, fn r -> URI.to_string(r) == "session://default/default/main" end),
                "Resolver must exclude current session URI to prevent dispatch loop"
       after
         Application.put_env(:ezagent_core, :routing_tables, original_tables)

@@ -124,7 +124,7 @@ defmodule EzagentPluginFeishu.Application do
   defp seed_each(bindings) do
     Enum.each(bindings, fn binding ->
       chat_id = Map.get(binding, "chat_id")
-      target_session = Map.get(binding, "session_uri") || "session://main"
+      target_session = Map.get(binding, "session_uri") || "session://default/default/main"
 
       if is_binary(chat_id) and chat_id != "" do
         Logger.info(

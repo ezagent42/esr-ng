@@ -21,7 +21,7 @@ defmodule Ezagent.Orchestrator.Tools do
   orchestrator's session context:
 
       Tools.add_agent_slot("backend-dev",
-        URI.parse("template://agent/cc-orchestrator"),
+        URI.parse("template://agent/default/cc-orchestrator"),
         opts: [
           session_uri: %URI{} = sess,
           workspace_uri: %URI{} = ws,
@@ -205,7 +205,7 @@ defmodule Ezagent.Orchestrator.Tools do
     instead).
 
   Returns `{:ok, new_template_uri}` where the URI is
-  `template://session/<parent_name>@<new_hash>`.
+  `template://session/<workspace>/<parent_name>@<new_hash>`.
 
   ## Deleted parent (PR 48)
 
@@ -226,7 +226,11 @@ defmodule Ezagent.Orchestrator.Tools do
          {:ok, parent_name} <- extract_template_name(parent_uri),
          {:ok, slice} <- build_working_copy(session_uri, workspace_uri, caller_uri, parent_uri) do
       version_hash = SessionTemplate.compute_version_hash(slice)
-      new_uri = SessionTemplate.build_uri(parent_name, version_hash)
+      # SPEC v3 §3.6 PR-7 — new template URI lands in same workspace
+      # as the orchestrator's session.
+      new_uri =
+        SessionTemplate.build_uri(parent_name, version_hash, workspace: workspace_uri.host)
+
       {:ok, new_uri}
     end
   end
@@ -271,7 +275,11 @@ defmodule Ezagent.Orchestrator.Tools do
          {:ok, caller_uri} <- require_opt(opts, :caller),
          {:ok, slice} <- build_working_copy(session_uri, workspace_uri, caller_uri, parent_uri) do
       version_hash = SessionTemplate.compute_version_hash(slice)
-      new_uri = SessionTemplate.build_uri(new_name, version_hash)
+      # SPEC v3 §3.6 PR-7 — new template URI lands in same workspace
+      # as the orchestrator's session.
+      new_uri =
+        SessionTemplate.build_uri(new_name, version_hash, workspace: workspace_uri.host)
+
       {:ok, new_uri}
     end
   end
@@ -338,7 +346,7 @@ defmodule Ezagent.Orchestrator.Tools do
     host == expected_host and is_binary(uri.path)
   end
 
-  defp template_match?(%URI{scheme: "template", host: host, path: path} = uri, expected_host, filter)
+  defp template_match?(%URI{scheme: "template", host: _host, path: path} = uri, expected_host, filter)
        when is_binary(filter) do
     template_match?(uri, expected_host, nil) and
       (path != nil and String.contains?(path, filter))
@@ -348,10 +356,11 @@ defmodule Ezagent.Orchestrator.Tools do
 
   defp extract_template_name(%URI{scheme: "template", host: "session", path: path})
        when is_binary(path) do
-    # Path is "/<name>@<hash>" or "/<name>"
+    # SPEC v3 §3.6 (Phase 9 PR-7) — path is "/<workspace>/<name>@<hash>"
+    # (PR-7 added the workspace segment).
     case String.split(path, "/", trim: true) do
-      [first | _] ->
-        name = first |> String.split("@") |> hd()
+      [_workspace, name_with_hash | _] ->
+        name = name_with_hash |> String.split("@") |> hd()
 
         if name == "" do
           {:error, :template_name_empty}
@@ -408,7 +417,7 @@ defmodule Ezagent.Orchestrator.Tools do
       name: nil,
       description: "",
       agent_slots: agent_slots,
-      orchestrator_template_uri: URI.parse("template://agent/cc-orchestrator"),
+      orchestrator_template_uri: URI.parse("template://agent/default/cc-orchestrator"),
       routing_rules: routing_rules,
       default_workspace_uri: workspace_uri,
       parent_template_uri: parent_uri,

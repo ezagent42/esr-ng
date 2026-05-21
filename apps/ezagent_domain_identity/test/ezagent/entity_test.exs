@@ -85,7 +85,7 @@ defmodule Ezagent.EntityTest do
 
   describe "authenticate/2 — unsupported entity URIs" do
     test "session URI rejected" do
-      uri = URI.parse("session://default/main")
+      uri = URI.parse("session://default/default/main")
       assert {:error, {:unsupported_entity_uri, ^uri}} = Entity.authenticate(uri, "x")
     end
 

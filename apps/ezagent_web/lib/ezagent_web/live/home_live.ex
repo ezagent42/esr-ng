@@ -15,7 +15,7 @@ defmodule EzagentWeb.HomeLive do
 
   ## Phase 8c PR-J context
 
-  Before PR-J, `session://main` was a static supervisor child of
+  Before PR-J, `session://default/default/main` was a static supervisor child of
   `EzagentDomainChat.Application` — hardcoded outside the canonical
   creation flow (`Session.spawn_from_template/2` / `create_session/2`).
   That bypass forced two boot-time workarounds (workspace bind +
@@ -179,7 +179,7 @@ defmodule EzagentWeb.HomeLive do
                 class="w-full px-3 py-2 text-sm bg-white dark:bg-zinc-950 border border-zinc-300 dark:border-zinc-700 rounded-md text-zinc-900 dark:text-zinc-100 focus:outline-none focus:border-zinc-500 dark:focus:border-zinc-500"
               />
               <p class="mt-1 text-xs text-zinc-500">
-                Creates <span class="font-mono">session://<span id="short-name-preview">{@form[:short_name].value}</span></span> bound to <span class="font-mono">workspace://default</span>.
+                Creates <span class="font-mono">session://default/default/<span id="short-name-preview">{@form[:short_name].value}</span></span> bound to <span class="font-mono">workspace://default</span>.
               </p>
             </div>
 

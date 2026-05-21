@@ -44,7 +44,7 @@ defmodule Ezagent.Entity.SessionTemplateTest do
     test "same slice content → same hash (deterministic)" do
       slice = %{
         name: "stable",
-        agent_slots: [{"a", URI.parse("template://agent/x")}],
+        agent_slots: [{"a", URI.parse("template://agent/default/x")}],
         version_hash: nil
       }
 
@@ -93,13 +93,21 @@ defmodule Ezagent.Entity.SessionTemplateTest do
   end
 
   describe "build_uri/2" do
-    test "constructs template://session/<name>@<hash> URI shape" do
+    test "constructs template://session/<workspace>/<name>@<hash> URI shape (SPEC v3 §3.6 PR-7)" do
       hash = String.duplicate("a", 64)
       uri = SessionTemplate.build_uri("code-review", hash)
 
       assert uri.scheme == "template"
       assert uri.host == "session"
-      assert uri.path == "/code-review@" <> hash
+      # PR-7 adds workspace segment; default workspace is `default`.
+      assert uri.path == "/default/code-review@" <> hash
+    end
+
+    test "build_uri/3 with explicit workspace places template in workspace path segment" do
+      hash = String.duplicate("b", 64)
+      uri = SessionTemplate.build_uri("code-review", hash, workspace: "team-alpha")
+
+      assert uri.path == "/team-alpha/code-review@" <> hash
     end
   end
 end

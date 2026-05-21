@@ -14,8 +14,8 @@ defmodule Ezagent.MessageStoreTest do
   alias Ezagent.{Message, MessageStore}
   alias EzagentCore.Repo
 
-  @session_a URI.new!("session://main")
-  @session_b URI.new!("session://other")
+  @session_a URI.new!("session://default/default/main")
+  @session_b URI.new!("session://default/default/other")
   @admin URI.new!("entity://user/default/admin")
   @bot URI.new!("entity://agent/default/test_cc-builder")
 

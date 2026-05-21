@@ -8,7 +8,7 @@ defmodule EzagentDomainChat do
 
   ## PR-J (Phase 8c, Allen 2026-05-20)
 
-  The previous `:main_is_static` restriction was removed. `session://main`
+  The previous `:main_is_static` restriction was removed. `session://default/default/main`
   is no longer a hardcoded static supervisor child of
   `EzagentDomainChat.Application` — it now goes through the same code
   path as every other session, created by the first-login wizard. The
@@ -25,9 +25,14 @@ defmodule EzagentDomainChat do
   alias Ezagent.Entity.{Session, User}
 
   @doc """
-  Spawn a new Session Kind at `session://<short_name>` under
-  `EzagentDomainChat.SessionSupervisor`, bind it to the default
-  workspace, and join `creator_uri` to it.
+  Spawn a new Session Kind under `EzagentDomainChat.SessionSupervisor`,
+  bind it to the default workspace, and join `creator_uri` to it.
+
+  SPEC v3 §3.6 (Phase 9 PR-7) — sessions are
+  `session://<template>/<workspace>/<name>`. `short_name` becomes the
+  `<name>` segment. The default template is `default` and the default
+  workspace is `default`. Callers needing a different workspace can
+  pass `opts[:workspace_uri]` or `opts[:template_name]`.
 
   Returns `{:ok, session_uri}` on success, `{:error, reason}` on:
   - `{:already_registered, _}` — session URI already in KindRegistry
@@ -36,18 +41,27 @@ defmodule EzagentDomainChat do
   Idempotent re-spawn of same short_name returns `{:ok, existing_uri}`
   (via `{:already_started, pid}` → reuse pid).
   """
-  @spec create_session(String.t(), URI.t() | nil) :: {:ok, URI.t()} | {:error, term()}
-  def create_session(short_name, creator_uri \\ nil)
+  @spec create_session(String.t(), URI.t() | nil, keyword()) ::
+          {:ok, URI.t()} | {:error, term()}
+  def create_session(short_name, creator_uri \\ nil, opts \\ [])
 
-  def create_session(short_name, creator_uri) when is_binary(short_name) and short_name != "" do
-    session_uri = URI.new!("session://#{short_name}")
+  def create_session(short_name, creator_uri, opts)
+      when is_binary(short_name) and short_name != "" do
+    {:ok, default_workspace_uri} = Ezagent.WorkspaceRegistry.default_workspace_uri()
+    workspace_uri = Keyword.get(opts, :workspace_uri, default_workspace_uri)
+    template_name = Keyword.get(opts, :template_name, "default")
+    workspace_name = workspace_name_of!(workspace_uri)
+
+    session_uri =
+      URI.new!("session://#{template_name}/#{workspace_name}/#{short_name}")
+
     spec = {Ezagent.Kind.Server, {Session, %{uri: session_uri}}}
 
     result = DynamicSupervisor.start_child(EzagentDomainChat.SessionSupervisor, spec)
 
     case result do
       {:ok, _pid} ->
-        :ok = bind_default_workspace(session_uri)
+        :ok = Ezagent.WorkspaceRegistry.bind(session_uri, workspace_uri)
         :ok = join_creator(session_uri, creator_uri || User.admin_uri())
         {:ok, session_uri}
 
@@ -58,12 +72,12 @@ defmodule EzagentDomainChat do
       # (idempotent ETS overwrite) + re-attempt join (cast is idempotent on
       # members map).
       {:error, {:already_started, _pid}} ->
-        :ok = bind_default_workspace(session_uri)
+        :ok = Ezagent.WorkspaceRegistry.bind(session_uri, workspace_uri)
         :ok = join_creator(session_uri, creator_uri || User.admin_uri())
         {:ok, session_uri}
 
       {:error, {:already_registered, _}} ->
-        :ok = bind_default_workspace(session_uri)
+        :ok = Ezagent.WorkspaceRegistry.bind(session_uri, workspace_uri)
         :ok = join_creator(session_uri, creator_uri || User.admin_uri())
         {:ok, session_uri}
 
@@ -72,7 +86,16 @@ defmodule EzagentDomainChat do
     end
   end
 
-  def create_session(_short_name, _creator), do: {:error, :short_name_required}
+  def create_session(_short_name, _creator, _opts), do: {:error, :short_name_required}
+
+  # workspace://<name> → "<name>". Raises ArgumentError if the URI
+  # isn't a bare workspace URI (helps catch passing entity / session
+  # URIs by accident).
+  defp workspace_name_of!(%URI{scheme: "workspace", host: name}) when is_binary(name),
+    do: name
+
+  defp workspace_name_of!(other),
+    do: raise(ArgumentError, "expected %URI{scheme: \"workspace\"}, got: #{inspect(other)}")
 
   @doc """
   Return all known Session URIs (KindRegistry session:// entries),
@@ -85,16 +108,6 @@ defmodule EzagentDomainChat do
     |> Enum.filter(fn {uri_str, _pid} -> String.starts_with?(uri_str, "session://") end)
     |> Enum.map(fn {uri_str, _pid} -> URI.new!(uri_str) end)
     |> Enum.sort_by(&URI.to_string/1)
-  end
-
-  # PR-J — bind every session to a workspace at creation. Closes the
-  # invariant (`sessions_have_workspace_test.exs`) for sessions created
-  # via this facade. Uses the canonical default workspace URI from
-  # `Ezagent.WorkspaceRegistry.default_workspace_uri/0`. Idempotent
-  # ETS write — re-binding is a no-op overwrite.
-  defp bind_default_workspace(session_uri) do
-    {:ok, workspace_uri} = Ezagent.WorkspaceRegistry.default_workspace_uri()
-    Ezagent.WorkspaceRegistry.bind(session_uri, workspace_uri)
   end
 
   defp join_creator(session_uri, creator_uri) do

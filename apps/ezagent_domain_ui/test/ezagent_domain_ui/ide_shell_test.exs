@@ -315,7 +315,7 @@ defmodule EzagentDomainUi.IdeShellTest do
       assigns = %{
         current_entity_uri: "entity://user/default/admin",
         status: %{
-          session_uri: "session://main",
+          session_uri: "session://default/default/main",
           agents_alive: 3,
           bridges: 1,
           debug_events: 5,
@@ -332,7 +332,7 @@ defmodule EzagentDomainUi.IdeShellTest do
         """)
 
       assert html =~ "entity://user/default/admin"
-      assert html =~ "session://main"
+      assert html =~ "session://default/default/main"
       assert html =~ "3 agents"
       assert html =~ "1 bridges"
       assert html =~ "5 events"
@@ -379,8 +379,8 @@ defmodule EzagentDomainUi.IdeShellTest do
         query: "ses",
         results: [
           %{
-            key: "session://main",
-            label: "session://main",
+            key: "session://default/default/main",
+            label: "session://default/default/main",
             icon: "message-square",
             group: "session"
           }
@@ -392,7 +392,7 @@ defmodule EzagentDomainUi.IdeShellTest do
         <IdeShell.command_palette open={@open} query={@query} results={@results} />
         """)
 
-      assert html =~ "session://main"
+      assert html =~ "session://default/default/main"
       refute html =~ "没有结果"
     end
   end
