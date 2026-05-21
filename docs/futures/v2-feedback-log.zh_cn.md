@@ -55,7 +55,39 @@
 
 ## 条目
 
-（空 —— V1 验收刚开始）
+## Workflow gap — UI "create agent" 动词隐藏了 instantiate step
+
+### 原始反馈
+
+> [Feishu 2026-05-21 15:59 (GMT+9), msg `om_x100b6fde9bf484a8c4afee8c48a8120`]
+> 我刚创建了 Agent: entity://agent/default/cc_demo，但看起来还是显示not running, 请检查是否已经启动？如果没有，为什么？如果启动了，为什么显示not running?
+
+### 本质原因
+
+V1 的 user-facing 动词 **"create agent"** **不等于** **"agent 准备好接收消息"**。UI 流程把 "create" 拆成 3 个内部步骤（spawn Kind 进 supervisor + 把 cc.agent template 加进 workspace.session_templates JSON + 通过 `cc.agent.instantiate/3` 启 PtyServer），但 `AgentNewLive.handle_event("create_agent")` 只做了 1+2 步。第 3 步（启 PtyServer）只在 `Workspace.Loader.load_all/0` 在 phx boot 时跑 — 所以新建的 cc agent 要等到 phx 重启才会真正 running。
+
+这跟 **Phase 8c bare-handle bounce** bug 是同一类抽象漏出（auth 动词的表面效果跟实际存进 session 的内容不一致）。共同模式：user-facing 动词的 dispatch 路径在结构上**不完整**, 比动词的表面意思**少做了事**。
+
+### V2 影响
+
+- **Scope**: structural — V1 的 `AgentNewLive` "create" 动词有误导性，不是一行能修的
+- **Affects**: `EzagentPluginLiveview.AgentNewLive`, `Ezagent.Workspace.Loader`, `Ezagent.PluginCc.PtyServer` 生命周期，可能还有 "agent kind 生命周期阶段" 抽象本身
+- **Blocks**: Allen 的 V1 cc agent 测试（workaround: phx 重启）—— 不硬阻塞其它测试
+- **相关 Phase 9 PR/SPEC**: 无直接关联；这是 Phase 8c 的表面 bug 被 V1 测试 surface 出来
+- **相关 memory**: 形态类似 Phase 8c bare-handle bounce 触发 `SessionPrincipal.put/2` invariant 的 bug
+
+### 候选方案
+
+- **A — AgentNewLive 战术修复**: `add_template` 之后加一个 `Workspace.invoke_template(workspace_uri, tmpl_name)` step。一个额外 dispatch 调用。Trade-off: 保留了 "spawn Kind + register template + instantiate template" 三步分裂；只有 LV 这条路径知道要串起来。其它 create 路径（CLI, API）要重复这个串接。
+- **B — agent 生命周期重构为显式阶段**: UI 显示 `registered → instantiated → running` 带显式转换。"Not running" 变成 "Registered but not instantiated"。Trade-off: UI 更复杂但没隐藏 gap；user 看得到当前在哪个阶段。
+- **C — 把 "create + instantiate" 合成单个 dispatch action**（推荐 V2）: 在 Behavior 层统一 workflow。`Ezagent.Behavior.AgentLifecycle.create_and_start` 是一个 cap-gated dispatch；AgentNewLive / CLI / API 都 invoke 同一个 action。Trade-off: 需要新 Behavior；最干净的抽象；符合 Phase 9 "dispatch 是唯一路径" invariant（Decision #3，invariant 1）。
+
+### 链接
+
+- Bug-fix candidate（如果 Allen 想在 V2 之前修）: `apps/ezagent_plugin_liveview/lib/ezagent_plugin_liveview/agent_new_live.ex` 大约 handle_event("create_agent") 行，在 `add_template` 之后插入 `Ezagent.Workspace.Loader.invoke_template(workspace_uri, tmpl_name)`（或等价）调用
+- 测试 gap: 没有 test 断言 "AgentNewLive create_agent 之后, agent 实际能收消息" — invariant_completion_requires_test pattern 在这个 flow 没应用
+
+
 
 ### 条目模板
 
