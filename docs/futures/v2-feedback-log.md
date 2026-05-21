@@ -64,7 +64,39 @@ Until then: **record, don't implement**.
 
 ## Entries
 
-(empty — V1 acceptance just begun)
+## Workflow gap — UI "create agent" verb hides the instantiate step
+
+### 原始反馈
+
+> [Feishu 2026-05-21 15:59 (GMT+9), msg `om_x100b6fde9bf484a8c4afee8c48a8120`]
+> 我刚创建了 Agent: entity://agent/default/cc_demo，但看起来还是显示not running, 请检查是否已经启动？如果没有，为什么？如果启动了，为什么显示not running?
+
+### 本质原因
+
+User-facing verb **"create agent"** in V1 does NOT equal **"agent ready to receive messages"**. The UI flow splits "create" into 3 internal steps (spawn Kind into supervisor + add cc.agent template to workspace.session_templates JSON + start PtyServer via `cc.agent.instantiate/3`) but `AgentNewLive.handle_event("create_agent")` only does steps 1 + 2. Step 3 (PtyServer start) only happens via `Workspace.Loader.load_all/0` which runs at phx boot — so newly-created cc agents are not running until the next phx restart.
+
+This is the same abstraction-leak family as the **Phase 8c bare-handle bounce** bug (where the auth verb's apparent effect diverged from what got stored in session). Both share the pattern: a user-facing verb whose dispatch path is structurally incomplete relative to the verb's apparent meaning.
+
+### V2 影响
+
+- **Scope**: structural — V1's `AgentNewLive` "create" verb is misleading; deeper than a one-line fix
+- **Affects**: `EzagentPluginLiveview.AgentNewLive`, `Ezagent.Workspace.Loader`, `Ezagent.PluginCc.PtyServer` lifecycle, possibly the abstraction of "agent kind lifecycle phases" itself
+- **Blocks**: Allen's V1 acceptance testing of cc agents (workaround: phx restart) — not a hard block on continuing other testing
+- **Related Phase 9 PR/SPEC**: none directly; this is a Phase 8c surface bug surfaced by V1 testing
+- **Related memory**: similar shape to Phase 8c bare-handle bounce that drove `SessionPrincipal.put/2` invariant
+
+### 候选方案
+
+- **A — Tactical fix in AgentNewLive**: add a `Workspace.invoke_template(workspace_uri, tmpl_name)` step after `add_template`. One additional dispatch call. Trade-off: keeps the "spawn Kind + register template + instantiate template" 3-step split; only the LV code path knows to chain them. Other create-paths (CLI, API) need the same chain.
+- **B — Restructure agent lifecycle as explicit phases**: UI displays `registered → instantiated → running` with explicit transitions. "Not running" becomes "Registered but not instantiated". Trade-off: more UI complexity but no hidden gap; user sees what state they're in.
+- **C — Collapse "create + instantiate" into a single dispatch action** (recommended for V2): unify the workflow at the Behavior layer. `Ezagent.Behavior.AgentLifecycle.create_and_start` is one cap-gated dispatch; AgentNewLive / CLI / API all invoke the same action. Trade-off: requires a new Behavior; cleanest abstraction; matches Phase 9 "dispatch is the only path" invariant (Decision #3, invariant 1).
+
+### 链接
+
+- Bug-fix candidate (if Allen wants it before V2): `apps/ezagent_plugin_liveview/lib/ezagent_plugin_liveview/agent_new_live.ex` line ~handle_event("create_agent"), insert call to `Ezagent.Workspace.Loader.invoke_template(workspace_uri, tmpl_name)` (or equivalent) after `add_template`
+- Related test gap: there's no test that asserts "after AgentNewLive create_agent, the agent is actually receiving messages" — invariant_completion_requires_test pattern not applied to this flow
+
+
 
 ### Entry template
 
