@@ -53,7 +53,7 @@ defmodule EzagentCli.CoercionTest do
       {_, kw} = Coercion.to_option(:members, {:list, :uri})
       parser = Keyword.fetch!(kw, :parser)
 
-      assert {:ok, [%URI{}, %URI{}]} = parser.("entity://user/default/admin,entity://agent/default/test_x")
+      assert {:ok, [%URI{}, %URI{}]} = parser.("entity://user/system/admin,entity://agent/default/test_x")
     end
 
     test "{:list, :string} via CSV" do

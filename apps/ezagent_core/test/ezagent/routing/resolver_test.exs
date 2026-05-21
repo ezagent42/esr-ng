@@ -32,7 +32,7 @@ defmodule Ezagent.Routing.ResolverTest do
   end
 
   defp msg(text \\ "hello", mentions \\ []) do
-    Message.new(URI.new!("entity://user/default/admin"), %{text: text, attachments: []},
+    Message.new(URI.new!("entity://user/system/admin"), %{text: text, attachments: []},
       mentions: mentions
     )
   end

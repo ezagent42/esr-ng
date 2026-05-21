@@ -60,7 +60,7 @@ defmodule Ezagent.Behavior.CurlAgentTest do
 
   describe "invoke(:configure, ...)" do
     test "mutates provider/model/system_prompt/max_history but never owner_uri" do
-      slice = CurlAgent.init_slice(%{owner_uri: URI.parse("entity://user/default/admin")})
+      slice = CurlAgent.init_slice(%{owner_uri: URI.parse("entity://user/system/admin")})
 
       args = %{
         provider: "openai",
@@ -78,7 +78,7 @@ defmodule Ezagent.Behavior.CurlAgentTest do
       assert new_slice.system_prompt == "concise"
       assert new_slice.max_history == 5
       # owner_uri unchanged — design lock per moduledoc.
-      assert URI.to_string(new_slice.owner_uri) == "entity://user/default/admin"
+      assert URI.to_string(new_slice.owner_uri) == "entity://user/system/admin"
     end
   end
 end

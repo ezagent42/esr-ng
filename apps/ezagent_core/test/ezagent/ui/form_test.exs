@@ -63,13 +63,13 @@ defmodule Ezagent.UI.FormTest do
       out =
         Ezagent.Template.GenericSession.form_to_args(%{
           "session_name" => "foo",
-          "members_csv" => "entity://user/default/admin, entity://agent/default/test_x ,"
+          "members_csv" => "entity://user/system/admin, entity://agent/default/test_x ,"
         })
 
       assert out == %{
                "class" => "session.generic",
                "session_name" => "foo",
-               "members" => ["entity://user/default/admin", "entity://agent/default/test_x"]
+               "members" => ["entity://user/system/admin", "entity://agent/default/test_x"]
              }
     end
   end

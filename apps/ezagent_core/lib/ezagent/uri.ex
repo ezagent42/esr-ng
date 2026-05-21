@@ -40,7 +40,7 @@ defmodule Ezagent.URI do
 
   ### Examples
 
-      entity://user/default/admin                             # PR-2 entity
+      entity://user/system/admin                             # PR-2 entity
       entity://agent/default/cc_demo?action=chat.receive      # entity + action
       entity://agent/team-alpha/curl_my-deepseek              # cross-workspace entity
       session://default/default/main?action=chat.send         # PR-7 session
@@ -204,7 +204,7 @@ defmodule Ezagent.URI do
   to recover the bare instance form.
 
   Examples:
-  - `entity://user/default/admin` → unchanged
+  - `entity://user/system/admin` → unchanged
   - `entity://agent/default/cc_demo?action=chat.receive`
     → `%URI{scheme: "entity", host: "agent", path: "/default/cc_demo"}`
   - `session://default/default/main?action=chat.send`
@@ -279,7 +279,7 @@ defmodule Ezagent.URI do
   - Capability matcher (Phase 9 PR-3) to enforce workspace dimension.
 
   Examples:
-  - `entity://user/default/admin` → `workspace://default`
+  - `entity://user/system/admin` → `workspace://default`
   - `entity://agent/team-alpha/cc_demo` → `workspace://team-alpha`
 
   Raises `FunctionClauseError` if the URI is not a 3-segment entity
@@ -347,7 +347,7 @@ defmodule Ezagent.URI do
   same split rule without re-deriving it.
 
   Examples:
-  - `entity://user/default/admin` → `""`
+  - `entity://user/system/admin` → `""`
   - `entity://agent/default/cc_demo-builder?action=chat.receive` → `"behavior/chat/receive"`
   - `entity://agent/cc_demo-builder/auth/login` → `"auth/login"`
   - `session://default/default/main?action=chat.send` → `"behavior/chat/send"`

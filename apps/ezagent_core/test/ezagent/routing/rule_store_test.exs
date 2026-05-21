@@ -25,13 +25,13 @@ defmodule Ezagent.Routing.RuleStoreTest do
         table,
         Matcher.text_contains("urgent"),
         ["session://default/default/oncall"],
-        URI.new!("entity://user/default/admin")
+        URI.new!("entity://user/system/admin")
       )
 
     assert row.table_name == Atom.to_string(table)
     assert row.matcher_data == %{"type" => "text_contains", "arg" => "urgent"}
     assert row.receivers == ["session://default/default/oncall"]
-    assert row.created_by == "entity://user/default/admin"
+    assert row.created_by == "entity://user/system/admin"
 
     [loaded] = admin_rules(table)
     assert loaded.id == row.id
@@ -79,7 +79,7 @@ defmodule Ezagent.Routing.RuleStoreTest do
         EzagentDomainChat.Routing.MentionRouting,
         Matcher.always(),
         [URI.new!("session://default/default/x"), URI.new!("session://default/default/y")],
-        URI.new!("entity://user/default/admin")
+        URI.new!("entity://user/system/admin")
       )
 
     assert row.receivers == ["session://default/default/x", "session://default/default/y"]

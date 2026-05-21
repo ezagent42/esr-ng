@@ -56,7 +56,7 @@ defmodule EzagentDomainUi.Primitives do
   @doc """
   Monogram or icon avatar for an Entity URI.
 
-      <.avatar uri="entity://user/default/admin" />
+      <.avatar uri="entity://user/system/admin" />
       <.avatar uri="entity://agent/default/cc_demo" size="md" />
   """
   attr :uri, :any, required: true
@@ -373,7 +373,7 @@ defmodule EzagentDomainUi.Primitives do
   Monospaced pill displaying a URI.
 
       <.uri_chip uri={@current_entity_uri} />
-      <.uri_chip uri="entity://user/default/admin" copyable />
+      <.uri_chip uri="entity://user/system/admin" copyable />
   """
   attr :uri, :any, required: true
   attr :copyable, :boolean, default: false

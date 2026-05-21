@@ -69,7 +69,7 @@ defmodule Ezagent.Behavior.CurlAgent do
       model: Map.get(args, :model, "deepseek-chat"),
       system_prompt: Map.get(args, :system_prompt),
       max_history: Map.get(args, :max_history, 20),
-      owner_uri: Map.get(args, :owner_uri, URI.parse("entity://user/default/admin")),
+      owner_uri: Map.get(args, :owner_uri, URI.parse("entity://user/system/admin")),
       conversation: [],
       last_error: nil,
       last_tokens: nil

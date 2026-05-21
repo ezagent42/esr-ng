@@ -49,7 +49,7 @@ defmodule EzagentWeb.SessionPrincipal do
   `:current_entity_uri` AND its derived `workspace://<name>` URI
   string in `:current_workspace_uri`. Accepts:
 
-  - a full URI string (`"entity://user/default/admin"`) — passes through
+  - a full URI string (`"entity://user/system/admin"`) — passes through
   - a bare handle (`"admin"`, `"allen"`) — normalized to
     `"entity://user/<workspace>/<handle>"` (lowercased). Workspace
     defaults to `"default"`; override via `put/3` `:workspace` opt.

@@ -43,7 +43,7 @@ defmodule Ezagent.UsersTest do
         instance: :any,
         # Phase 9 PR-3 (SPEC v3 §4): caps are now workspace-scoped.
         workspace_uri: URI.new!("workspace://default"),
-        granted_by: URI.parse("entity://user/default/admin"),
+        granted_by: URI.parse("entity://user/system/admin"),
         granted_at: ~U[2026-05-16 00:00:00.000000Z]
       }
 

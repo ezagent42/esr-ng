@@ -12,7 +12,7 @@ defmodule EzagentCli.Integration.CLIDispatchTest do
   describe "Dispatch.run_action — end-to-end via auto-derive" do
     test "workspace list_members on an existing workspace returns the member list" do
       name = "cli-test-#{System.unique_integer([:positive])}"
-      members = [URI.parse("entity://user/default/admin"), URI.parse("entity://agent/default/test_test-cli")]
+      members = [URI.parse("entity://user/system/admin"), URI.parse("entity://agent/default/test_test-cli")]
       {:ok, _pid} = Ezagent.Workspace.create(name, %{members: members})
 
       parsed = %{

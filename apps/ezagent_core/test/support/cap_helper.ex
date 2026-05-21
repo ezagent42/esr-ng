@@ -37,7 +37,7 @@ defmodule Ezagent.Test.CapHelper do
   alias Ezagent.Capability
 
   @default_workspace URI.new!("workspace://default")
-  @default_granter URI.parse("entity://user/default/admin")
+  @default_granter URI.parse("entity://user/system/admin")
   @default_granted_at ~U[2026-05-21 00:00:00Z]
 
   @doc """
@@ -45,7 +45,7 @@ defmodule Ezagent.Test.CapHelper do
 
   Required key absent → defaults applied:
   - `workspace_uri` → `workspace://default`
-  - `granted_by` → `entity://user/default/admin`
+  - `granted_by` → `entity://user/system/admin`
   - `granted_at` → `2026-05-21T00:00:00Z`
 
   Pass any subset of keys to override; remaining keys default to

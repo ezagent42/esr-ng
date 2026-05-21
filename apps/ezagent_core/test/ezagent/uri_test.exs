@@ -3,10 +3,10 @@ defmodule Ezagent.URITest do
 
   describe "parse!/1" do
     test "parses 3-segment entity:// URI (SPEC v3 §3.2)" do
-      uri = Ezagent.URI.parse!("entity://user/default/admin")
+      uri = Ezagent.URI.parse!("entity://user/system/admin")
       assert uri.scheme == "entity"
       assert uri.host == "user"
-      assert uri.path == "/default/admin"
+      assert uri.path == "/system/admin"
     end
 
     test "parses URI with action query (SPEC v2 §5.2, PR #148)" do
@@ -118,7 +118,7 @@ defmodule Ezagent.URITest do
 
     test "rejects 4+ segment entity URI (sub-resource reserved)" do
       assert_raise ArgumentError, ~r/sub-resource positions are reserved/, fn ->
-        Ezagent.URI.parse!("entity://user/default/admin/extra")
+        Ezagent.URI.parse!("entity://user/system/admin/extra")
       end
     end
   end
@@ -139,8 +139,8 @@ defmodule Ezagent.URITest do
       assert Ezagent.URI.instance(uri) == uri
     end
 
-    test "entity://user/default/admin is unchanged" do
-      uri = Ezagent.URI.parse!("entity://user/default/admin")
+    test "entity://user/system/admin is unchanged" do
+      uri = Ezagent.URI.parse!("entity://user/system/admin")
       assert Ezagent.URI.instance(uri) == uri
     end
 
@@ -185,7 +185,7 @@ defmodule Ezagent.URITest do
 
   describe "entity_workspace_uri/1 (SPEC v3 §3.3)" do
     test "extracts workspace URI from default-workspace user entity" do
-      uri = Ezagent.URI.parse!("entity://user/default/admin")
+      uri = Ezagent.URI.parse!("entity://user/default/allen")
       assert Ezagent.URI.entity_workspace_uri(uri) == URI.new!("workspace://default")
     end
 
@@ -194,8 +194,14 @@ defmodule Ezagent.URITest do
       assert Ezagent.URI.entity_workspace_uri(uri) == URI.new!("workspace://team-alpha")
     end
 
+    # Phase 9 PR-8 (SPEC v3 §13): admin lives in workspace://system.
+    test "extracts workspace://system URI from admin entity" do
+      uri = Ezagent.URI.parse!("entity://user/system/admin")
+      assert Ezagent.URI.entity_workspace_uri(uri) == URI.new!("workspace://system")
+    end
+
     test "extracts workspace URI from entity URI with query string" do
-      uri = Ezagent.URI.parse!("entity://user/default/admin?action=identity.list_caps")
+      uri = Ezagent.URI.parse!("entity://user/default/allen?action=identity.list_caps")
       assert Ezagent.URI.entity_workspace_uri(uri) == URI.new!("workspace://default")
     end
   end
@@ -207,7 +213,7 @@ defmodule Ezagent.URITest do
     end
 
     test "entity:// with just /<workspace>/<name> → empty string" do
-      uri = Ezagent.URI.parse!("entity://user/default/admin")
+      uri = Ezagent.URI.parse!("entity://user/system/admin")
       assert Ezagent.URI.subresource(uri) == ""
     end
 

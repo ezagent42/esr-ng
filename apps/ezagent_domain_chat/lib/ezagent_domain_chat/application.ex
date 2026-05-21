@@ -210,15 +210,19 @@ defmodule EzagentDomainChat.Application do
     if test_env?() do
       :ok
     else
-      do_ensure_default_workspace()
+      # Phase 9 PR-8 (SPEC v3 §13.4) — order matters: system workspace
+      # is created first so admin's URI (`entity://user/system/admin`)
+      # resolves its workspace; then default for regular users.
+      :ok = ensure_workspace("system", %{visible: false})
+      :ok = ensure_workspace("default", %{})
     end
   end
 
-  defp do_ensure_default_workspace do
+  defp ensure_workspace(name, attrs) do
     try do
-      case Ezagent.Workspace.Store.get_by_name("default") do
+      case Ezagent.Workspace.Store.get_by_name(name) do
         nil ->
-          case Ezagent.Workspace.create("default", %{}) do
+          case Ezagent.Workspace.create(name, attrs) do
             {:ok, _pid} ->
               :ok
 
@@ -226,7 +230,7 @@ defmodule EzagentDomainChat.Application do
               # Kind already alive but no Store row — happens if a
               # prior boot bound via WorkspaceRegistry without
               # persisting. Re-attempt just the Store row.
-              case Ezagent.Workspace.Store.create("default", %{}) do
+              case Ezagent.Workspace.Store.create(name, attrs) do
                 {:ok, _} -> :ok
                 {:error, _} -> :ok
               end
@@ -235,7 +239,7 @@ defmodule EzagentDomainChat.Application do
               require Logger
 
               Logger.warning(
-                "ensure_default_workspace: create failed (#{inspect(reason)}); " <>
+                "ensure_workspace(#{inspect(name)}): create failed (#{inspect(reason)}); " <>
                   "/workspaces listing will be incomplete until next boot"
               )
 
@@ -250,8 +254,8 @@ defmodule EzagentDomainChat.Application do
         require Logger
 
         Logger.warning(
-          "ensure_default_workspace: DB unavailable at boot (#{inspect(e.__struct__)}); " <>
-            "default Workspace provisioning deferred to next boot"
+          "ensure_workspace(#{inspect(name)}): DB unavailable at boot (#{inspect(e.__struct__)}); " <>
+            "Workspace provisioning deferred to next boot"
         )
 
         :ok

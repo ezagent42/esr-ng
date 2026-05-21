@@ -41,7 +41,7 @@ defmodule EzagentPluginLiveview.AdminLiveTest do
     # Composer input wired up with the autocomplete hook.
     assert html =~ ~s(phx-hook="MentionAutocomplete")
     # Caller URI shown somewhere in the IDE shell chrome.
-    assert html =~ "entity://user/default/admin"
+    assert html =~ "entity://user/system/admin"
   end
 
   test "Session members section shows admin User as online (Phase 2 boot)", %{conn: conn} do
@@ -50,7 +50,7 @@ defmodule EzagentPluginLiveview.AdminLiveTest do
     # Section header
     assert html =~ "session://default/default/main"
     # admin URI listed
-    assert html =~ "entity://user/default/admin"
+    assert html =~ "entity://user/system/admin"
     # admin is online (boot post-spawn dispatched chat/join)
     assert html =~ "online"
     # The members table id is rendered (not the empty-state placeholder)
@@ -71,7 +71,7 @@ defmodule EzagentPluginLiveview.AdminLiveTest do
     html = render(lv)
 
     assert html =~ text
-    assert html =~ "entity://user/default/admin"
+    assert html =~ "entity://user/system/admin"
   end
 
   test "Chat row shape identical for admin vs agent senders (CSS-level diff only)", %{conn: conn} do
@@ -122,7 +122,7 @@ defmodule EzagentPluginLiveview.AdminLiveTest do
     for i <- 1..100 do
       msg =
         Ezagent.Message.new(
-          URI.new!("entity://user/default/admin"),
+          URI.new!("entity://user/system/admin"),
           %{text: "histmsg-#{i}", attachments: []},
           inserted_at: DateTime.add(base, i, :second)
         )

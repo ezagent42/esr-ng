@@ -228,4 +228,26 @@ defmodule Ezagent.Workspace do
   @doc "List persisted Workspaces (decoded structs from `Ezagent.Workspace.Store`)."
   @spec list_persisted() :: [map()]
   def list_persisted, do: Store.list_all()
+
+  @doc """
+  List all persisted workspaces — admin / loader / mix-task use.
+  Returns hidden workspaces (e.g. `workspace://system`) too.
+
+  Phase 9 PR-8 (SPEC v3 §13.1): callers rendering operator-facing UI
+  should use `list_visible/0` instead so the system workspace stays
+  hidden from regular users.
+  """
+  @spec list_all() :: [map()]
+  def list_all, do: Store.list_all()
+
+  @doc """
+  List only workspaces with `visible: true` — the operator-facing
+  surface (workspace dropdown, /workspaces page for non-admins).
+
+  Phase 9 PR-8 (SPEC v3 §13.1). `workspace://system` is created with
+  `visible: false` at boot and MUST NOT appear in the regular
+  selector.
+  """
+  @spec list_visible() :: [map()]
+  def list_visible, do: Store.list_visible()
 end

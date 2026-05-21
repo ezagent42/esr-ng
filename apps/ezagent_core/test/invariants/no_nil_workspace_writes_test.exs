@@ -39,7 +39,7 @@ defmodule EzagentCore.Invariants.NoNilWorkspaceWritesTest do
       msg =
         %Ezagent.Message{
           id: "test-no-ws-msg",
-          sender: URI.new!("entity://user/default/admin"),
+          sender: URI.new!("entity://user/system/admin"),
           mentions: [],
           body: %{text: "x", attachments: []},
           inserted_at: DateTime.utc_now()

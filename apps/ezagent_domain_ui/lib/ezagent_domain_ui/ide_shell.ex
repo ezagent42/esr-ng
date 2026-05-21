@@ -103,6 +103,25 @@ defmodule EzagentDomainUi.IdeShell do
     """
   )
 
+  attr(:is_system_member?, :boolean,
+    default: false,
+    doc: """
+    Phase 9 PR-8 (SPEC v3 §13.3) — whether the current entity is a
+    member of `workspace://system`. Controls the workspace dropdown's
+    affordance for non-current rows:
+
+    - System member → all rows clickable, no lock indicator;
+      clicking POSTs `/workspaces/switch` and gets a context-swap
+      with no logout.
+    - Regular user → other workspaces are visually locked AND still
+      clickable (they hit the controller-rendered denial page that
+      offers a "Sign in to <ws>" prompt).
+
+    Computed by `EzagentWeb.LiveAuth.on_mount/4` from the caller URI
+    + workspace, threaded as an attr like `is_admin?`.
+    """
+  )
+
   slot(:resource_panel)
   slot(:main_window, required: true)
   slot(:right_sidebar)
@@ -119,6 +138,7 @@ defmodule EzagentDomainUi.IdeShell do
         workspace_name={@workspace_name}
         workspaces={@workspaces}
         is_admin?={@is_admin?}
+        is_system_member?={@is_system_member?}
         has_resource_panel={@resource_panel != []}
         has_right_sidebar={@right_sidebar != []}
       />
@@ -290,6 +310,7 @@ defmodule EzagentDomainUi.IdeShell do
   attr(:workspace_name, :string, default: nil)
   attr(:workspaces, :list, default: [])
   attr(:is_admin?, :boolean, default: false)
+  attr(:is_system_member?, :boolean, default: false)
 
   attr(:has_resource_panel, :boolean,
     default: false,
@@ -334,6 +355,7 @@ defmodule EzagentDomainUi.IdeShell do
         <.workspace_dropdown
           workspace_name={@workspace_name}
           workspaces={@workspaces}
+          is_system_member?={@is_system_member?}
         />
       <% else %>
         <div class="flex items-center gap-2 shrink-0">
@@ -434,6 +456,17 @@ defmodule EzagentDomainUi.IdeShell do
   attr(:workspace_name, :string, default: nil)
   attr(:workspaces, :list, required: true)
 
+  attr(:is_system_member?, :boolean,
+    default: false,
+    doc: """
+    Phase 9 PR-8 (SPEC v3 §13.2) — system-member callers see no lock
+    indicator on non-current rows (clicking does a context swap with
+    no logout). Regular users see a 🔒 lock badge on non-current
+    rows; clicking still POSTs to /workspaces/switch but the
+    controller renders the denial page.
+    """
+  )
+
   def workspace_dropdown(assigns) do
     assigns =
       assigns
@@ -493,11 +526,14 @@ defmodule EzagentDomainUi.IdeShell do
                 </span>
               </div>
             <% else %>
-              <%!-- Phase 9 PR-5 (SPEC v3 §6.4 amended) — switching
-                    workspace is logout + re-auth, not in-place context
-                    swap. POST /workspaces/switch clears the session
-                    and redirects to /login?workspace=<name>. The form
-                    wrapper is needed for CSRF + cookie clear. --%>
+              <%!-- Phase 9 PR-8 (SPEC v3 §6.4 amendment 3 + §13.2) —
+                    permission-gated switch. System members get a
+                    seamless context swap (no logout); regular users
+                    get a denial page offering "Sign in to <ws>".
+                    Both branches POST to /workspaces/switch — the
+                    controller chooses the UX based on caller
+                    membership. The lock icon is the operator-side
+                    affordance: "you'll be asked to re-auth." --%>
               <form action="/workspaces/switch" method="post" class="block">
                 <input
                   type="hidden"
@@ -507,10 +543,28 @@ defmodule EzagentDomainUi.IdeShell do
                 <input type="hidden" name="workspace" value={ws_name} />
                 <button
                   type="submit"
-                  class="w-full text-left px-3 py-1.5 text-xs text-zinc-700 dark:text-zinc-300 hover:bg-zinc-100 dark:hover:bg-zinc-800"
-                  title={"Switch to workspace " <> ws_name <> " (you'll be asked to sign in)"}
+                  class={[
+                    "w-full text-left px-3 py-1.5 text-xs flex items-center justify-between gap-2 hover:bg-zinc-100 dark:hover:bg-zinc-800",
+                    if(@is_system_member?,
+                      do: "text-zinc-700 dark:text-zinc-300",
+                      else: "text-zinc-500 dark:text-zinc-400"
+                    )
+                  ]}
+                  title={
+                    if @is_system_member?,
+                      do: "Operate on workspace " <> ws_name,
+                      else: "Sign in to workspace " <> ws_name <> " (you'll be asked to re-auth)"
+                  }
                 >
                   <span class="font-mono truncate">{ws_name}</span>
+                  <span
+                    :if={not @is_system_member?}
+                    class="text-[10px] text-zinc-400 dark:text-zinc-600 shrink-0"
+                    aria-label="locked"
+                    title="You'll be asked to sign in to this workspace"
+                  >
+                    🔒
+                  </span>
                 </button>
               </form>
             <% end %>

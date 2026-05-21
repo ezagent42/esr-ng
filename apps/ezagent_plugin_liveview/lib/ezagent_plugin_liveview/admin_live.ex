@@ -455,6 +455,22 @@ defmodule EzagentPluginLiveview.AdminLive do
       |> assign_new(:is_admin?, fn ->
         Ezagent.Identity.admin?(assigns.caller_uri_str)
       end)
+      # Phase 9 PR-8 (SPEC v3 §13.3) — `is_system_member?` is normally
+      # set by `EzagentWeb.LiveAuth.on_mount(:require_entity)`; this
+      # belt-and-suspenders fallback catches any test path that mounts
+      # this LV outside the `:require_entity` live_session.
+      |> assign_new(:is_system_member?, fn ->
+        try do
+          caller_workspace =
+            assigns.caller_uri_str
+            |> URI.parse()
+            |> Ezagent.URI.entity_workspace_uri()
+
+          URI.to_string(caller_workspace) == "workspace://system"
+        rescue
+          _ -> false
+        end
+      end)
 
     ~H"""
     <IdeShell.ide_shell
@@ -464,6 +480,7 @@ defmodule EzagentPluginLiveview.AdminLive do
       workspace_name={@workspace_name}
       workspaces={@workspaces}
       is_admin?={@is_admin?}
+      is_system_member?={@is_system_member?}
     >
       <:main_window>
         <SessionEditor.session_editor

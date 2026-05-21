@@ -16,10 +16,10 @@ defmodule Mix.Tasks.Ezagent.User.Token do
 
   ## Examples
 
-      mix ezagent.user.token entity://user/default/admin --mint --label cli-laptop
+      mix ezagent.user.token entity://user/system/admin --mint --label cli-laptop
       mix ezagent.user.token entity://agent/default/cc_demo --mint
-      mix ezagent.user.token entity://user/default/admin --list
-      mix ezagent.user.token entity://user/default/admin --revoke 17
+      mix ezagent.user.token entity://user/system/admin --list
+      mix ezagent.user.token entity://user/system/admin --revoke 17
 
   ## After minting
 

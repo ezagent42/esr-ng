@@ -26,12 +26,13 @@ defmodule EzagentWeb.Plugs.RequireEntityTest do
     test "passes through + assigns current_entity_uri for entity://user/*" do
       conn =
         conn(:get, "/admin")
-        |> init_test_session(%{"current_entity_uri" => "entity://user/default/admin"})
+        |> init_test_session(%{"current_entity_uri" => "entity://user/system/admin"})
         |> RequireEntity.call([])
 
       refute conn.halted
 
-      assert %URI{scheme: "entity", host: "user", path: "/default/admin"} =
+      # Phase 9 PR-8: admin URI is in workspace://system.
+      assert %URI{scheme: "entity", host: "user", path: "/system/admin"} =
                conn.assigns.current_entity_uri
     end
 

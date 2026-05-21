@@ -147,7 +147,7 @@ defmodule Ezagent.InvocationTest do
 
   defp ctx_for(pid) do
     %{
-      caller: URI.parse("entity://user/default/admin"),
+      caller: URI.parse("entity://user/system/admin"),
       caps: Ezagent.Entity.User.admin_caps(),
       reply: {:caller_inbox, pid}
     }

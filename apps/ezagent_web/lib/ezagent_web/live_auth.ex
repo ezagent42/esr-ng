@@ -57,18 +57,34 @@ defmodule EzagentWeb.LiveAuth do
         case parse_entity_uri(uri_str) do
           {:ok, uri} ->
             workspace_uri = parse_workspace_uri(session["current_workspace_uri"], uri)
+            is_system_member = system_member?(uri)
 
             {:cont,
              socket
              |> assign(:current_entity_uri, uri)
              |> assign(:current_workspace_uri, workspace_uri)
              |> assign(:is_admin?, admin?(uri))
+             |> assign(:is_system_member?, is_system_member)
              |> assign(:workspaces, list_known_workspaces())}
 
           :error ->
             # Malformed / non-entity URI → treat as unauthenticated.
             {:halt, redirect(socket, to: "/login")}
         end
+    end
+  end
+
+  # Phase 9 PR-8 (SPEC v3 §13.3) — `is_system_member?` is the
+  # membership-based cross-workspace authority predicate. Used by the
+  # workspace dropdown to decide whether non-current workspaces are
+  # clickable (system member: yes, regular user: yes but hits the
+  # denial page).
+  defp system_member?(%URI{} = entity_uri) do
+    try do
+      caller_workspace = Ezagent.URI.entity_workspace_uri(entity_uri)
+      URI.to_string(caller_workspace) == "workspace://system"
+    rescue
+      _ -> false
     end
   end
 
@@ -113,14 +129,25 @@ defmodule EzagentWeb.LiveAuth do
   # not checked out) returns an empty list + default workspace stub.
   # The dropdown still renders sensibly with just "default".
   defp list_known_workspaces do
+    # Phase 9 PR-8 (SPEC v3 §13.1) — use `list_visible/0` so the
+    # `workspace://system` workspace stays out of the regular
+    # operator-facing dropdown. System members still see it from the
+    # admin tooling, but it is never a click-to-switch target.
     persisted =
       try do
-        if Code.ensure_loaded?(Ezagent.Workspace) and
-             function_exported?(Ezagent.Workspace, :list_persisted, 0) do
-          Ezagent.Workspace.list_persisted()
-          |> Enum.map(fn ws -> %{name: ws.name, uri: ws.uri} end)
-        else
-          []
+        cond do
+          Code.ensure_loaded?(Ezagent.Workspace) and
+              function_exported?(Ezagent.Workspace, :list_visible, 0) ->
+            Ezagent.Workspace.list_visible()
+            |> Enum.map(fn ws -> %{name: ws.name, uri: ws.uri} end)
+
+          Code.ensure_loaded?(Ezagent.Workspace) and
+              function_exported?(Ezagent.Workspace, :list_persisted, 0) ->
+            Ezagent.Workspace.list_persisted()
+            |> Enum.map(fn ws -> %{name: ws.name, uri: ws.uri} end)
+
+          true ->
+            []
         end
       rescue
         _ -> []

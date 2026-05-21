@@ -58,8 +58,8 @@ defmodule EzagentWeb.ApiV1ControllerTest do
     conn =
       conn
       |> put_req_header("authorization", "Bearer esr_pat_garbage_token_value")
-      |> put_req_header("x-ezagent-entity-uri", "entity://user/default/admin")
-      |> post("/api/v1/user/list_caps", %{"target" => "entity://user/default/admin"})
+      |> put_req_header("x-ezagent-entity-uri", "entity://user/system/admin")
+      |> post("/api/v1/user/list_caps", %{"target" => "entity://user/system/admin"})
 
     assert conn.status == 401
     body = Jason.decode!(conn.resp_body)
@@ -71,7 +71,7 @@ defmodule EzagentWeb.ApiV1ControllerTest do
     conn =
       conn
       |> put_req_header("authorization", "Bearer esr_pat_garbage_token_value")
-      |> post("/api/v1/user/list_caps", %{"target" => "entity://user/default/admin"})
+      |> post("/api/v1/user/list_caps", %{"target" => "entity://user/system/admin"})
 
     assert conn.status == 401
     body = Jason.decode!(conn.resp_body)

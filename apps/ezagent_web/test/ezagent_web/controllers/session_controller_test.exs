@@ -86,7 +86,7 @@ defmodule EzagentWeb.SessionControllerTest do
     # auth but the RAW input was put into the session as :current_entity_uri.
     # On the next request RequireEntity called URI.parse("admin") → no
     # scheme → bounced to /login. Login appeared to fail to the user.
-    # Fix: store canonical "entity://user/default/admin", not raw "admin".
+    # Fix: store canonical "entity://user/system/admin", not raw "admin".
     test "bare handle stores CANONICAL entity:// URI in session (regression)" do
       handle = "barehandle#{System.unique_integer([:positive])}"
       # Phase 9 PR-2 (SPEC v3 §3): entity URIs carry workspace segment.
@@ -105,6 +105,9 @@ defmodule EzagentWeb.SessionControllerTest do
     end
 
     test "bare handle is lowercased before lookup; canonical is stored" do
+      # Phase 9 PR-8: bare-handle workspace is `default`; using a
+      # unique handle that starts with `admincase` (NOT the admin user
+      # which lives in workspace://system).
       uri = "entity://user/default/admincase#{System.unique_integer([:positive])}"
       {:ok, _} = Ezagent.Users.create(uri, "pw", [])
 
@@ -170,7 +173,7 @@ defmodule EzagentWeb.SessionControllerTest do
     end
 
     # Regression: Allen 2026-05-20 — bare handle "admin" must be accepted as
-    # shortcut for "entity://user/default/admin"; session stores canonical URI.
+    # shortcut for "entity://user/system/admin"; session stores canonical URI.
     test "bare handle: 'foo' → authenticates as entity://user/default/foo, session stores canonical URI" do
       handle = "barehandle#{System.unique_integer([:positive])}"
       # Phase 9 PR-2 (SPEC v3 §3): entity URIs carry workspace segment.
@@ -188,6 +191,9 @@ defmodule EzagentWeb.SessionControllerTest do
 
     # Regression: Allen 2026-05-20 — bare handle case-insensitive lowercasing.
     test "bare handle is lowercased before lookup" do
+      # Phase 9 PR-8: bare-handle workspace is `default`; using a
+      # unique handle that starts with `admincase` (NOT the admin user
+      # which lives in workspace://system).
       uri = "entity://user/default/admincase#{System.unique_integer([:positive])}"
       {:ok, _} = Ezagent.Users.create(uri, "pw", [])
 

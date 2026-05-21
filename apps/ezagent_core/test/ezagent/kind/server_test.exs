@@ -39,7 +39,7 @@ defmodule Ezagent.Kind.ServerTest do
       mode: :call,
       args: %{msg: "hello"},
       ctx: %{
-        caller: URI.parse("entity://user/default/admin"),
+        caller: URI.parse("entity://user/system/admin"),
         caps: Ezagent.Entity.User.admin_caps(),
         reply: :ignore
       }
@@ -57,7 +57,7 @@ defmodule Ezagent.Kind.ServerTest do
       mode: :cast,
       args: %{msg: "via-cast"},
       ctx: %{
-        caller: URI.parse("entity://user/default/admin"),
+        caller: URI.parse("entity://user/system/admin"),
         caps: Ezagent.Entity.User.admin_caps(),
         reply: {:caller_inbox, self()}
       }
@@ -76,7 +76,7 @@ defmodule Ezagent.Kind.ServerTest do
       mode: :cast,
       args: %{msg: "pre-ready"},
       ctx: %{
-        caller: URI.parse("entity://user/default/admin"),
+        caller: URI.parse("entity://user/system/admin"),
         caps: Ezagent.Entity.User.admin_caps(),
         reply: {:caller_inbox, self()}
       }

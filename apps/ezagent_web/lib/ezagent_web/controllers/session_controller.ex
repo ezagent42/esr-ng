@@ -229,7 +229,7 @@ defmodule EzagentWeb.SessionController do
         <input type="hidden" name="_csrf_token" value="{{CSRF}}">
         {{WORKSPACE_HIDDEN}}
         <label for="entity_uri">Username or entity URI</label>
-        <input type="text" id="entity_uri" name="entity_uri" placeholder="admin   or   entity://user/default/admin" required autofocus>
+        <input type="text" id="entity_uri" name="entity_uri" placeholder="admin   or   entity://user/system/admin" required autofocus>
         <label for="secret">Password or token</label>
         <input type="password" id="secret" name="secret" required>
         <button type="submit">Sign in</button>
@@ -241,10 +241,10 @@ defmodule EzagentWeb.SessionController do
       {{EMAIL_SECTION}}
 
       <p class="hint">
-        Bare handles (<code>admin</code>) resolve to <code>entity://user/default/admin</code>.
+        Bare handles (<code>admin</code>) resolve to <code>entity://user/system/admin</code>.
         Full URIs (<code>entity://user/&lt;name&gt;</code> /
         <code>entity://agent/&lt;flavor&gt;_&lt;name&gt;</code>) also accepted.
-        First-time admin: <code>mix ezagent.user.set_password entity://user/default/admin --password X</code>.
+        First-time admin: <code>mix ezagent.user.set_password entity://user/system/admin --password X</code>.
       </p>
     </div>
   </body>
@@ -336,11 +336,29 @@ defmodule EzagentWeb.SessionController do
     )
   end
 
-  def delete(conn, _params) do
+  def delete(conn, params) do
+    # Phase 9 PR-8 (SPEC v3 §6.4 amendment 3) — `return_to` lets the
+    # workspace-switch denial page POST to /logout and land the user
+    # on `/login?workspace=<ws>`. Restricted to local paths
+    # (`String.starts_with?("/")` + no `//`) so it can't be a phishing
+    # redirector to an external site.
+    return_to = params |> Map.get("return_to", "/login") |> safe_return_to()
+
     conn
     |> SessionPrincipal.clear()
-    |> redirect(to: "/login")
+    |> redirect(to: return_to)
   end
+
+  defp safe_return_to(path) when is_binary(path) do
+    cond do
+      not String.starts_with?(path, "/") -> "/login"
+      # Reject protocol-relative redirects (`//evil.com/x`).
+      String.starts_with?(path, "//") -> "/login"
+      true -> path
+    end
+  end
+
+  defp safe_return_to(_), do: "/login"
 
   # --- internals ----------------------------------------------------
 

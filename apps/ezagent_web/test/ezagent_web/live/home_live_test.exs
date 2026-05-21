@@ -16,7 +16,7 @@ defmodule EzagentWeb.HomeLiveTest do
     conn =
       conn
       |> Plug.Test.init_test_session(%{
-        "current_entity_uri" => "entity://user/default/admin"
+        "current_entity_uri" => "entity://user/system/admin"
       })
 
     assert {:error, {:live_redirect, %{to: "/sessions"}}} = live(conn, ~p"/")
@@ -47,7 +47,7 @@ defmodule EzagentWeb.HomeLiveTest do
       conn =
         conn
         |> Plug.Test.init_test_session(%{
-          "current_entity_uri" => "entity://user/default/admin"
+          "current_entity_uri" => "entity://user/system/admin"
         })
 
       {:ok, _lv, html} = live(conn, ~p"/")
@@ -61,7 +61,7 @@ defmodule EzagentWeb.HomeLiveTest do
       conn =
         conn
         |> Plug.Test.init_test_session(%{
-          "current_entity_uri" => "entity://user/default/admin"
+          "current_entity_uri" => "entity://user/system/admin"
         })
 
       {:ok, lv, _html} = live(conn, ~p"/")

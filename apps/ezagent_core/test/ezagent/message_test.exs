@@ -2,7 +2,7 @@ defmodule Ezagent.MessageTest do
   use ExUnit.Case, async: true
   alias Ezagent.Message
 
-  @sender URI.parse("entity://user/default/admin")
+  @sender URI.parse("entity://user/system/admin")
   @body %{text: "hello", attachments: []}
 
   describe "new/3" do
@@ -73,8 +73,8 @@ defmodule Ezagent.MessageTest do
     end
 
     test "URI inside a list (mentions field) serializes as JSON array of strings" do
-      uris = [URI.parse("entity://agent/default/test_cc"), URI.parse("entity://user/default/admin")]
-      assert Jason.encode!(uris) == ~s(["entity://agent/default/test_cc","entity://user/default/admin"])
+      uris = [URI.parse("entity://agent/default/test_cc"), URI.parse("entity://user/system/admin")]
+      assert Jason.encode!(uris) == ~s(["entity://agent/default/test_cc","entity://user/system/admin"])
     end
   end
 
@@ -85,7 +85,7 @@ defmodule Ezagent.MessageTest do
       assert is_binary(encoded)
       decoded = Jason.decode!(encoded)
 
-      assert decoded["sender"] == "entity://user/default/admin"
+      assert decoded["sender"] == "entity://user/system/admin"
       assert decoded["mentions"] == ["entity://agent/default/test_cc"]
       assert decoded["body"]["text"] == "hello"
       assert decoded["body"]["attachments"] == []
