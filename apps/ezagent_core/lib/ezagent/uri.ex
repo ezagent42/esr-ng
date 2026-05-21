@@ -282,14 +282,55 @@ defmodule Ezagent.URI do
   - `entity://user/system/admin` → `workspace://default`
   - `entity://agent/team-alpha/cc_demo` → `workspace://team-alpha`
 
-  Raises `FunctionClauseError` if the URI is not a 3-segment entity
-  URI (e.g. a `session://` URI is rejected — callers must dispatch
-  to `Ezagent.WorkspaceRegistry.lookup/1` for non-entity URIs).
+  Raises `ArgumentError` if the URI is not a 3-segment entity URI
+  (e.g. a `session://` URI, a legacy 2-segment entity URI from a
+  stale pre-Phase-9 cookie, or a non-URI input). Callers must
+  dispatch to `Ezagent.WorkspaceRegistry.lookup/1` for non-entity
+  URIs.
+
+  V1 fix (Allen Feishu 2026-05-21) — was previously raising
+  `MatchError` on 2-segment input via `[a, b] = String.split(...)`.
+  Stale pre-Phase-9 cookies that slipped past LiveAuth's lax
+  `parse_entity_uri/1` reached here and surfaced a cryptic 500 with
+  no actionable error. Now raises with a clear message even though
+  the read-side validation in `EzagentWeb.LiveAuth` is the
+  structural prevention (defense in depth, per memory
+  `feedback_let_it_crash_no_workarounds` — no back-compat shim,
+  still let it crash, just crash informatively).
   """
   @spec entity_workspace_uri(URI.t()) :: URI.t()
-  def entity_workspace_uri(%URI{scheme: "entity", path: "/" <> rest}) do
-    [workspace_name, _entity_name] = String.split(rest, "/", parts: 2)
-    URI.new!("workspace://" <> workspace_name)
+  def entity_workspace_uri(%URI{scheme: "entity", path: "/" <> rest} = uri) do
+    case String.split(rest, "/", parts: 2) do
+      [workspace_name, entity_name] when workspace_name != "" and entity_name != "" ->
+        URI.new!("workspace://" <> workspace_name)
+
+      _ ->
+        raise ArgumentError, stale_cookie_message(uri)
+    end
+  end
+
+  def entity_workspace_uri(%URI{scheme: "entity"} = uri) do
+    # path: nil or path: "" — same "not 3-segment" failure shape, same
+    # actionable hint.
+    raise ArgumentError, stale_cookie_message(uri)
+  end
+
+  def entity_workspace_uri(other) do
+    raise ArgumentError,
+          "entity_workspace_uri/1 requires %URI{scheme: \"entity\", ...}; got: " <>
+            inspect(other)
+  end
+
+  defp stale_cookie_message(%URI{} = uri) do
+    "entity_workspace_uri/1 requires a 3-segment URI " <>
+      "(entity://<type>/<workspace>/<name>); got: " <>
+      URI.to_string(uri) <>
+      ". If this is from a stale session cookie, the user " <>
+      "should sign in again — write side " <>
+      "(EzagentWeb.SessionPrincipal.canonicalize) writes " <>
+      "3-segment, read side validation " <>
+      "(EzagentWeb.LiveAuth.parse_entity_uri) should reject " <>
+      "2-segment before calling this function."
   end
 
   @doc """

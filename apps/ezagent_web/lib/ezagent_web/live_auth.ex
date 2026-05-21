@@ -46,7 +46,7 @@ defmodule EzagentWeb.LiveAuth do
   """
 
   import Phoenix.Component, only: [assign: 3]
-  import Phoenix.LiveView, only: [redirect: 2]
+  import Phoenix.LiveView, only: [put_flash: 3, redirect: 2]
 
   @doc """
   LiveView on_mount hook that propagates the per-request Gettext locale
@@ -101,8 +101,15 @@ defmodule EzagentWeb.LiveAuth do
              |> assign(:workspaces, list_known_workspaces())}
 
           :error ->
-            # Malformed / non-entity URI → treat as unauthenticated.
-            {:halt, redirect(socket, to: "/login")}
+            # Malformed / non-entity / stale pre-Phase-9 2-segment URI
+            # → treat as unauthenticated. The flash informs the user
+            # WHY they were bounced — pre-Phase 9 cookies (with bare
+            # 2-segment entity URIs) silently expire after the SPEC v3
+            # write/read parity fix (V1, Allen 2026-05-21).
+            {:halt,
+             socket
+             |> put_flash(:info, "Your session expired. Please sign in again.")
+             |> redirect(to: "/login")}
         end
     end
   end
@@ -202,14 +209,37 @@ defmodule EzagentWeb.LiveAuth do
   end
 
   # PR #149 (S-8): accept entity://user/* and entity://agent/* uniformly.
-  defp parse_entity_uri(uri_str) do
-    case URI.new(uri_str) do
-      {:ok, %URI{scheme: "entity", host: host, path: "/" <> name} = uri}
-      when host in ["user", "agent"] and name != "" ->
-        {:ok, uri}
+  #
+  # V1 fix (Allen Feishu 2026-05-21) — strict delegation to
+  # `Ezagent.URI.parse!/1` (the SPEC v3 canonical parser). Previously
+  # this accepted ANY `entity://<host>/<path>` shape including the
+  # legacy 2-segment `entity://user/admin` form, which broke the
+  # write/read URI parity invariant (memory
+  # `feedback_register_lookup_key_parity`). Pre-Phase-9 cookies with
+  # 2-segment URIs would parse to `{:ok, uri}` here, then flow into
+  # `Ezagent.URI.entity_workspace_uri/1` which pattern-matches the
+  # 3-segment shape → MatchError 500.
+  #
+  # Delegating to `parse!/1` means stale cookies raise `ArgumentError`
+  # → `:error` → caller redirects to /login → session cleared → fresh
+  # login writes a canonical 3-segment cookie. Single source of truth
+  # for URI shape lives in `Ezagent.URI.parse!/1`.
+  @spec parse_entity_uri(any) :: {:ok, URI.t()} | :error
+  defp parse_entity_uri(uri_str) when is_binary(uri_str) do
+    try do
+      uri = Ezagent.URI.parse!(uri_str)
 
-      _ ->
-        :error
+      case uri do
+        %URI{scheme: "entity", host: host} when host in ["user", "agent"] ->
+          {:ok, uri}
+
+        _ ->
+          :error
+      end
+    rescue
+      ArgumentError -> :error
     end
   end
+
+  defp parse_entity_uri(_), do: :error
 end

@@ -204,6 +204,52 @@ defmodule Ezagent.URITest do
       uri = Ezagent.URI.parse!("entity://user/default/allen?action=identity.list_caps")
       assert Ezagent.URI.entity_workspace_uri(uri) == URI.new!("workspace://default")
     end
+
+    # V1 fix (Allen Feishu 2026-05-21) — was raising MatchError on
+    # 2-segment input via the `[a, b] = String.split(...)` clause.
+    # Now raises ArgumentError with a clear, actionable message
+    # (defense in depth; LiveAuth's strict parse_entity_uri/1 is the
+    # structural prevention).
+    test "raises ArgumentError on legacy 2-segment URI (stale cookie regression)" do
+      # Hand-construct the legacy shape — `parse!/1` correctly
+      # rejects it at parse time, so we bypass to exercise the
+      # defense-in-depth path inside entity_workspace_uri/1.
+      legacy = %URI{scheme: "entity", host: "user", path: "/admin"}
+
+      assert_raise ArgumentError, ~r/requires a 3-segment URI/, fn ->
+        Ezagent.URI.entity_workspace_uri(legacy)
+      end
+    end
+
+    test "raises ArgumentError mentions sign-in hint for stale cookies" do
+      legacy = %URI{scheme: "entity", host: "agent", path: "/cc_demo"}
+
+      assert_raise ArgumentError, ~r/stale session cookie/, fn ->
+        Ezagent.URI.entity_workspace_uri(legacy)
+      end
+    end
+
+    test "raises ArgumentError on non-entity URI struct" do
+      not_entity = URI.parse("session://default/default/main")
+
+      assert_raise ArgumentError, ~r/requires %URI\{scheme: "entity"/, fn ->
+        Ezagent.URI.entity_workspace_uri(not_entity)
+      end
+    end
+
+    test "raises ArgumentError on non-URI input (e.g. plain string)" do
+      assert_raise ArgumentError, ~r/requires %URI/, fn ->
+        Ezagent.URI.entity_workspace_uri("entity://user/default/admin")
+      end
+    end
+
+    test "raises ArgumentError on path-less entity URI" do
+      pathless = %URI{scheme: "entity", host: "user", path: nil}
+
+      assert_raise ArgumentError, ~r/requires a 3-segment URI/, fn ->
+        Ezagent.URI.entity_workspace_uri(pathless)
+      end
+    end
   end
 
   describe "subresource/1" do
