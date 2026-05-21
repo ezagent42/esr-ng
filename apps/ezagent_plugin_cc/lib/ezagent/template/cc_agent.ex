@@ -1,43 +1,56 @@
 defmodule Ezagent.PluginCc.Template.CcAgent do
   @moduledoc """
-  Unified CC agent Template Class (PR-D2, Allen 2026-05-19).
+  Unified CC agent Template Class (PR-D2, Allen 2026-05-19; mode field
+  removed PR-V1-fix Allen 2026-05-21).
 
   Replaces the previous split between `cc.pty` and `cc.channel_instance`
   Template Classes. The operator now adds ONE template (`cc.agent`)
-  and picks a `mode` field for how the agent is materialized:
+  per CC agent and the spawn path is always local-pty.
 
-  - `"local-pty"` — spawn a PTY-managed local `claude` process via
-    erlexec (the original cc.pty behavior).
-  - `"remote-channel"` — placeholder for future remote bridges
-    (an external host runs `claude` and connects to ESR via the
-    v2 `/cc_socket` Phoenix.Channel using a minted token). NOT
-    YET IMPLEMENTED — `instantiate/3` returns `{:error,
-    :remote_mode_not_implemented}`. The form option is reserved
-    so the operator UI doesn't need to change later.
+  The earlier PR-D2 plan reserved a `mode` field with values
+  `"local-pty"` / `"remote-channel"` so a future external-bridge mode
+  could share the same Template Class. Allen 2026-05-21 cut this:
+  remote-channel was never wired and the placeholder + dichotomy were
+  dead weight. If/when remote support returns, it will land as a
+  separate plugin + Template Class, not a mode field. The `"mode"`
+  field is no longer part of the schema; if a legacy row still carries
+  it the template is accepted and the field ignored (no migration
+  required — see PR-D2 migration that originally seeded the field).
+
+  ## Architecture: instantiate PRODUCES the Kind (Allen 2026-05-21)
+
+  Allen's mental model is "Template.instantiate produces a new Kind".
+  Pre-V1-fix the AgentNewLive flow inverted this: it called
+  `SpawnRegistry.spawn(agent_uri)` directly (which spawned the Agent
+  Kind) BEFORE `Workspace.add_template/3` (which chains to
+  instantiate). cc.agent.instantiate then short-circuited on the
+  already-alive Kind and started PtyServer only — making it look like
+  templates couldn't bring an Agent Kind up standalone.
+
+  The V1 fix removed the pre-spawn from AgentNewLive AND made this
+  template do the full job: when instantiate runs it BOTH ensures the
+  Agent Kind exists (via `SpawnRegistry.spawn/1`) AND starts the
+  PtyServer. After `add_template → invoke_template → instantiate`
+  returns, the caller has a fully-operational cc agent.
 
   ## Template data
 
       %{
         "class" => "cc.agent",
-        "agent_uri" => "entity://agent/default/cc_<name>",  # PR #141 SPEC v2
-        "mode" => "local-pty" | "remote-channel",
-        "cwd" => "/path"                     # required for local-pty
+        "agent_uri" => "entity://agent/<workspace>/cc_<name>",
+        "cwd" => "/path"
       }
 
-  ## Idempotency (PR-D2)
+  ## Idempotency (PR-D2 + V1 fix)
 
   `instantiate/3` first looks up `agent_uri` in `KindRegistry`.
-  If alive, returns the existing pid — no respawn, no PTY waste.
-  If absent, spawns via the appropriate path. The spawned
-  `PtyServer` itself registers under a `:via Registry` keyed by
-  `agent_uri` so concurrent boot-time calls (e.g. multiple plugins
-  each running `Workspace.Loader.load_all/0`) collapse atomically
-  at the supervisor layer — `start_child` returns `{:error,
-  {:already_started, pid}}` for the second-and-beyond callers.
-
-  Pre-PR-D2 the comment said "for v1 we accept double-spawn at
-  the supervisor layer" — that turned out to spawn 4× PtyServers
-  per agent at boot (one per plugin re-running load_all). Fixed.
+  If alive, returns the existing URI — no respawn, no PTY waste.
+  Otherwise spawns the Agent Kind via `SpawnRegistry.spawn/1` then
+  starts the PtyServer under `EzagentPluginCc.PtyServerSupervisor`.
+  Both layers are atomically dedup'd: Agent Kind via
+  `KindRegistry` (entity:// spawn fn returns `{:error,
+  {:already_started, _}}` for duplicates), PtyServer via its `:via
+  Registry` (`EzagentPluginCc.PtyServerRegistry`).
   """
 
   @behaviour Ezagent.Kind.Template
@@ -52,8 +65,7 @@ defmodule Ezagent.PluginCc.Template.CcAgent do
   def validate(tmpl) when is_map(tmpl) do
     with :ok <- check_class(tmpl),
          :ok <- check_agent_uri(tmpl),
-         :ok <- check_mode(tmpl),
-         :ok <- check_cwd_when_local(tmpl) do
+         :ok <- check_cwd(tmpl) do
       :ok
     end
   end
@@ -99,81 +111,105 @@ defmodule Ezagent.PluginCc.Template.CcAgent do
 
   defp check_agent_uri(_), do: {:error, :missing_agent_uri}
 
-  defp check_mode(%{"mode" => mode}) when mode in ["local-pty", "remote-channel"], do: :ok
-  defp check_mode(%{"mode" => other}), do: {:error, {:unsupported_mode, other}}
-  # Back-compat: missing mode defaults to local-pty (matches pre-D2 cc.pty behavior)
-  defp check_mode(tmpl) when is_map(tmpl), do: :ok
-
-  defp check_cwd_when_local(%{"mode" => "remote-channel"}), do: :ok
-
-  defp check_cwd_when_local(tmpl) do
-    case tmpl do
-      %{"cwd" => cwd} when is_binary(cwd) and cwd != "" -> :ok
-      _ -> {:error, :missing_cwd}
-    end
-  end
+  defp check_cwd(%{"cwd" => cwd}) when is_binary(cwd) and cwd != "", do: :ok
+  defp check_cwd(_), do: {:error, :missing_cwd}
 
   @impl Ezagent.Kind.Template
   def instantiate(_tmpl_name, %{"agent_uri" => uri_str} = tmpl, _workspace_uri) do
     agent_uri = URI.parse(uri_str)
-    mode = Map.get(tmpl, "mode", "local-pty")
 
-    # PR-D2 idempotency short-circuit: if the agent is already alive,
-    # just return its URI — no spawn, no log noise. Each plugin
+    # PR-D2 idempotency short-circuit: if BOTH the Agent Kind and the
+    # PtyServer are already alive we have nothing to do. Each plugin
     # re-running Workspace.Loader.load_all/0 hits this on subsequent
-    # passes (the first pass spawns, the rest no-op).
-    case Ezagent.KindRegistry.lookup(agent_uri) do
-      {:ok, _pid} ->
+    # passes; the first pass spawns, the rest no-op.
+    cond do
+      agent_kind_alive?(agent_uri) and pty_server_alive?(agent_uri) ->
         {:ok, [agent_uri]}
 
-      :error ->
-        spawn_for_mode(mode, agent_uri, tmpl)
+      true ->
+        spawn_for_local_pty(agent_uri, tmpl)
     end
   end
 
   def instantiate(_tmpl_name, tmpl, _workspace_uri), do: {:error, {:invalid_template, tmpl}}
 
-  defp spawn_for_mode("local-pty", agent_uri, tmpl) do
+  # V1 fix Allen 2026-05-21: template instantiate PRODUCES the Kind.
+  # Before this fix, instantiate started only PtyServer and assumed
+  # someone else (AgentNewLive's direct SpawnRegistry.spawn call) had
+  # already created the Agent Kind. The new flow:
+  #
+  # 1. Ensure the Agent Kind exists (via SpawnRegistry — routed by
+  #    chat plugin's "entity" spawn fn to AgentSupervisor).
+  # 2. Start the PtyServer for this agent_uri.
+  #
+  # Both steps are idempotent: SpawnRegistry returns
+  # `{:error, {:already_started, _}}` for an existing Agent Kind, and
+  # the PtyServer's :via Registry collapses concurrent starts.
+  defp spawn_for_local_pty(agent_uri, tmpl) do
     cwd = Map.fetch!(tmpl, "cwd")
 
+    with :ok <- ensure_agent_kind(agent_uri),
+         :ok <- ensure_pty_server(agent_uri, cwd) do
+      {:ok, [agent_uri]}
+    end
+  end
+
+  defp ensure_agent_kind(agent_uri) do
+    case Ezagent.SpawnRegistry.spawn(agent_uri) do
+      {:ok, _pid} ->
+        :ok
+
+      {:error, {:already_started, _pid}} ->
+        # Atomic dedup at KindRegistry level — Kind was spawned by a
+        # concurrent caller (or by an earlier instantiate that crashed
+        # between Kind spawn and PtyServer start). Treat as success.
+        :ok
+
+      {:error, reason} ->
+        Logger.warning(
+          "cc.agent: SpawnRegistry.spawn failed for #{URI.to_string(agent_uri)}: " <>
+            inspect(reason)
+        )
+
+        {:error, {:agent_kind_spawn_failed, reason}}
+    end
+  end
+
+  defp ensure_pty_server(agent_uri, cwd) do
     case DynamicSupervisor.start_child(
            EzagentPluginCc.PtyServerSupervisor,
            {Ezagent.PluginCc.PtyServer, %{agent_uri: agent_uri, cwd: cwd}}
          ) do
       {:ok, _pid} ->
-        {:ok, [agent_uri]}
+        :ok
 
       {:error, {:already_started, _pid}} ->
         # Atomic dedup at supervisor layer (PtyServer's :via Registry
         # name made this happen). Treat as success.
-        {:ok, [agent_uri]}
+        :ok
 
       {:error, reason} ->
         Logger.warning(
-          "cc.agent[local-pty] spawn failed for #{URI.to_string(agent_uri)}: " <>
+          "cc.agent: PtyServer start failed for #{URI.to_string(agent_uri)}: " <>
             inspect(reason)
         )
 
-        {:error, reason}
+        {:error, {:pty_server_spawn_failed, reason}}
     end
   end
 
-  defp spawn_for_mode("remote-channel", agent_uri, _tmpl) do
-    # Placeholder per PR-D2 plan: mint the token so a remote claude
-    # can connect, but no local process is spawned. When the remote
-    # connects via /cc_socket the BridgeRegistry will hold its pid;
-    # KindRegistry routing into the agent uses the bridge.
-    #
-    # NOT WIRED YET — the spawn-or-register-virtual-Kind half of this
-    # needs design. For now, return an explicit error so the operator
-    # sees that "remote-channel" is a documented placeholder, not a
-    # silent failure.
-    Logger.info(
-      "cc.agent[remote-channel] is a documented placeholder " <>
-        "(uri=#{URI.to_string(agent_uri)}); returning :not_implemented"
-    )
+  defp agent_kind_alive?(agent_uri) do
+    case Ezagent.KindRegistry.lookup(agent_uri) do
+      {:ok, _pid} -> true
+      :error -> false
+    end
+  end
 
-    {:error, :remote_mode_not_implemented}
+  defp pty_server_alive?(agent_uri) do
+    case Ezagent.PluginCc.PtyServer.find_by_agent_uri(agent_uri) do
+      {:ok, _pid} -> true
+      :error -> false
+    end
   end
 
   # --- Ezagent.UI.Form ---------------------------------------------------------
@@ -184,23 +220,15 @@ defmodule Ezagent.PluginCc.Template.CcAgent do
       %{
         name: "agent_uri",
         type: :uri,
-        label: "Agent URI (entity://agent/default/cc_<name>)",
+        label: "Agent URI (entity://agent/<workspace>/cc_<name>)",
         required: true,
         placeholder: "entity://agent/default/cc_architect"
       },
       %{
-        name: "mode",
-        type: :select,
-        label: "Mode",
-        required: true,
-        options: ["local-pty", "remote-channel"],
-        placeholder: nil
-      },
-      %{
         name: "cwd",
         type: :path,
-        label: "Working directory (local-pty only)",
-        required: false,
+        label: "Working directory",
+        required: true,
         placeholder: "/Users/me/Workspace/proj"
       }
     ]

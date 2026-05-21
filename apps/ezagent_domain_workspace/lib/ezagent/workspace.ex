@@ -24,7 +24,7 @@ defmodule Ezagent.Workspace do
   """
 
   alias Ezagent.Entity.Workspace, as: WK
-  alias Ezagent.{Invocation, KindRegistry, Workspace.Store}
+  alias Ezagent.{Invocation, KindRegistry, Workspace.Loader, Workspace.Store}
 
   # --- spawn ---------------------------------------------------------
 
@@ -114,6 +114,23 @@ defmodule Ezagent.Workspace do
   Per Phase 4-completion Spec 01 Q2-(b): `"class"` field is the source
   of truth for template Class binding. Multiple instances per Class are
   fine — they're distinguished by the Workspace-local `tmpl_name` key.
+
+  ## V1 acceptance fix (2026-05-21)
+
+  The full chain is now:
+  1. DB JSON updated (`Store.update_templates`)
+  2. Live Workspace Kind notified (`dispatch_mutation`)
+  3. **Template Class instantiated** (`Loader.invoke_template`) — runs
+     `Class.instantiate/3`, brings the spawned Kinds (PtyServer for
+     cc.agent, Session for session.generic, etc.) to life immediately
+     so any caller (`AgentNewLive`, CLI, future API) gets a running
+     agent without needing a phx restart.
+
+  An instantiate `{:error, {:already_started, _}}` is treated as
+  success (idempotent w.r.t. step 3 — re-running on an already-alive
+  Kind is a no-op). Any other instantiate error is returned to the
+  caller (per `feedback_let_it_crash_no_workarounds` — no silent
+  swallow).
   """
   @spec add_template(String.t(), String.t(), map()) :: :ok | {:error, term()}
   def add_template(name, tmpl_name, tmpl) when is_binary(tmpl_name) and is_map(tmpl) do
@@ -122,8 +139,22 @@ defmodule Ezagent.Workspace do
          new_tmpls = Map.put(tmpls, tmpl_name, tmpl),
          {:ok, _} <- Store.update_templates(name, new_tmpls),
          :ok <-
-           dispatch_mutation(name, "add_template", %{name: tmpl_name, template: tmpl}) do
+           dispatch_mutation(name, "add_template", %{name: tmpl_name, template: tmpl}),
+         :ok <- invoke_template_now(name, tmpl_name) do
       :ok
+    end
+  end
+
+  defp invoke_template_now(name, tmpl_name) do
+    workspace_uri = URI.parse("workspace://#{name}")
+
+    case Loader.invoke_template(workspace_uri, tmpl_name) do
+      {:ok, _uris} -> :ok
+      # Idempotent — already running. cc.agent.instantiate already
+      # short-circuits, but defensive in case other templates return
+      # this shape.
+      {:error, {:already_started, _pid}} -> :ok
+      {:error, _reason} = err -> err
     end
   end
 

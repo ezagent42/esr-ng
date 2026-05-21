@@ -17,8 +17,8 @@ defmodule EzagentPluginLiveview.AgentNewLive do
     Empty is fine — agents can be created with no caps and have caps
     granted later via `/identities/agents/<uri>/caps`.
 
-  Submit (`create_agent`) runs the same backend path as
-  `mix ezagent.agent.create`:
+  Submit (`create_agent`) follows the **template-produces-Kind**
+  architecture (Allen 2026-05-21 V1 fix):
 
   1. Parse flavor + name → build `%URI{}`
   2. Validate name (non-empty, no `_` collision with flavor prefix)
@@ -26,10 +26,26 @@ defmodule EzagentPluginLiveview.AgentNewLive do
      misleading "Create" on a noop — per memory
      `feedback_ui_no_misleading_buttons`)
   4. Parse caps via `Ezagent.Capability.Parser.parse/3`
-  5. `Ezagent.SpawnRegistry.spawn/1`
+  5. `register_and_instantiate/3` — for `cc`, registers the
+     `cc.agent` template which chains through
+     `Workspace.add_template → invoke_template → cc.agent.instantiate`
+     and BOTH the Agent Kind AND the PtyServer come up. For
+     `echo`/`curl` (no template-driven plugin) we call
+     `Ezagent.SpawnRegistry.spawn/1` directly — those flavors don't
+     have a separate per-instance lifecycle resource.
   6. For each parsed cap: dispatch `identity.grant_cap` (same path as
      `EntityCapsLive`)
   7. `push_navigate(to: /identities/agents/<encoded>)`
+
+  ### Why not always go through a template?
+
+  Echo and curl agents have no per-instance lifecycle resource (no
+  PTY, no token, no working directory). Defining a minimal template
+  class for them would be empty boilerplate that exists only to
+  satisfy a uniform creation API. Direct `SpawnRegistry.spawn/1` for
+  these flavors is the clearer V1 choice. If/when they grow per-
+  instance state, the same pattern as cc.agent (template + class)
+  applies.
 
   Wraps in `IdeShell.ide_shell` (workspace surface — agent creation
   is workflow, not config).
@@ -103,9 +119,8 @@ defmodule EzagentPluginLiveview.AgentNewLive do
          {:ok, agent_uri} <- compose_uri(flavor, name),
          :ok <- refuse_if_exists(agent_uri),
          {:ok, caps} <- Capability.Parser.parse(caps_str, caller_uri(socket)),
-         {:ok, _pid} <- Ezagent.SpawnRegistry.spawn(agent_uri),
-         :ok <- grant_all(agent_uri, caps, socket),
-         :ok <- maybe_register_cc_template(flavor, agent_uri, cwd) do
+         :ok <- register_and_instantiate(flavor, agent_uri, cwd),
+         :ok <- grant_all(agent_uri, caps, socket) do
       encoded = URI.encode_www_form(URI.to_string(agent_uri))
       {:noreply, push_navigate(socket, to: "/identities/agents/#{encoded}")}
     else
@@ -157,13 +172,19 @@ defmodule EzagentPluginLiveview.AgentNewLive do
 
   defp validate_cwd_for_flavor(_, _), do: :ok
 
-  defp maybe_register_cc_template("cc", agent_uri, cwd) do
+  # V1 fix Allen 2026-05-21 — template instantiate PRODUCES the Kind.
+  # For cc: register the cc.agent template; the chain
+  # `Workspace.add_template → invoke_template → cc.agent.instantiate`
+  # ensures BOTH the Agent Kind AND the PtyServer are alive when this
+  # returns. NO pre-spawn via `SpawnRegistry.spawn/1` — that path is
+  # what the V1 fix removed (it created the Kind out-of-order, leaving
+  # cc.agent.instantiate to spawn only the PtyServer).
+  defp register_and_instantiate("cc", agent_uri, cwd) do
     tmpl_name = "cc.agent." <> agent_name(agent_uri)
 
     tmpl = %{
       "class" => "cc.agent",
       "agent_uri" => URI.to_string(agent_uri),
-      "mode" => "local-pty",
       "cwd" => Path.expand(cwd)
     }
 
@@ -173,7 +194,18 @@ defmodule EzagentPluginLiveview.AgentNewLive do
     end
   end
 
-  defp maybe_register_cc_template(_other_flavor, _agent_uri, _cwd), do: :ok
+  # echo / curl have no per-instance lifecycle resource (no PTY, no
+  # token, no cwd). Direct spawn is the V1 path — see moduledoc for
+  # the rationale. `{:already_started, _}` is treated as success
+  # because `refuse_if_exists/1` upstream already rejected duplicates
+  # against a stale registry view; this guards against a tight race.
+  defp register_and_instantiate(flavor, agent_uri, _cwd) when flavor in ["echo", "curl"] do
+    case Ezagent.SpawnRegistry.spawn(agent_uri) do
+      {:ok, _pid} -> :ok
+      {:error, {:already_started, _pid}} -> :ok
+      {:error, reason} -> {:error, {:spawn_failed, reason}}
+    end
+  end
 
   defp agent_name(%URI{path: "/" <> rest}) do
     # Phase 9 PR-2 (SPEC v3 §3): entity URI is /<workspace>/<entity_name>.
@@ -263,7 +295,10 @@ defmodule EzagentPluginLiveview.AgentNewLive do
     do: "Working directory #{inspect(cwd)} doesn't exist or isn't a directory."
 
   defp friendly_error({:template_register_failed, reason}),
-    do: "Agent created but cc.agent template registration failed: #{inspect(reason)}"
+    do: "cc.agent template registration failed: #{inspect(reason)}"
+
+  defp friendly_error({:spawn_failed, reason}),
+    do: "Agent spawn failed: #{inspect(reason)}"
 
   defp friendly_error(other), do: "Create failed: #{inspect(other)}"
 

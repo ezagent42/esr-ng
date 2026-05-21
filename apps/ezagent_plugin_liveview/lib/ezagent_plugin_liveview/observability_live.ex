@@ -179,7 +179,7 @@ defmodule EzagentPluginLiveview.ObservabilityLive do
     <.empty_state
       :if={@bridges == []}
       title="No connected bridges"
-      description="A bridge connects when a cc.agent local-pty mode spawns claude with the sidecar."
+      description="A bridge connects when a cc.agent's claude PtyServer launches its Python MCP sidecar."
     />
     <.card :if={@bridges != []} class="p-0">
       <table class="w-full text-xs font-mono">

@@ -173,4 +173,73 @@ defmodule EzagentPluginLiveview.AgentNewLiveTest do
     assert html =~ "/identities/agents/new"
     assert html =~ "+ New agent"
   end
+
+  # Regression suite for the V1 acceptance bug. The user-visible
+  # failure was: operator clicks "Create agent" with `flavor=cc`, UI
+  # redirects to the detail page, detail page shows "Not running"
+  # forever.
+  #
+  # Root cause was a two-fold inversion:
+  # 1. AgentNewLive called `SpawnRegistry.spawn(agent_uri)` BEFORE
+  #    `Workspace.add_template/3`. That spawned the Agent Kind out-
+  #    of-order, and the subsequent `cc.agent.instantiate/3` saw the
+  #    Kind already alive → idempotent short-circuit → PtyServer
+  #    never started.
+  # 2. `Workspace.add_template/3` never chained into
+  #    `Workspace.Loader.invoke_template/2`, so even if the order had
+  #    been right, the Template Class's instantiate never ran at
+  #    runtime.
+  #
+  # These tests pin BOTH halves of the invariant: after create_agent
+  # with `flavor=cc`, both the Agent Kind AND the PtyServer are alive.
+  describe "cc flavor — V1 fix invariant (Allen 2026-05-21)" do
+    setup do
+      # Ensure the "default" workspace exists — AgentNewLive's
+      # `register_and_instantiate("cc", ...)` writes to it via
+      # `Workspace.add_template`. Idempotent: existing-workspace tests
+      # can run in any order.
+      case Ezagent.Workspace.Store.get_by_name("default") do
+        nil -> {:ok, _} = Ezagent.Workspace.create("default", %{})
+        _existing -> :ok
+      end
+
+      :ok
+    end
+
+    test "create_agent for cc → BOTH Agent Kind AND PtyServer alive (no `Not running`)",
+         %{conn: conn} do
+      name = "v1fix-#{System.unique_integer([:positive])}"
+      agent_uri = URI.parse("entity://agent/default/cc_#{name}")
+
+      {:ok, lv, _html} = live(conn, "/identities/agents/new")
+
+      assert {:error, {:live_redirect, %{to: to}}} =
+               lv
+               |> form("#agent-new-form", %{
+                 "agent" => %{
+                   "flavor" => "cc",
+                   "name" => name,
+                   "cwd" => System.tmp_dir!(),
+                   "caps" => ""
+                 }
+               })
+               |> render_submit()
+
+      encoded = URI.encode_www_form(URI.to_string(agent_uri))
+      assert to == "/identities/agents/#{encoded}"
+
+      # The two assertions that fail without the V1 fix:
+      assert {:ok, agent_pid} = Ezagent.KindRegistry.lookup(agent_uri),
+             "Agent Kind must be alive after create_agent (V1 fix invariant 1/2)"
+
+      assert is_pid(agent_pid)
+      assert Process.alive?(agent_pid)
+
+      assert {:ok, pty_pid} = Ezagent.PluginCc.PtyServer.find_by_agent_uri(agent_uri),
+             "PtyServer must be alive after create_agent (V1 fix invariant 2/2)"
+
+      assert is_pid(pty_pid)
+      assert Process.alive?(pty_pid)
+    end
+  end
 end

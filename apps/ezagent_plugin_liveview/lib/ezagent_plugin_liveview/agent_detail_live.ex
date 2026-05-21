@@ -54,18 +54,22 @@ defmodule EzagentPluginLiveview.AgentDetailLive do
     end
   end
 
+  # V1 acceptance fix (2026-05-21) — per ezagent-developer skill
+  # invariant 8: Domain UI MUST NOT import Plugin module functions.
+  # Domain.Agent.lifecycle_status/1 is the sanctioned facade — it
+  # pattern-matches the agent flavor and dispatches to the owning
+  # plugin's lifecycle helper internally. Response shape:
+  # %{phase: :alive | :registered | :not_found | ..., flavor: String.t() | nil, detail: map() | nil}.
   defp load_status(agent_uri) do
-    case Ezagent.PluginCc.PtyServer.find_by_agent_uri(agent_uri) do
-      {:ok, pid} -> {:alive, Ezagent.PluginCc.PtyServer.status(pid)}
-      :error -> :not_found
-    end
+    Ezagent.Domain.Agent.lifecycle_status(agent_uri)
   end
 
   # Phase 8b §1.10 — CC Bridges (v2) panel moved here from admin_live.
   # Per-agent so the operator can see "is this agent's WS bridge live?"
   # while looking at the agent's other status data. Returns `nil` if
   # the BridgeRegistry has no entry for this agent (most likely cause:
-  # local-pty agent that doesn't open a WS bridge).
+  # PtyServer is running but the Python MCP bridge inside claude
+  # hasn't connected back via `/cc_socket` yet, or has disconnected).
   defp load_bridge_entry(agent_uri) do
     if Code.ensure_loaded?(EzagentPluginCc.BridgeRegistry) do
       EzagentPluginCc.BridgeRegistry.list_connected()
@@ -91,6 +95,12 @@ defmodule EzagentPluginLiveview.AgentDetailLive do
 
   @impl true
   def handle_event("restart", _params, socket) do
+    # cc-specific operation — restart is currently only meaningful for
+    # cc-flavored agents (it restarts the PtyServer). Other flavors
+    # won't surface the Restart button in render/1. Direct plugin
+    # reference here is the documented exception per invariant 8:
+    # there's no domain-wide "restart agent" abstraction yet (V2
+    # work — see Lifecycle Behavior contract in v2-feedback-log).
     case Ezagent.PluginCc.PtyServer.find_by_agent_uri(socket.assigns.agent_uri) do
       {:ok, pid} ->
         # Supervisor terminates → restart via :permanent restart spec.
@@ -103,7 +113,7 @@ defmodule EzagentPluginLiveview.AgentDetailLive do
 
         {:noreply,
          socket
-         |> assign(:status, :not_found)
+         |> assign(:status, %{phase: :not_found, flavor: "cc", detail: nil})
          |> assign(:flash_error, nil)}
 
       :error ->
@@ -174,18 +184,26 @@ defmodule EzagentPluginLiveview.AgentDetailLive do
             {@flash_error}
           </p>
 
-          <%= case @status do %>
-            <% :not_found -> %>
+          <%!-- V1 acceptance fix (2026-05-21) — new status shape:
+               %{phase: :alive | :registered | :not_found | :error,
+                 flavor: String.t() | nil, detail: map() | nil}
+               per Ezagent.Domain.Agent. --%>
+          <%= cond do %>
+            <% @status.phase in [:not_found, :registered] -> %>
               <.card class="mt-6">
-                <h2 class="text-sm text-rose-600 dark:text-rose-400 font-medium mb-2">Not running</h2>
+                <h2 class="text-sm text-rose-600 dark:text-rose-400 font-medium mb-2">
+                  {phase_header(@status.phase)}
+                </h2>
                 <p class="text-xs">
-                  No live PtyServer for this URI. If you just clicked Restart, wait a moment.
-                  Otherwise, add a cc.pty template for this agent_uri in a Workspace.
+                  {phase_help_text(@status, @agent_uri)}
                 </p>
               </.card>
-            <% {:alive, s} -> %>
+            <% @status.phase == :alive and @status.flavor == "cc" -> %>
+              <% s = @status.detail %>
               <.card class="mt-6">
-                <h2 class="text-sm font-medium mb-3 text-zinc-900 dark:text-zinc-100">Status</h2>
+                <h2 class="text-sm font-medium mb-3 text-zinc-900 dark:text-zinc-100">
+                  Running (cc)
+                </h2>
                 <table class="w-full text-xs">
                   <tbody>
                     <tr>
@@ -273,10 +291,29 @@ defmodule EzagentPluginLiveview.AgentDetailLive do
                 </table>
               </.card>
 
-              <.card :if={s.recent_output != []} class="mt-6 bg-zinc-900 dark:bg-zinc-950 border-zinc-700 dark:border-zinc-800">
+              <.card :if={is_map(s) and Map.get(s, :recent_output, []) != []} class="mt-6 bg-zinc-900 dark:bg-zinc-950 border-zinc-700 dark:border-zinc-800">
                 <h2 class="text-sm font-medium mb-2 text-zinc-200">Recent PTY output (last 50 lines)</h2>
                 <pre class="font-mono text-[11px] whitespace-pre-wrap m-0 max-h-[360px] overflow-y-auto text-zinc-200"><%= for line <- s.recent_output do %>{line}
 <% end %></pre>
+              </.card>
+            <% @status.phase == :alive -> %>
+              <%!-- echo / curl / other flavors — Kind alive, no
+                   PTY/bridge layer to introspect. --%>
+              <.card class="mt-6">
+                <h2 class="text-sm font-medium mb-2 text-emerald-600 dark:text-emerald-400">
+                  Running ({@status.flavor || "unknown flavor"})
+                </h2>
+                <p class="text-xs text-zinc-500">
+                  Agent Kind is alive. This flavor has no PTY/bridge layer to introspect.
+                </p>
+              </.card>
+            <% true -> %>
+              <%!-- :error or any other phase --%>
+              <.card class="mt-6">
+                <h2 class="text-sm font-medium mb-2 text-rose-600 dark:text-rose-400">
+                  Status error
+                </h2>
+                <p class="text-xs">{inspect(@status.detail)}</p>
               </.card>
           <% end %>
         </div>
@@ -292,4 +329,28 @@ defmodule EzagentPluginLiveview.AgentDetailLive do
 
   defp client_label(%{info: %{claude_info: %{"name" => name}}}), do: name
   defp client_label(_), do: "—"
+
+  # V1 acceptance fix (2026-05-21) — header text for non-running
+  # lifecycle phases. "Not running" matches the pre-fix wording the
+  # operator already knows.
+  defp phase_header(:not_found), do: "Not running"
+  defp phase_header(:registered), do: "Registered (not yet instantiated)"
+  defp phase_header(other), do: to_string(other)
+
+  defp phase_help_text(%{phase: :not_found}, _agent_uri) do
+    "No Kind registered at this URI. If you just clicked Restart, wait a moment. " <>
+      "Otherwise, add a cc.agent template for this agent_uri in a Workspace."
+  end
+
+  defp phase_help_text(%{phase: :registered, detail: %{note: note}}, _agent_uri)
+       when is_binary(note) do
+    "Agent Kind alive but lifecycle helper says: #{note}. For cc agents this usually " <>
+      "means the PtyServer hasn't started yet (boot race or instantiate failed)."
+  end
+
+  defp phase_help_text(%{phase: :registered}, _agent_uri) do
+    "Agent Kind alive but the deeper lifecycle layer is not running yet."
+  end
+
+  defp phase_help_text(_status, _agent_uri), do: ""
 end

@@ -23,10 +23,13 @@ defmodule EzagentPluginCc.Application do
   the token + makes BridgeRegistry happy). They were always added
   together, deleted together.
 
-  Now: ONE template (`cc.agent`), ONE plugin. The operator picks
-  a `mode` field — `"local-pty"` spawns a local PTY-managed claude
-  (the cc.pty path); `"remote-channel"` is reserved for a future
-  external-host bridge.
+  Now: ONE template (`cc.agent`), ONE plugin. PR-D2 originally
+  reserved a `mode` field (`"local-pty"` / `"remote-channel"`) for a
+  future external-host bridge mode. Allen 2026-05-21 removed that
+  field — the placeholder was never wired and the dichotomy was
+  dead weight. If/when remote support returns it will land as a
+  separate plugin + Template Class, not a mode dimension on this
+  template.
 
   ## Boot order
 
@@ -90,7 +93,9 @@ defmodule EzagentPluginCc.Application do
 
   defp register_template_classes do
     # PR-D2 (Allen 2026-05-19): cc.pty + cc.channel_instance collapsed
-    # into a single cc.agent Template with a "mode" form field.
+    # into a single cc.agent Template (originally with a "mode" form
+    # field — that field was removed Allen 2026-05-21; only local-pty
+    # remains).
     :ok = Ezagent.TemplateRegistry.register(Ezagent.PluginCc.Template.CcAgent)
     :ok
   end
