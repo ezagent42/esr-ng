@@ -430,26 +430,46 @@ socket
 
 LV scopes (live_session :require_entity) inherit both.
 
-### 6.4 Workspace selector = logout + re-auth (Allen correction 2026-05-21)
+### 6.4 Workspace selector = permission-gated (Amendments 1 + 3)
 
-**Amended from original SPEC.** Per Allen's structural correction: if
-entity URI is workspace-bound (3-segment), then
-`entity://user/default/admin` and `entity://user/team-alpha/admin`
-are **two different entities**. There is no "stay-as-this-user,
-change-workspace" semantic in this design — switching workspace IS
-switching entity.
+**Amended twice from original SPEC.** Original "stay-as-this-user,
+change-workspace" was structurally incoherent. Amendment 1
+(2026-05-21 morning) said "always logout + re-auth." Amendment 3
+(2026-05-21 evening) refined: behavior splits by caller's permission:
 
-The avatar-dropdown workspace selector behaves as:
+**The unified flow** for clicking another workspace in the selector:
 
-- Click another workspace → POST `/workspaces/switch` with target ws.
-- Controller clears BOTH `:current_entity_uri` AND
-  `:current_workspace_uri` from the session.
-- Redirect to `/login?workspace=<target_ws>` with the workspace
-  pre-filled in the login form.
-- User authenticates as the entity in that workspace
-  (`<handle>` is interpreted as `entity://user/<target_ws>/<handle>`
-  via the same `SessionPrincipal.canonicalize/1` path but with a
-  workspace-override option).
+1. POST `/workspaces/switch` with target ws.
+2. Controller checks: is caller a member of `workspace://system`?
+   - **Yes (system member)** → context swap. Update
+     `:current_workspace_uri` to target; KEEP `:current_entity_uri`.
+     LV re-mounts with new workspace scope; UI shows "Operating on
+     `<target_ws>` as `system/admin`". (See §13.2 for the system
+     member view.)
+   - **No (regular user)** → denied. Render a prompt page:
+     "You don't have permission to view workspace `<target_ws>`.
+     Sign in as a member of that workspace to continue."
+     Offer a "Sign in to `<target_ws>`" button → redirects to
+     `/login?workspace=<target_ws>` which clears the current
+     session and pre-fills the workspace.
+
+The regular-user path does NOT auto-logout on click; the user must
+explicitly choose to log out + re-auth. This avoids surprise
+session loss when a regular user accidentally clicks a workspace
+they don't belong to.
+
+**Why permission-gated instead of always-logout (Amendment 3
+reasoning)**:
+
+- System members SHOULD switch contexts seamlessly — that's the
+  whole point of the Keycloak realm-admin model (§13).
+- Regular users SHOULD be told why they can't, not silently
+  logged out. The Phase 8c bare-handle-bounce bug taught us:
+  silent session changes are the worst UX (user can't tell what
+  happened).
+- The cap check is the structural place for permission;
+  controller logic doesn't need to know "is this a switch or a
+  re-login" until it's evaluated the cap.
 
 Why this is the right model:
 
@@ -748,13 +768,15 @@ alongside `workspace://default` and is structurally privileged:
 
 ### 13.2 Workspace-switch UX divergence (system vs. regular)
 
-The §6.4 amendment (workspace switch = logout) applies to
-**regular users only**. For `workspace://system` members:
+**Refined by Amendment 3.** The §6.4 permission-gated switcher has
+two branches based on caller's membership:
 
-- The "workspace selector" in the UI is renamed to
+For `workspace://system` members:
+
+- The "workspace selector" in the UI is labeled
   "Operate on workspace" (or 操作 workspace in Chinese).
-- Clicking another workspace does NOT log out — it updates
-  `:current_workspace_uri` to the target while keeping
+- Clicking another workspace → context swap (no logout). Updates
+  `:current_workspace_uri` to the target; KEEPS
   `:current_entity_uri` as `entity://user/system/admin`.
 - `:current_workspace_uri` for a system member can be ANY
   workspace; the §6.5 invariant
@@ -764,9 +786,18 @@ The §6.4 amendment (workspace switch = logout) applies to
   `system/admin`" so the system admin always knows which workspace
   their actions affect.
 
-This matches Keycloak's master-realm admin model — they stay
-authenticated as themselves, but the "current realm" context
-switches as they navigate.
+For regular workspace members (NOT in `workspace://system`):
+
+- Workspace selector shows ALL workspaces but their own as locked
+  (visual indicator). Clicking a locked workspace → "Sign in to
+  `<workspace>`" prompt (per §6.4 Amendment 3).
+- Their own workspace is highlighted as "current".
+- They never see `workspace://system` in the selector (it's
+  hidden per §13.1).
+
+This matches Keycloak's master-realm admin model — system admins
+stay authenticated as themselves with context-switching; regular
+users have a single fixed workspace until they explicitly re-auth.
 
 ### 13.3 Cap-loading flow
 
