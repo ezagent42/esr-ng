@@ -39,8 +39,15 @@ defmodule EzagentDomainUi.AdminSettingsShell do
       </.admin_settings_shell>
 
   Sub-sections are fixed in `sections/0`. `active_section` is one of
-  `:overview | :logs | :registry | :snapshots` (the keys returned by
-  `sections/0`) and controls which sidebar item is highlighted.
+  `:overview | :workspaces | :logs | :registry | :snapshots | :settings`
+  (the keys returned by `sections/0`) and controls which sidebar item
+  is highlighted.
+
+  V1 fix (Allen Feishu 2026-05-21 17:44): `:settings` was added because
+  `/settings` (SMTP + registration domains) is admin-only config and
+  belongs in the admin drawer, not in the avatar dropdown's personal-
+  config Preference link. Route moved from `/settings` →
+  `/admin/settings`.
   """
 
   use Phoenix.Component
@@ -59,12 +66,18 @@ defmodule EzagentDomainUi.AdminSettingsShell do
     default: nil,
     doc: """
     Which sidebar item is highlighted. One of `:overview | :workspaces |
-    :logs | :registry | :snapshots`, OR `nil` to derive from `current_path`.
+    :logs | :registry | :snapshots | :settings`, OR `nil` to derive from
+    `current_path`.
 
     PR-M (Allen 2026-05-20): `:workspaces` added — `/workspaces*` is now
     a configuration surface (workspace management = templates / members
     / routing config), rendered inside this drawer rather than as a peer
     workflow surface in `IdeShell`. The "no two header types" UX rule.
+
+    V1 fix (Allen Feishu 2026-05-21 17:44): `:settings` added —
+    `/admin/settings` (formerly `/settings`) hosts SMTP + registration-
+    domain editors, which are admin-only config; the route was moved
+    out of the avatar Preference dropdown into this drawer.
     """
   )
 
@@ -183,13 +196,17 @@ defmodule EzagentDomainUi.AdminSettingsShell do
   # --- sections / routing helpers ------------------------------------------
 
   @doc """
-  The 5 admin sub-sections in display order. Each entry:
+  The 6 admin sub-sections in display order. Each entry:
 
       %{key: atom, label: String.t(), icon: String.t(), path: String.t()}
 
   PR-M (Allen 2026-05-20): `:workspaces` inserted after `:overview` —
   the `/workspaces` and `/workspaces/:name` routes now render inside
   this drawer (workspace management is config, not workflow).
+
+  V1 fix (Allen Feishu 2026-05-21 17:44): `:settings` appended —
+  `/admin/settings` (formerly `/settings`) hosts SMTP + registration
+  allowlist editors and belongs in the admin drawer.
   """
   @spec sections() :: [%{key: atom(), label: String.t(), icon: String.t(), path: String.t()}]
   def sections do
@@ -198,7 +215,8 @@ defmodule EzagentDomainUi.AdminSettingsShell do
       %{key: :workspaces, label: "Workspaces", icon: "folder", path: "/workspaces"},
       %{key: :logs, label: "Logs & Audit", icon: "bug", path: "/admin/logs"},
       %{key: :registry, label: "Registry", icon: "users", path: "/admin/registry"},
-      %{key: :snapshots, label: "Snapshots", icon: "folder", path: "/admin/snapshots"}
+      %{key: :snapshots, label: "Snapshots", icon: "folder", path: "/admin/snapshots"},
+      %{key: :settings, label: "Settings", icon: "settings", path: "/admin/settings"}
     ]
   end
 
@@ -226,6 +244,9 @@ defmodule EzagentDomainUi.AdminSettingsShell do
       iex> section_for_path("/workspaces/demo")
       :workspaces
 
+      iex> section_for_path("/admin/settings")
+      :settings
+
       iex> section_for_path("/sessions")
       :overview
   """
@@ -235,6 +256,7 @@ defmodule EzagentDomainUi.AdminSettingsShell do
       String.starts_with?(path, "/admin/logs") -> :logs
       String.starts_with?(path, "/admin/registry") -> :registry
       String.starts_with?(path, "/admin/snapshots") -> :snapshots
+      String.starts_with?(path, "/admin/settings") -> :settings
       String.starts_with?(path, "/workspaces") -> :workspaces
       # /admin and any unknown path default to Overview (Allen's pivot
       # treats Overview as the "home" of the admin drawer).

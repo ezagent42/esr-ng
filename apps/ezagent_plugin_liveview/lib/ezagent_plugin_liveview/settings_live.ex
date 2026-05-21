@@ -1,6 +1,13 @@
 defmodule EzagentPluginLiveview.SettingsLive do
   @moduledoc """
-  Phase 8 阶段 D — Settings LV (`/admin/settings`).
+  Phase 8 阶段 D — Settings LV.
+
+  V1 fix (Allen Feishu 2026-05-21 17:44): moved from `/settings` →
+  `/admin/settings` and re-shelled inside
+  `EzagentDomainUi.AdminSettingsShell` (the admin drawer) instead of
+  `EzagentDomainUi.IdeShell` (the workspace surface). The page hosts
+  admin-only config (SMTP + registration domains) and never belonged
+  in the avatar dropdown's personal-config "Preference" slot.
 
   Account / Preferences / Keyboard / Access & Identity / System.
   Most sections are placeholders in Phase 8; Access & Identity
@@ -14,23 +21,39 @@ defmodule EzagentPluginLiveview.SettingsLive do
   the admin can verify SMTP end-to-end. **This page ACTIVATES the
   email-login flow** — until SMTP is set here, magic-link login fails
   with `:smtp_not_configured` in production.
+
+  V1 fix tightens the admin scope at the mount level: non-admin
+  callers are redirected to `/sessions` with a flash — defence in
+  depth on top of the per-section `@is_admin?` UI gates.
   """
   use Phoenix.LiveView
-  alias EzagentDomainUi.IdeShell
+  alias EzagentDomainUi.AdminSettingsShell
   use EzagentDomainUi.Components
   use EzagentDomainUi.Primitives
 
   @impl true
   def mount(_params, _session, socket) do
-    {:ok,
-     socket
-     |> assign(:section, :account)
-     |> load_smtp_form()
-     |> load_registration_domains()
-     |> assign(:smtp_test_recipient, default_test_recipient(socket))
-     |> assign(:smtp_test_result, nil)
-     |> assign(:smtp_flash, nil)
-     |> assign(:registration_flash, nil)}
+    if Map.get(socket.assigns, :is_admin?) do
+      {:ok,
+       socket
+       |> assign(:section, :smtp)
+       |> load_smtp_form()
+       |> load_registration_domains()
+       |> assign(:smtp_test_recipient, default_test_recipient(socket))
+       |> assign(:smtp_test_result, nil)
+       |> assign(:smtp_flash, nil)
+       |> assign(:registration_flash, nil)}
+    else
+      # V1 fix (Allen 2026-05-21 17:44): /admin/settings is admin
+      # scope. The avatar-dropdown "Admin" link is already gated by
+      # `@is_admin?` for non-admins, so reaching this route is
+      # either a deep link or a stale bookmark from when the page
+      # lived at /settings. Redirect to /sessions with a flash.
+      {:ok,
+       socket
+       |> put_flash(:error, "Admin Settings is restricted to admin entities.")
+       |> push_navigate(to: "/sessions")}
+    end
   end
 
   @impl true
@@ -189,32 +212,38 @@ defmodule EzagentPluginLiveview.SettingsLive do
       end)
 
     ~H"""
-    <IdeShell.ide_shell
+    <AdminSettingsShell.admin_settings_shell
       current_entity_uri={@current_entity_uri_str}
-      current_path="/settings"
-      status={%{agents_alive: 0, bridges: 0, debug_events: 0, version: "dev"}}
-      is_admin?={@is_admin?}
-      is_system_member?={@is_system_member?}
-      workspaces={@workspaces}
+      current_path="/admin/settings"
+      active_section={:settings}
     >
-      <:resource_panel>
-        <div class="p-3 flex flex-col gap-px">
-          <div class="text-[10px] uppercase tracking-wide text-zinc-500 mb-2">Settings</div>
-          <.section_link section={@section} value={:account} label="Account" />
-          <.section_link section={@section} value={:preferences} label="Preferences" />
-          <.section_link section={@section} value={:keyboard} label="Keyboard" />
-          <.section_link section={@section} value={:access} label="Access & Identity" />
-          <.section_link :if={@is_admin?} section={@section} value={:system} label="System" />
-          <.section_link :if={@is_admin?} section={@section} value={:smtp} label="Email / SMTP" />
-          <.section_link :if={@is_admin?} section={@section} value={:registration} label="Registration" />
+      <:main>
+        <div class="flex flex-1 min-h-0">
+          <%!-- V1 fix (Allen 2026-05-21 17:44): inner sub-section rail.
+                AdminSettingsShell's outer sidebar selects which admin
+                page is active (Overview / Workspaces / Logs / Registry
+                / Snapshots / Settings); this inner rail switches
+                between sub-sections of the Settings page itself. All
+                sub-sections are admin-only at the mount-gate level, so
+                the prior `:if={@is_admin?}` conditionals are dropped. --%>
+          <aside class="w-56 shrink-0 border-r border-zinc-200 dark:border-zinc-800 bg-zinc-50/50 dark:bg-zinc-950/50">
+            <div class="p-3 flex flex-col gap-px">
+              <div class="text-[10px] uppercase tracking-wide text-zinc-500 mb-2">Settings</div>
+              <.section_link section={@section} value={:smtp} label="Email / SMTP" />
+              <.section_link section={@section} value={:registration} label="Registration" />
+              <.section_link section={@section} value={:access} label="Access & Identity" />
+              <.section_link section={@section} value={:system} label="System" />
+              <.section_link section={@section} value={:account} label="Account" />
+              <.section_link section={@section} value={:preferences} label="Preferences" />
+              <.section_link section={@section} value={:keyboard} label="Keyboard" />
+            </div>
+          </aside>
+          <div class="flex-1 overflow-auto px-6 py-6">
+            {render_section(assigns, @section)}
+          </div>
         </div>
-      </:resource_panel>
-      <:main_window>
-        <div class="flex-1 overflow-auto px-6 py-6">
-          {render_section(assigns, @section)}
-        </div>
-      </:main_window>
-    </IdeShell.ide_shell>
+      </:main>
+    </AdminSettingsShell.admin_settings_shell>
     """
   end
 
@@ -310,37 +339,32 @@ defmodule EzagentPluginLiveview.SettingsLive do
 
   defp render_section(assigns, :system) do
     ~H"""
-    <%= if @is_admin? do %>
-      <.page_header title="System">
-        <:subtitle>Cluster + plugin metadata.</:subtitle>
-      </.page_header>
-      <.card>
-        <div class="text-xs space-y-2">
-          <div class="flex justify-between border-b border-zinc-100 dark:border-zinc-900 pb-1">
-            <span>ezagent_core version</span>
-            <span class="font-mono">{system_version()}</span>
-          </div>
-          <div class="flex justify-between border-b border-zinc-100 dark:border-zinc-900 pb-1">
-            <span>Elixir / OTP</span>
-            <span class="font-mono">{System.version()} / {System.otp_release()}</span>
-          </div>
-          <div class="flex justify-between border-b border-zinc-100 dark:border-zinc-900 pb-1">
-            <span>Loaded apps</span>
-            <span class="font-mono">{loaded_app_count()}</span>
-          </div>
+    <.page_header title="System">
+      <:subtitle>Cluster + plugin metadata.</:subtitle>
+    </.page_header>
+    <.card>
+      <div class="text-xs space-y-2">
+        <div class="flex justify-between border-b border-zinc-100 dark:border-zinc-900 pb-1">
+          <span>ezagent_core version</span>
+          <span class="font-mono">{system_version()}</span>
         </div>
-      </.card>
-    <% else %>
-      <.admin_only_notice />
-    <% end %>
+        <div class="flex justify-between border-b border-zinc-100 dark:border-zinc-900 pb-1">
+          <span>Elixir / OTP</span>
+          <span class="font-mono">{System.version()} / {System.otp_release()}</span>
+        </div>
+        <div class="flex justify-between border-b border-zinc-100 dark:border-zinc-900 pb-1">
+          <span>Loaded apps</span>
+          <span class="font-mono">{loaded_app_count()}</span>
+        </div>
+      </div>
+    </.card>
     """
   end
 
   # Task 4 — SMTP config (admin-only). Activates magic-link login.
   defp render_section(assigns, :smtp) do
     ~H"""
-    <%= if @is_admin? do %>
-      <.page_header title="Email / SMTP">
+    <.page_header title="Email / SMTP">
         <:subtitle>
           Outbound mail config for magic-link sign-in. Until SMTP is set
           here, email login fails with <code>:smtp_not_configured</code>.
@@ -412,17 +436,13 @@ defmodule EzagentPluginLiveview.SettingsLive do
           ✗ {elem(@smtp_test_result, 1)}
         </p>
       </.card>
-    <% else %>
-      <.admin_only_notice />
-    <% end %>
     """
   end
 
   # Task 4 — Registration domains (admin-only).
   defp render_section(assigns, :registration) do
     ~H"""
-    <%= if @is_admin? do %>
-      <.page_header title="Registration">
+    <.page_header title="Registration">
         <:subtitle>
           Self-registration allowlist. Empty list = self-registration disabled
           (only admin-created users can sign in via magic link).
@@ -464,9 +484,6 @@ defmodule EzagentPluginLiveview.SettingsLive do
           </div>
         </div>
       </.card>
-    <% else %>
-      <.admin_only_notice />
-    <% end %>
     """
   end
 
@@ -489,17 +506,6 @@ defmodule EzagentPluginLiveview.SettingsLive do
         class="w-full px-2 py-1.5 text-xs border border-zinc-300 dark:border-zinc-700 rounded font-mono bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-100"
       />
     </div>
-    """
-  end
-
-  defp admin_only_notice(assigns) do
-    ~H"""
-    <.page_header title="Admin only" />
-    <.card>
-      <p class="text-sm text-zinc-700 dark:text-zinc-300">
-        This section is restricted to admin entities.
-      </p>
-    </.card>
     """
   end
 

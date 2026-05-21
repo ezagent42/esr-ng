@@ -197,11 +197,14 @@ defmodule EzagentDomainUi.AdminSettingsShellTest do
   end
 
   describe "sections/0" do
-    test "returns 5 sub-sections in display order (PR-M added Workspaces)" do
+    test "returns 6 sub-sections in display order (V1 fix added Settings)" do
+      # PR-M added :workspaces; V1 fix (Allen Feishu 2026-05-21 17:44)
+      # appended :settings (the former /settings page, now at
+      # /admin/settings, lives in the admin drawer).
       items = AdminSettingsShell.sections()
-      assert length(items) == 5
+      assert length(items) == 6
       keys = Enum.map(items, & &1.key)
-      assert keys == [:overview, :workspaces, :logs, :registry, :snapshots]
+      assert keys == [:overview, :workspaces, :logs, :registry, :snapshots, :settings]
     end
 
     test "each section has key/label/icon/path" do
@@ -216,6 +219,19 @@ defmodule EzagentDomainUi.AdminSettingsShellTest do
         assert String.starts_with?(section.path, "/admin") or
                  String.starts_with?(section.path, "/workspaces")
       end
+    end
+
+    test "settings entry points at /admin/settings (V1 fix)" do
+      settings = Enum.find(AdminSettingsShell.sections(), &(&1.key == :settings))
+      assert settings != nil
+      assert settings.path == "/admin/settings"
+      assert settings.label == "Settings"
+    end
+  end
+
+  describe "section_for_path/1 settings extension (V1 fix)" do
+    test "/admin/settings → :settings" do
+      assert AdminSettingsShell.section_for_path("/admin/settings") == :settings
     end
   end
 end

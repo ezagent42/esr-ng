@@ -1,9 +1,11 @@
 defmodule EzagentPluginLiveview.SettingsLiveSmtpTest do
   @moduledoc """
   V1 regression — Allen Feishu 2026-05-21 17:44: saved SMTP config
-  via `/settings`, form showed "SMTP config saved." but clicking
-  "Send test email" returned the cond branch's "SMTP not configured —
-  fill host/port/username/password/from above and save first."
+  via `/admin/settings` (moved from `/settings` the same day; see
+  router commit "move /settings to /admin/settings"), form showed
+  "SMTP config saved." but clicking "Send test email" returned the
+  cond branch's "SMTP not configured — fill host/port/username/
+  password/from above and save first."
 
   These tests drive the LV through the actual form submission + test-send
   flow to keep the save→read invariant: after `save_smtp` returns
@@ -42,7 +44,7 @@ defmodule EzagentPluginLiveview.SettingsLiveSmtpTest do
   describe "save_smtp -> send_test_email round-trip" do
     test "after saving a complete SMTP config, send_test_email does NOT report 'not configured'",
          %{conn: conn} do
-      {:ok, lv, _html} = live(conn, "/settings")
+      {:ok, lv, _html} = live(conn, "/admin/settings")
 
       # Switch to SMTP section + save the config the same way the form does.
       lv |> render_click("switch_section", %{"key" => "smtp"})
@@ -67,7 +69,7 @@ defmodule EzagentPluginLiveview.SettingsLiveSmtpTest do
 
     test "Ezagent.AppSettings.smtp_configured?/0 is true immediately after save_smtp completes",
          %{conn: conn} do
-      {:ok, lv, _html} = live(conn, "/settings")
+      {:ok, lv, _html} = live(conn, "/admin/settings")
 
       lv |> render_click("switch_section", %{"key" => "smtp"})
       _html = lv |> render_submit("save_smtp", %{"smtp" => @smtp_complete})
@@ -78,7 +80,7 @@ defmodule EzagentPluginLiveview.SettingsLiveSmtpTest do
 
     test "send_test_email DOES report 'not configured' when config is genuinely incomplete",
          %{conn: conn} do
-      {:ok, lv, _html} = live(conn, "/settings")
+      {:ok, lv, _html} = live(conn, "/admin/settings")
 
       lv |> render_click("switch_section", %{"key" => "smtp"})
 
