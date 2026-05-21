@@ -109,10 +109,134 @@ Recommended V2: **A + C combo**. A solves the "spawn forgot to instantiate assoc
 
 ### 链接
 
-- V1 tactical fix: PR #XXX (cross-link after merge)
+- **V1 tactical fix SHIPPED**: PR #175 (commit `c60cd32`) — Workspace.add_template chains to invoke_template + AgentNewLive spawn order inverted + Domain.Agent.lifecycle_status facade + cc.agent mode/remote-channel dead code removed
 - Same-family pattern in Phase 8c: bare-handle bounce → `SessionPrincipal.put/2` invariant
-- Q2 clarification needed from Allen: cc-channel + with_pty mental model vs actual PR-D2 code shape (asked on Feishu 2026-05-21 16:14)
-- Test gap: invariant test for "any URI in `session_templates` has a running instantiated process" — missing today, fix to include
+- Q2 clarification from Allen 2026-05-21 16:22: cc plugin original design was channel-as-primary + optional PTY; remote-channel was deferred placeholder; CURRENT direction (per Allen): single local-pty mode, future remote support = separate plugin. PR #175 acted on this.
+- Q3 clarification from Allen: Agent UI fix IS V1 work (not V2 deferred); V2 will reference V1's Domain.Agent facade as architecture pattern.
+- Test gap CLOSED in PR #175: "AgentNewLive create_agent → BOTH Agent Kind AND PtyServer alive" e2e regression test
+
+## V2 macro charter — Phoenix-Plug-style spawn pipeline (Allen sketch + Claude refinements)
+
+### Allen's V2 macro sketch (Feishu 2026-05-21 16:36, msg `om_x100b6fdf11dbe8a8c333bbaa75d77c7`)
+
+> [verbatim quote]
+> defmodule Ezagent.Plugin.Cc.Template.CcAgent do
+>   use Ezagent.Kind.Template,
+>   use Ezagent.Entity.Agent
+>     agent_types: cc,
+>     spawns_with: [Ezagent.Domain.Pty.PtyServer]
+>     spawns_pipeline: Agent.spawn |> Caps.grant |> Pty.Start |> Channel.connect |>  Session.join
+
+### Refined V2 syntax (Claude — Elixir-realistic)
+
+```elixir
+defmodule Ezagent.PluginCc.Template.CcAgent do
+  use Ezagent.Kind.Template,
+    creates: Ezagent.Entity.Agent,
+    flavor: "cc",
+    spawns_with: [Ezagent.Domain.Pty.PtyServer]
+
+  spawn_pipeline do
+    step Ezagent.Lifecycle.AgentSpawn
+    step Ezagent.Lifecycle.CapsGrant
+    step Ezagent.Lifecycle.PtyStart
+    step Ezagent.Lifecycle.ChannelConnect
+    step Ezagent.Lifecycle.SessionJoin
+  end
+
+  def required_params, do: [:agent_uri, :cwd]
+end
+```
+
+### Why these adjustments from Allen's sketch
+
+| Allen's sketch | Refinement | Reason |
+|---|---|---|
+| `use Foo, use Bar` | one `use` with options | Elixir disallows multiple `use` in one statement; common idiom is single `use` with keyword options |
+| `agent_types: cc` (atom) | `flavor: "cc"` (string) | Matches Phase 9 SPEC §5.14 `entity://agent/<flavor>_<name>` URI shape where flavor is a string prefix |
+| `Foo \|> Bar \|> Baz` at attribute level | `spawn_pipeline do step Foo; step Bar; ... end` block macro | `\|>` is a runtime operator and can't be evaluated at module-definition time. Phoenix's `pipeline :browser do plug X end` is the canonical Elixir DSL pattern for this |
+| `Ezagent.Domain.Pty.PtyServer` (Domain layer) | KEEP — Allen's good call | PTY is a generic capability (cc + future flavors may use); domain layer is the right home (currently in plugin_cc — V2 promotes it) |
+
+### Macro expansion (what it generates)
+
+The `use Ezagent.Kind.Template` macro with `spawn_pipeline` block generates:
+
+1. **`instantiate/3` callback**: chains each pipeline step with proper context passing (think Plug.Conn — each step receives an `%Ezagent.Lifecycle.Context{}` struct and returns `{:ok, context}` or `{:error, reason, context}`)
+2. **`flavor_match?/1` helper**: matches URIs against the declared flavor prefix
+3. **`Ezagent.Domain.Agent.lifecycle_status/1` integration**: auto-derives phase from the pipeline's furthest-completed step
+4. **Pipeline trace / debugging**: each step records into telemetry; debugger UI shows "stuck at PtyStart" instead of "Not running"
+5. **Reverse pipeline for terminate/3**: graceful shutdown runs steps in reverse (SessionLeave → ChannelDisconnect → PtyStop → CapsRevoke → AgentDespawn)
+6. **Cap-gated**: each step declares the cap it requires (e.g., `PtyStart` requires `pty.start` cap); pipeline halts on first denial
+
+### Why this matters for V2
+
+- **Plugin authoring friction reduced**: cc plugin author writes ~5 lines + 5 lifecycle modules (one per step); macro generates the orchestration
+- **Cross-plugin composability**: feishu plugin can add `Ezagent.PluginFeishu.Lifecycle.WebhookRegister` step without forking cc plugin
+- **Debuggability**: pipeline trace beats "Not running" mystery — operator sees exactly which step failed
+- **No more reverse-spawn-order bugs**: pipeline ordering is declarative + compile-checked
+- **Symmetric with terminate**: today there's no graceful agent shutdown; V2 macro generates it for free
+
+### Trade-off
+
+- More macro complexity in `Ezagent.Kind.Template` itself (~200 LOC macro)
+- Plugin authors learn a new DSL (mitigated by familiarity with Phoenix Plug)
+- Edge cases: dynamic pipelines (template selects steps based on params) — needs design
+
+### Recommended V2 PR sequence
+
+1. Define `Ezagent.Lifecycle.Step` Behaviour (`call/2` + `terminate/2`)
+2. Implement `spawn_pipeline` macro in `Ezagent.Kind.Template`
+3. Refactor `cc.agent` template to use macro (migration test: behavior preserved)
+4. Refactor echo/curl/future plugins to use macro
+5. Promote `Ezagent.Domain.Pty` from plugin_cc (PTY = generic capability)
+6. CI gate: every plugin Template MUST use the macro (grep gate)
+
+### 链接
+
+- Allen's bug-history question + prevention strategies discussed Feishu 2026-05-21 16:37 (msg `om_x100b6fdf2f46b094c3ada79847ecc1c`) — captured in V1 fix prevention strategies (entry below)
+
+---
+
+## Architectural prevention — How the reverse-spawn-order bug snuck through, how to make it impossible
+
+### 原始反馈
+
+> [Feishu 2026-05-21 16:37 (GMT+9), msg `om_x100b6fdf2f46b094c3ada79847ecc1c`]
+> agent spawn 反序问题是怎么出现的，如何预防？
+
+### 本质原因
+
+The bug shipped because **the test suite couldn't distinguish "Kind alive by direct spawn + template-as-config" from "Kind alive via template-as-creator"**. Both states satisfy `KindRegistry.lookup → {:ok, _}`; only when template instantiate is the SOLE creator does the layering invariant hold.
+
+Three contributing factors:
+
+1. **Idempotent instantiate masking the bug**: `cc.agent.instantiate/3` short-circuits when it sees `KindRegistry.lookup → {:ok, _}`. The pre-spawn flow worked because instantiate is "tolerant" — but tolerance ate the architectural invariant.
+2. **No "every Agent Kind came from a Template" invariant test**: existing invariants assert workspace binding, URI shape, cap workspace — none assert provenance.
+3. **Mental-model leak**: AgentNewLive author (Phase 8c PR-N) thought "Kind = the thing; Template = config". The correct model: "Template = the creator; Kind = the product". Without macro enforcement, every code author re-decides this.
+
+### V2 影响
+
+- **Scope**: structural (macro enforcement) + tactical (invariant test) + skill update
+- **Affects**: SpawnRegistry, Kind/Template authoring story, ezagent-developer SKILL.md anti-patterns
+- **Blocks**: V2 macro design is the structural answer; needs invariant test + skill update meanwhile
+
+### 候选方案 — 5-layer defence
+
+| Layer | Strategy | When |
+|---|---|---|
+| 1. Structural | Macro-generated `spawn_pipeline` makes "spawn outside template" impossible at compile time | V2 |
+| 2. Invariant test | Runtime: every alive `entity://agent/<flavor>_*` Kind has matching template in some workspace.session_templates | V1 (proposed follow-up PR) |
+| 3. Domain API | `Ezagent.Domain.Agent.create(flavor, name, params)` as ONLY user-facing creation API; UI/CLI/API all go through it | V1 fix #175 partial (facade exists; not yet enforced as sole entry) |
+| 4. SKILL.md anti-pattern | "Never call SpawnRegistry.spawn(entity://agent/...) directly outside Template.instantiate/3" in ezagent-developer skill | V1 (proposed follow-up PR) |
+| 5. CI gate | Static grep: lib/ code calling `SpawnRegistry.spawn(entity://agent/...)` outside template modules fails CI | V1 (proposed follow-up PR) |
+
+**V2's macro (Layer 1) is the structural fix**. Layers 2 + 4 + 5 are V1 follow-ups Allen can authorize (asked Feishu 16:50). Layer 3 is partially done by Fix 2 (Domain.Agent facade); making it the SOLE entry is V2 scope.
+
+### 链接
+
+- Bug origin: Phase 8c PR-N (AgentNewLive creation, 2026-05-20)
+- V1 fix: PR #175 (commit `c60cd32`)
+- V2 macro: above entry in this doc
 
 
 
