@@ -591,11 +591,35 @@ Template Instance 的代表性例子。**薄 Resource Kind**——state 是 fold
 
 参考: ARCHITECTURE.md §3.1.1,Decision #63
 
-### `Ezagent.WorkspaceRegistry`(Phase 7 PR 31)
+### `Ezagent.WorkspaceRegistry`(Phase 7 PR 31,Phase 9 PR-7 降级)
 
-第 5 个 ETS Registry,在 Kind/Behavior/Routing/Spawn/Template Registry 之外补的 session→workspace 反向 lookup。Workspace.Loader.invoke_template 在 spawn session 后 `bind(session_uri, workspace_uri)`;`Ezagent.Behavior.Chat.invoke(:send)` at chat.ex:116 `lookup(session_uri)` 拿到 workspace_uri 传给 `Resolver.resolve/4`,这样 workspace-scoped routing rules 才会实际被过滤(Phase 6 PR 8 加了字段但 chat.ex 没喂)。Unbound session(pre-PR-31 snapshot)返 `:error` → fallback `nil` → 跟 pre-PR-31 全局行为兼容。
+第 5 个 ETS Registry,在 Kind/Behavior/Routing/Spawn/Template Registry 之外补的 session→workspace 反向 lookup。**Phase 7-8c 时**:authoritative source of truth ——Workspace.Loader.invoke_template 在 spawn session 后 `bind(session_uri, workspace_uri)`;dispatch 通过 `lookup(session_uri)` 拿到 workspace_uri 传给 `Resolver.resolve/4`。**Phase 9 PR-7 之后(SPEC v3 §3.6 URI scheme 统一)**:**降级为 consistency cache**。所有 per-tenant URI(session/template/resource 都加了 workspace 段)now carry workspace structurally;`Capability.workspace_of/1` 直接从 URI 字符串 O(1) 提取,no ETS lookup。WorkspaceRegistry binding **必须等于** session URI 的 workspace 段(invariant test `all_per_tenant_uris_have_workspace_test.exs` "registry binding matches URI workspace segment" 守住)。
 
-参考: ARCHITECTURE.md Decision #135,IMPL-7-1 in phase-specs/phase7/DECISIONS.md
+参考: ARCHITECTURE.md Decision #135 + #145,IMPL-7-1 in phase-specs/phase7/DECISIONS.md,SPEC v3 §3.6
+
+### Deployment unit(部署单元)— Phase 9 framing
+
+Workspace 的**正式名**。Phase 9 之前 workspace 是"配置 bundle(members + session_templates + routing_rules)";Phase 9 之后是完整 deployment unit,4 个隔离维度结构性保证:(1) entity URI 携带 workspace 段;(2) Capability 携带 `workspace_uri`;(3) Dispatch step 5.6 强制 caller/target workspace 一致(除非有 cross-workspace cap 或 system 成员身份);(4) per-tenant 表 `workspace_uri` NOT NULL 列。Multi-host SaaS 部署只是把不同 workspace 跑在不同主机上 —— 架构已经 ready。"deployment unit" 是首选术语;"tenant" 太 SaaS-y、"namespace" 太 Kubernetes-y。
+
+参考: `docs/notes/workspace-as-deployment-unit.md`,ARCHITECTURE.md Decision #145
+
+### `workspace://system` workspace + Keycloak realm-admin 模型(Phase 9 PR-8)
+
+Phase 9 §13 的结构特例:`workspace://system` 是**真实** workspace 但 `visible: false`(不在普通 workspace 选择器显示)。Bootstrap admin(`entity://user/system/admin`,Phase 8c 之前是 `entity://user/default/admin`)是 system workspace 成员。System 成员通过**成员身份**(not 显式 cap grant)持跨 workspace 权限 —— `Capability.cross_workspace?/2` arity-2 检 `caller_workspace == "workspace://system"`,true 则 step 5.6 通过。**Workspace 选择器分支**(SPEC §6.4 amendment 3):system 成员 click 其它 workspace = 上下文切换(no logout,`:current_workspace_uri` 变 `:current_entity_uri` 不变);普通 user click 锁定的 workspace = 拒绝 + "Sign in to <ws>" 提示页(显式选 logout 才登出,不静默)。比 Keycloak 多一个 "Operate on as system/admin" UI 标签,但本质相同 —— master-realm 管理员可以管理子 realm 而保持自己身份。
+
+参考: ARCHITECTURE.md Decision #145,SPEC v3 §13(`docs/superpowers/specs/2026-05-21-phase-9-tenant-isolation-design.md`)
+
+### 3-segment URI(SPEC v3,Phase 9 PR-2 + PR-7)
+
+Phase 9 之前所有 URI 都是 2-segment authority(`<scheme>://<type>/<name>`,Phase 7 PR 31 SPEC v2)。Phase 9 之后所有 per-tenant scheme(`entity://`, `session://`, `template://`, `resource://`)升级到 3-segment:`<scheme>://<type>/<workspace>/<name>`。`workspace://<name>` 和 `system://<type>/<name>` 不变(workspace 是 tenant root 本身,system 是 cross-cutting)。**为什么(Option A)**:URI 自描述,不需要 out-of-band lookup;auth token 携带完整身份;同 handle 在两个 workspace 就是两个独立 entity(隔离干净);cap matching O(1) 从字符串提取。**不做** Option B(envelope 携带 workspace),因为 ambient context 容易忘 + 数据泄露风险。`Ezagent.URI.parse!/1` parse-time 拒绝 2-segment per-tenant URI(`ArgumentError: <scheme> URI must include workspace segment`)。
+
+参考: ARCHITECTURE.md Decision #145,SPEC v3 §3,`docs/notes/uri-design.md` §5.15
+
+### Cross-workspace cap / Cross-workspace dispatch(Phase 9 PR-4 + PR-8)
+
+`Capability.workspace_uri == :any` 即 cross-workspace cap —— 持有者可以 dispatch 到任意 workspace。Bootstrap admin cap 默认是这个形态(`kind: :any, behavior: :any, instance: :any, workspace_uri: :any`)。**Cross-workspace dispatch enforcement** 在 `Ezagent.Kind.Runtime.handle_dispatch/4` 的 step 5.6(在 CapBAC step 5.5 之后):caller workspace == target workspace OR 任意 cap with `workspace_uri: :any` OR caller 是 `workspace://system` 成员(Keycloak realm-admin)。拒绝时返 `:cross_workspace_denied`(distinct from `:unauthorized`,inbound transport 用不同 emoji 区分:`THUMBSDOWN` vs `NO`)。**Gate-verified**:临时禁 5.6 → 2/6 invariant test 失败,真 gate。
+
+参考: ARCHITECTURE.md Decision #145,SPEC v3 §5 + §13.3,invariant test `cross_workspace_isolation_test.exs`
 
 ### AgentTemplate(Phase 7 PR 37)
 

@@ -514,6 +514,69 @@ This removes `message://` from `@known_schemes` and simplifies the Message ↔ U
 
 Flavor names are operator-convention. `cc_*` for Claude Code agents, `curl_*` for HTTP-API agents, `echo_*` for the testing echo Kind. Future combined-plugin agents can use any convention (`cc+curl_polyglot`); the URI parser doesn't care.
 
+### §5.15 SPEC v3 — Per-tenant URIs carry workspace segment (Phase 9 PR-2 + PR-7)
+
+**Promoted from "SPEC v4 / Phase 10 future work" to in-scope by Allen 2026-05-21** (SPEC amendment 2 in `docs/superpowers/specs/2026-05-21-phase-9-tenant-isolation-design.md`).
+
+Phase 9 extends the 2-segment authority rule (§5.1) to 3-segment for **per-tenant schemes**:
+
+    <scheme>://<type>/<workspace>/<name>
+
+| Scheme | SPEC v2 (Phase 7) | SPEC v3 (Phase 9) |
+|--------|--------------------|--------------------|
+| `entity://` | `entity://user/admin` | `entity://user/default/admin` |
+| `session://` | `session://default/main` | `session://default/default/main` |
+| `template://` | `template://agent/cc-orch` | `template://agent/default/cc-orch` |
+| `resource://` | `resource://uploads/x` | `resource://uploads/default/x` |
+| `workspace://` | `workspace://default` | **unchanged** (workspace IS tenant root) |
+| `system://` | `system://routing/default` | **unchanged** (cross-cutting) |
+
+For `session://`:
+- First path segment is template name (unchanged from SPEC v2's `session://<template>/<name>` shape — that "template" was always the host-axis value)
+- Second segment is workspace name (new)
+- Third segment is session instance name
+
+For `template://`:
+- First: template type (`agent`, `session`)
+- Second: workspace where the template lives
+- Third: template name
+
+For `resource://`:
+- First: resource kind (`uploads`, etc.)
+- Second: owning workspace
+- Third: resource instance
+
+**Why URI-carries-workspace (Option A) not envelope-context (Option B)**:
+- URI is self-describing; no out-of-band lookup needed for "which workspace owns this entity"
+- Auth tokens carry full URI; tenant context travels with the principal
+- Same handle in two workspaces = two distinct entities (clean isolation; matches Keycloak realm-per-tenant model)
+- Cap matcher (`Ezagent.Capability.workspace_of/1`) extracts workspace from URI string at O(1) — no ETS lookup
+
+Option B (`%{workspace: ws_uri}` in dispatch envelope) was rejected: ambient context is easy to forget; cap matcher would need 2-key lookup; data leak risk if envelope isn't validated.
+
+**Parser change** (`Ezagent.URI.parse!/1`):
+- Accepts 3-segment authority path for per-tenant schemes
+- **Rejects** 2-segment forms for those schemes with `ArgumentError: <scheme> URI must include workspace segment`
+- Rejects 4+ segments (sub-resource positions reserved per §5.1)
+- `Ezagent.URI.instance/1` for per-tenant schemes returns the full 3-segment path stripped of query/fragment
+- New `Ezagent.URI.entity_workspace_uri/1` extracts the workspace URI from an entity URI
+
+**`WorkspaceRegistry` demotion**:
+- Pre-Phase 9: authoritative source-of-truth for "which workspace owns this session" (`bind/2` was required for dispatch correctness)
+- Post-Phase 9: **consistency cache**. Workspace lives in URI directly; `workspace_of/1` extracts structurally
+- New invariant test: every WorkspaceRegistry binding MUST equal the workspace segment of its session URI
+
+**Migration strategy** (per §5.11 + `feedback_let_it_crash_no_workarounds`):
+- Wipe + rebuild dev DB (no backfill scripts)
+- All hardcoded URI strings rewritten (PR-2: 163 files for entity scheme; PR-7: 68 files for session/template/resource)
+- No back-compat shim; 2-segment forms raise at parse time
+
+**`workspace://system` exemption**: see SPEC v3 §13 — `workspace://system` is a real workspace (visible: false) whose members get cross-workspace authority by membership (`Ezagent.Capability.cross_workspace?/2`). The bootstrap admin migrates from `entity://user/default/admin` (SPEC v2) to `entity://user/system/admin` (SPEC v3).
+
+**Invariant tests** (CI gates):
+- `entities_have_workspace_test.exs` (PR-2) — 2-segment entity URI parse-time rejection
+- `all_per_tenant_uris_have_workspace_test.exs` (PR-7) — same for session/template/resource
+
 ---
 
 ## §6 Migration sequence (v2)
