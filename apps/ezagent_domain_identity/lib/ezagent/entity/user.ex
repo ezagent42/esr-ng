@@ -135,4 +135,9 @@ defmodule Ezagent.Entity.User do
 
   @impl Ezagent.Kind
   def persistence, do: {:snapshot, :on_change}
+
+  # V1 prevention (Allen 2026-05-21): User Kinds live under the identity
+  # domain's UserSupervisor. `Ezagent.Kind.spawn/2` reads this.
+  @impl Ezagent.Kind
+  def supervisor, do: EzagentDomainIdentity.Application.UserSupervisor
 end

@@ -41,7 +41,14 @@ defmodule EzagentCore.Application do
       # singletons (System Kind sentinels + future cross-domain
       # controllers). Workspace.Supervisor moved out to
       # ezagent_domain_workspace as part of the three-layer split.
-      {DynamicSupervisor, name: Ezagent.Core.SingletonSupervisor, strategy: :one_for_one}
+      {DynamicSupervisor, name: Ezagent.Core.SingletonSupervisor, strategy: :one_for_one},
+
+      # ⑨ Default Kind supervisor — V1 structural prevention (Allen
+      # 2026-05-21). `Ezagent.Kind.spawn/2` routes here when a Kind
+      # module doesn't declare its own `supervisor/0` callback. Always
+      # available so spawn calls from any plugin or domain app at boot
+      # have a destination.
+      Ezagent.KindSupervisor
     ]
 
     result = Supervisor.start_link(children, strategy: :one_for_one, name: EzagentCore.Supervisor)
@@ -110,10 +117,10 @@ defmodule EzagentCore.Application do
 
     :ok =
       Ezagent.SpawnRegistry.register("system", fn %URI{} = uri ->
-        DynamicSupervisor.start_child(
-          Ezagent.Core.SingletonSupervisor,
-          {Ezagent.Kind.Server, {SK, %{uri: uri}}}
-        )
+        # V1 prevention (Allen 2026-05-21): routed through Ezagent.Kind.spawn/2.
+        # System Kind declares Ezagent.Core.SingletonSupervisor via
+        # supervisor/0 callback so destination is preserved.
+        Ezagent.Kind.spawn(SK, %{uri: uri})
       end)
 
     uri = SK.routing_default_uri()

@@ -19,4 +19,10 @@ defmodule Ezagent.Entity.Echo do
 
   @impl Ezagent.Kind
   def persistence, do: :ephemeral
+
+  # V1 prevention (Allen 2026-05-21): Echo Kinds live under the chat
+  # domain's AgentSupervisor (chat's `spawn_agent/1` flavor-prefix
+  # resolver routes echo there). `Ezagent.Kind.spawn/2` reads this.
+  @impl Ezagent.Kind
+  def supervisor, do: EzagentDomainChat.AgentSupervisor
 end

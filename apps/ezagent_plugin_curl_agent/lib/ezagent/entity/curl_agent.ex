@@ -62,4 +62,10 @@ defmodule Ezagent.Entity.CurlAgent do
 
   @impl Ezagent.Kind
   def persistence, do: {:snapshot, :on_change}
+
+  # V1 prevention (Allen 2026-05-21): CurlAgent Kinds live under the
+  # curl_agent plugin's own InstanceSupervisor. `Ezagent.Kind.spawn/2`
+  # reads this.
+  @impl Ezagent.Kind
+  def supervisor, do: EzagentPluginCurlAgent.InstanceSupervisor
 end

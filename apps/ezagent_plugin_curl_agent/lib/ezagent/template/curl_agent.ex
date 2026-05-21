@@ -122,10 +122,10 @@ defmodule Ezagent.PluginCurlAgent.Template do
       owner_uri: parse_owner_uri(tmpl["owner_uri"])
     }
 
-    case DynamicSupervisor.start_child(
-           EzagentPluginCurlAgent.InstanceSupervisor,
-           {Ezagent.Kind.Server, {Ezagent.Entity.CurlAgent, init_args}}
-         ) do
+    # V1 prevention (Allen 2026-05-21): route via Ezagent.Kind.spawn/2.
+    # CurlAgent declares EzagentPluginCurlAgent.InstanceSupervisor via
+    # supervisor/0 — destination preserved.
+    case Ezagent.Kind.spawn(Ezagent.Entity.CurlAgent, init_args) do
       {:ok, _pid} ->
         {:ok, [agent_uri]}
 

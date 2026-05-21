@@ -320,6 +320,10 @@ Refuse for now. Decision #142 (D7-8): plugin unload requires Kind lifecycle mana
 
 Refuse. SPEC v2 §5.11 + memory `feedback_let_it_crash_no_workarounds`: no back-compat shims. Existing DB data is wiped + rebuilt on migration. No operator shorthand. No legacy URI form accepted. Every URI in CLI input, LV form input, stored data, audit log, KindRegistry, routing matchers is canonical from day 1. Fix the call sites instead of compensating in the parser.
 
+### Anti-pattern: "I'll `DynamicSupervisor.start_child` a Kind module directly"
+
+Refuse. V1 structural prevention (Phase 9 follow-up, Allen 2026-05-21): all Kind processes go through `Ezagent.Kind.spawn(kind_module, params)` — the SOLE programmatic entry. Each Kind declares its target supervisor via the `supervisor/0` callback; `Ezagent.Kind.spawn/2` resolves it and calls `DynamicSupervisor.start_child` exactly once (inside `Ezagent.Kind`). Direct `DynamicSupervisor.start_child` calls for Kind modules are caught by CI gate `apps/ezagent_core/test/invariants/single_spawn_entry_test.exs` + runtime invariant `apps/ezagent_core/test/invariants/kind_provenance_test.exs`. Sidecars (PtyServer etc.) are exempt but explicitly listed in `allowed_sidecar_paths/0` — adding a new sidecar requires editing both the spawn-entry test's exemption list AND the moduledoc explanation. This is V1 (Layers 2+4+5 of `docs/futures/v2-feedback-log.md`); V2 `spawn_pipeline` macro will wrap `Ezagent.Kind.spawn` as its underlying primitive.
+
 ---
 
 ## How-to recipes

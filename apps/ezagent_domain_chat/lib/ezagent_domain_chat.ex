@@ -55,9 +55,10 @@ defmodule EzagentDomainChat do
     session_uri =
       URI.new!("session://#{template_name}/#{workspace_name}/#{short_name}")
 
-    spec = {Ezagent.Kind.Server, {Session, %{uri: session_uri}}}
-
-    result = DynamicSupervisor.start_child(EzagentDomainChat.SessionSupervisor, spec)
+    # V1 prevention (Allen 2026-05-21): route via Ezagent.Kind.spawn/2.
+    # Session Kind declares EzagentDomainChat.SessionSupervisor via
+    # supervisor/0 — destination preserved.
+    result = Ezagent.Kind.spawn(Session, %{uri: session_uri})
 
     case result do
       {:ok, _pid} ->

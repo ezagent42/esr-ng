@@ -110,10 +110,10 @@ defmodule EzagentDomainIdentity.Application do
       # + side-effects.
       admin_uri = User.admin_uri()
 
-      case DynamicSupervisor.start_child(
-             __MODULE__.UserSupervisor,
-             {Ezagent.Kind.Server, {User, %{uri: admin_uri, initial_caps: User.admin_caps()}}}
-           ) do
+      # V1 prevention (Allen 2026-05-21): route via Ezagent.Kind.spawn/2.
+      # User Kind declares `EzagentDomainIdentity.Application.UserSupervisor`
+      # via supervisor/0 — destination preserved.
+      case Ezagent.Kind.spawn(User, %{uri: admin_uri, initial_caps: User.admin_caps()}) do
         {:ok, _pid} -> :ok
         {:error, {:already_started, _pid}} -> :ok
         {:error, reason} ->
@@ -206,10 +206,8 @@ defmodule EzagentDomainIdentity.Application do
                 MapSet.new()
               end
 
-            DynamicSupervisor.start_child(
-              __MODULE__.UserSupervisor,
-              {Ezagent.Kind.Server, {User, %{uri: uri, initial_caps: initial_caps}}}
-            )
+            # V1 prevention (Allen 2026-05-21): route via Ezagent.Kind.spawn/2.
+            Ezagent.Kind.spawn(User, %{uri: uri, initial_caps: initial_caps})
 
           other ->
             {:error, {:no_entity_host_handler, other}}

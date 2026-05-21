@@ -34,6 +34,11 @@ defmodule Ezagent.Entity.System do
   @impl Ezagent.Kind
   def uri_from_args(args), do: Map.fetch!(args, :uri)
 
+  # V1 prevention (Allen 2026-05-21): system Kinds live under the
+  # core singleton supervisor. `Ezagent.Kind.spawn/2` reads this.
+  @impl Ezagent.Kind
+  def supervisor, do: Ezagent.Core.SingletonSupervisor
+
   @doc """
   Canonical URI for the global routing-rule sentinel:
   `system://routing/default` (SPEC §5.10).
