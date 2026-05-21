@@ -11,16 +11,18 @@ defmodule EzagentCore.Repo.Migrations.Phase4Users do
 
     create unique_index(:users, [:uri])
 
-    # Seed admin row. caps_json is empty; admin uses User.admin_caps/0
-    # at runtime (structural, not data-driven). password_hash is NULL
-    # initially — must be set via `mix ezagent.user.set_password entity://user/default/admin --password X`
-    # before /login accepts the admin (per Spec 05 Q-MU-1).
-    execute """
-            INSERT INTO users (uri, password_hash, caps_json, inserted_at, updated_at)
-            VALUES ('entity://user/default/admin', NULL, '[]',
-                    strftime('%Y-%m-%d %H:%M:%f', 'now'),
-                    strftime('%Y-%m-%d %H:%M:%f', 'now'))
-            """,
-            "DELETE FROM users WHERE uri = 'entity://user/default/admin'"
+    # NOTE: original migration seeded an admin row at
+    # `entity://user/default/admin`. That seed was removed in Phase 9
+    # PR-8 (SPEC v3 §13) when admin moved to
+    # `entity://user/system/admin` (Keycloak realm-admin model). The
+    # boot-time `ensure_admin_user/0` in
+    # `EzagentDomainIdentity.Application` now creates admin via
+    # `Ezagent.Users.create/3`, which populates the Phase 9 PR-6
+    # `workspace_uri` column and uses the canonical admin URI from
+    # `Ezagent.Entity.User.admin_uri/0`.
+    #
+    # Fresh clones get the right URI from boot. Pre-Phase-9 DBs get
+    # the legacy row deleted by
+    # `phase9_remove_legacy_admin_seed` migration.
   end
 end
