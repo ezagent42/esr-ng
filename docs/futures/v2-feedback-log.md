@@ -64,37 +64,55 @@ Until then: **record, don't implement**.
 
 ## Entries
 
-## Workflow gap — UI "create agent" verb hides the instantiate step
+## Architecture gap — No auto-trigger from URI registration to associated template instantiate
 
 ### 原始反馈
 
-> [Feishu 2026-05-21 15:59 (GMT+9), msg `om_x100b6fde9bf484a8c4afee8c48a8120`]
-> 我刚创建了 Agent: entity://agent/default/cc_demo，但看起来还是显示not running, 请检查是否已经启动？如果没有，为什么？如果启动了，为什么显示not running?
+> [Feishu 2026-05-21 16:11 (GMT+9), msg `om_x100b6fdf4c6a08a0c4eaef4621b7af0`]
+> 请注意这不是v2内容，而是v1验收没有通过的内容，需要立即dispatch subagent进行修复：
+> 1. 请分析会漏instantiate template的根源是什么，目前kind不会自动帮助plugin注入instantiate template这一步吗？
+> 2. 之前cc分裂为channel和pty两个部份，现在改为cc-channel启动是本体，可以带with_pty的命令启动本地Pty。这个对出现这个bug有影响吗？
+> 3. not running的UI应该如何修改，Domain.Agent是不是应该提供统一的UI，供显示agent的生命周期？
+
+(The surface bug — created cc_demo shows "Not running" — was fixed in V1 (PR #XXX); this entry records the architectural pattern surfaced by Allen's Q1 + Q3.)
 
 ### 本质原因
 
-User-facing verb **"create agent"** in V1 does NOT equal **"agent ready to receive messages"**. The UI flow splits "create" into 3 internal steps (spawn Kind into supervisor + add cc.agent template to workspace.session_templates JSON + start PtyServer via `cc.agent.instantiate/3`) but `AgentNewLive.handle_event("create_agent")` only does steps 1 + 2. Step 3 (PtyServer start) only happens via `Workspace.Loader.load_all/0` which runs at phx boot — so newly-created cc agents are not running until the next phx restart.
+Two related but distinct architectural gaps surfaced by Allen's V1 acceptance testing:
 
-This is the same abstraction-leak family as the **Phase 8c bare-handle bounce** bug (where the auth verb's apparent effect diverged from what got stored in session). Both share the pattern: a user-facing verb whose dispatch path is structurally incomplete relative to the verb's apparent meaning.
+**Gap 1 (Q1)** — There is no **URI-registration → associated-template-instantiate** hook in the Kind / SpawnRegistry layer. Today's flow:
+- `SpawnRegistry.spawn(uri)` → starts a Kind process in supervision tree. Done.
+- `Workspace.add_template(name, tmpl_name, tmpl)` → updates DB JSON. Done.
+- `Workspace.Loader.load_all/0` → iterates all `session_templates` and invokes template's `instantiate/3`. Only runs at **plugin boot** (chat plugin + cc plugin each run it).
+
+Runtime-added templates have nobody calling instantiate. The V1 fix (PR #XXX) puts the invoke inside `Workspace.add_template/3` itself — but that's a tactical wedge, not a structural answer. The deeper question: **should Kind / SpawnRegistry / Template-registration share a generic "post-registration hook" abstraction**? Today each layer (Kind spawn, template add, workspace template list) manages its own side-effects; the chains aren't composable.
+
+**Gap 2 (Q3)** — `AgentDetailLive.load_status/1` directly calls `Ezagent.PluginCc.PtyServer.find_by_agent_uri` — a Domain UI module **importing Plugin module internals**. This violates the 3-tier architecture (invariant 8: plugins extend core, not other way) and means echo/curl agents have no defined "lifecycle status" surface. V1 fix introduces `Ezagent.Domain.Agent.lifecycle_status(uri)` as flavor-agnostic facade; but **Domain.Agent itself is new** — V1 did not have a unified domain model for "agent" across flavors.
+
+Both share: lack of cross-flavor / cross-layer abstractions for agent lifecycle. Each plugin reinvents (cc has PtyServer.find_by_agent_uri; echo has nothing visible; curl has nothing visible).
 
 ### V2 影响
 
-- **Scope**: structural — V1's `AgentNewLive` "create" verb is misleading; deeper than a one-line fix
-- **Affects**: `EzagentPluginLiveview.AgentNewLive`, `Ezagent.Workspace.Loader`, `Ezagent.PluginCc.PtyServer` lifecycle, possibly the abstraction of "agent kind lifecycle phases" itself
-- **Blocks**: Allen's V1 acceptance testing of cc agents (workaround: phx restart) — not a hard block on continuing other testing
-- **Related Phase 9 PR/SPEC**: none directly; this is a Phase 8c surface bug surfaced by V1 testing
-- **Related memory**: similar shape to Phase 8c bare-handle bounce that drove `SessionPrincipal.put/2` invariant
+- **Scope**: structural — generic Kind-lifecycle hook abstraction; unified Domain.Agent model with lifecycle phases (`:registered → :instantiated → :alive → :busy → :error → :terminated`)
+- **Affects**: `Ezagent.Kind`, `Ezagent.SpawnRegistry`, `Ezagent.TemplateRegistry`, new `Ezagent.Domain.Agent`, plugin lifecycle Behavior contracts, all plugin Application boot paths
+- **Blocks**: V2 plugin authoring story — without a generic hook + lifecycle behavior, every new plugin has to reinvent both
+- **Related Phase 9 PR/SPEC**: this surfaced after Phase 9 closure
+- **V1 tactical fix shipped** (PR #XXX): `Workspace.add_template` chains to instantiate; `Ezagent.Domain.Agent.lifecycle_status/1` introduced as flavor-agnostic facade
 
 ### 候选方案
 
-- **A — Tactical fix in AgentNewLive**: add a `Workspace.invoke_template(workspace_uri, tmpl_name)` step after `add_template`. One additional dispatch call. Trade-off: keeps the "spawn Kind + register template + instantiate template" 3-step split; only the LV code path knows to chain them. Other create-paths (CLI, API) need the same chain.
-- **B — Restructure agent lifecycle as explicit phases**: UI displays `registered → instantiated → running` with explicit transitions. "Not running" becomes "Registered but not instantiated". Trade-off: more UI complexity but no hidden gap; user sees what state they're in.
-- **C — Collapse "create + instantiate" into a single dispatch action** (recommended for V2): unify the workflow at the Behavior layer. `Ezagent.Behavior.AgentLifecycle.create_and_start` is one cap-gated dispatch; AgentNewLive / CLI / API all invoke the same action. Trade-off: requires a new Behavior; cleanest abstraction; matches Phase 9 "dispatch is the only path" invariant (Decision #3, invariant 1).
+- **A — Kind callback `on_spawn_hook/1`**: add to `@behaviour Ezagent.Kind` an optional callback that runs after KindRegistry registration. cc plugin's Agent Kind implements it to start PtyServer. Trade-off: each Kind owns its own bootstrap, but the hook is opt-in so non-running Kinds (echo, system) don't need to implement.
+- **B — Template-driven spawn unification**: eliminate "spawn Kind directly" path entirely. ALL agent Kinds must be spawned via a Template; `SpawnRegistry.spawn(entity://agent/...)` is deprecated in favor of `Template.instantiate(template_uri)`. Trade-off: bigger refactor but eliminates the "spawn Kind without template" failure mode.
+- **C — Lifecycle Behavior contract**: define `Ezagent.Behavior.Lifecycle` with `phase/2`, `transition/3` actions. Every "running" Kind (agent, session) carries this Behavior. `Ezagent.Domain.Agent.lifecycle_status/1` dispatches `?action=lifecycle.phase` to the Kind. Trade-off: explicit lifecycle modeling vs implicit "is supervisor PID alive" — more code but observable + capability-gated.
+
+Recommended V2: **A + C combo**. A solves the "spawn forgot to instantiate associated template" class. C solves the "UI knows about plugin internals" class. B is too big a refactor for V2 unless multi-flavor agent composition becomes a goal.
 
 ### 链接
 
-- Bug-fix candidate (if Allen wants it before V2): `apps/ezagent_plugin_liveview/lib/ezagent_plugin_liveview/agent_new_live.ex` line ~handle_event("create_agent"), insert call to `Ezagent.Workspace.Loader.invoke_template(workspace_uri, tmpl_name)` (or equivalent) after `add_template`
-- Related test gap: there's no test that asserts "after AgentNewLive create_agent, the agent is actually receiving messages" — invariant_completion_requires_test pattern not applied to this flow
+- V1 tactical fix: PR #XXX (cross-link after merge)
+- Same-family pattern in Phase 8c: bare-handle bounce → `SessionPrincipal.put/2` invariant
+- Q2 clarification needed from Allen: cc-channel + with_pty mental model vs actual PR-D2 code shape (asked on Feishu 2026-05-21 16:14)
+- Test gap: invariant test for "any URI in `session_templates` has a running instantiated process" — missing today, fix to include
 
 
 

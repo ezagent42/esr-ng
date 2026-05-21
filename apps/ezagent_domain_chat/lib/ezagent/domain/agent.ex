@@ -1,0 +1,140 @@
+defmodule Ezagent.Domain.Agent do
+  @moduledoc """
+  Flavor-agnostic Agent lifecycle facade. Domain-layer single entry
+  point for asking "what's the lifecycle status of this agent?" — UI
+  surfaces (`AgentDetailLive`, etc.) call this instead of reaching
+  into plugin internals.
+
+  Per `ezagent-developer` skill invariant 8 (plugin authoring
+  contract): Domain UI MUST NOT import Plugin module functions. This
+  facade is the sanctioned boundary.
+
+  ## Why this lives in `ezagent_domain_chat`
+
+  Domain.Agent is the unifying domain model over the various agent
+  flavors (cc, echo, curl, future). The Agent Kind itself lives in
+  `Ezagent.Entity.Agent` here in `ezagent_domain_chat`, so the facade
+  belongs in the same app. Plugin-specific knowledge (cc →
+  `PtyServer.find_by_agent_uri`, echo → just Kind alive-or-not) stays
+  in the respective plugin module; Domain.Agent's job is to know
+  WHICH plugin to ask and unify the response format.
+
+  ## V2 (deferred)
+
+  Per `docs/futures/v2-feedback-log.md` (Architecture gap — No
+  auto-trigger from URI registration to associated template
+  instantiate): the V2 path is a generic `Ezagent.Behavior.Lifecycle`
+  contract carried by every "running" Kind, dispatched via
+  `?action=lifecycle.phase`. For V1 the facade pattern-matches the
+  flavor prefix; the response shape is forward-compatible.
+  """
+
+  @type phase :: :registered | :instantiated | :alive | :error | :not_found
+  @type flavor :: String.t() | nil
+  @type status :: %{
+          phase: phase(),
+          flavor: flavor(),
+          detail: map() | nil
+        }
+
+  @doc """
+  Return the unified lifecycle status of `agent_uri`. Delegates to
+  the plugin that owns the flavor (cc / curl / echo / future).
+
+  Returns `%{phase: :not_found, flavor: <derived>, detail: nil}` if
+  no Kind is registered at the URI.
+
+  ## Phases
+
+  - `:alive`        — Kind is registered AND (for flavors with deeper
+                      lifecycle) the supporting process (PtyServer,
+                      bridge, etc.) is running.
+  - `:registered`   — Kind is registered in supervision but the deeper
+                      lifecycle phase is not yet reached (e.g. cc
+                      agent Kind alive but PtyServer down).
+  - `:not_found`    — No KindRegistry entry for the URI.
+  - `:instantiated` — (reserved for future use; not emitted by V1
+                      pattern-match path).
+  - `:error`        — Lifecycle helper raised / returned an error
+                      atom while introspecting.
+  """
+  @spec lifecycle_status(URI.t()) :: status()
+  def lifecycle_status(%URI{} = agent_uri) do
+    flavor = derive_flavor(agent_uri)
+
+    case Ezagent.KindRegistry.lookup(agent_uri) do
+      {:ok, _pid} ->
+        delegate_alive_status(flavor, agent_uri)
+
+      :error ->
+        %{phase: :not_found, flavor: flavor, detail: nil}
+    end
+  end
+
+  # ── flavor → plugin lifecycle helper dispatch ────────────────────
+
+  defp delegate_alive_status("cc", agent_uri) do
+    # cc plugin's deeper lifecycle = PtyServer (or remote-channel
+    # bridge). PtyServer.find_by_agent_uri + status returns the
+    # operator-facing snapshot.
+    if Code.ensure_loaded?(Ezagent.PluginCc.PtyServer) do
+      case Ezagent.PluginCc.PtyServer.find_by_agent_uri(agent_uri) do
+        {:ok, pid} ->
+          try do
+            %{phase: :alive, flavor: "cc", detail: Ezagent.PluginCc.PtyServer.status(pid)}
+          catch
+            _, reason ->
+              %{phase: :error, flavor: "cc", detail: %{error: inspect(reason)}}
+          end
+
+        :error ->
+          # Kind is alive but PtyServer isn't — common for remote-
+          # channel mode (no local PTY spawned) or transient between
+          # Kind spawn and PtyServer start.
+          %{phase: :registered, flavor: "cc", detail: %{note: "no PtyServer"}}
+      end
+    else
+      %{phase: :registered, flavor: "cc", detail: %{note: "PluginCc not loaded"}}
+    end
+  end
+
+  defp delegate_alive_status("echo", _agent_uri) do
+    # Echo flavor has no deeper lifecycle layer — Kind alive ==
+    # ready to receive. Empty detail map (Domain.Agent's
+    # response shape stays uniform).
+    %{phase: :alive, flavor: "echo", detail: %{}}
+  end
+
+  defp delegate_alive_status("curl", _agent_uri) do
+    # Curl flavor (HTTP-API agent) also has no PTY layer; if the
+    # Kind is alive, the agent is ready. Future: query upstream
+    # HTTP endpoint reachability.
+    %{phase: :alive, flavor: "curl", detail: %{}}
+  end
+
+  defp delegate_alive_status(other_flavor, _agent_uri) do
+    # Unknown flavor — Kind is alive but Domain.Agent has no
+    # flavor-specific introspection. Return registered phase + the
+    # flavor for the UI to display "lifecycle unknown".
+    %{phase: :alive, flavor: other_flavor, detail: %{}}
+  end
+
+  # ── flavor derivation ────────────────────────────────────────────
+
+  # Agent URIs are `entity://agent/<workspace>/<flavor>_<name>` per
+  # SPEC v3 §3 (3-segment authority) + SPEC v2 §5.14 (flavor lives in
+  # name prefix). Workspace URIs / non-agent URIs return nil flavor.
+  defp derive_flavor(%URI{scheme: "entity", host: "agent", path: "/" <> rest})
+       when rest != "" do
+    with [_workspace, entity_name] when entity_name != "" <-
+           String.split(rest, "/", parts: 2),
+         [flavor, suffix] when flavor != "" and suffix != "" <-
+           String.split(entity_name, "_", parts: 2) do
+      flavor
+    else
+      _ -> nil
+    end
+  end
+
+  defp derive_flavor(_), do: nil
+end

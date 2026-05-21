@@ -46,6 +46,123 @@ defmodule Ezagent.Workspace.Loader do
   loading — a Workspace declaring an unknown scheme should produce
   a clear log but not block the rest of the boot.
   """
+  @doc """
+  Invoke a single Template Class's `instantiate/3` by name, against
+  the workspace's persisted `session_templates` JSON.
+
+  Called by `Ezagent.Workspace.add_template/3` after the DB write +
+  dispatch_mutation succeed, so a runtime-added template's Kind comes
+  up immediately (without waiting for the next phx boot's
+  `load_all/0`).
+
+  Returns:
+  - `{:ok, [URI.t()]}` — list of URIs the Template Class spawned. Also
+    binds each URI to `workspace_uri` in `Ezagent.WorkspaceRegistry`,
+    matching `load_all/0`'s post-instantiate plumbing (invariant 4).
+  - `{:error, :workspace_not_found}` — workspace missing from store.
+  - `{:error, {:template_not_found, tmpl_name}}` — workspace has no
+    template under that name.
+  - `{:error, :missing_class_field}` — template lacks `"class"`.
+  - `{:error, {:no_template_class, class_name}}` — class name not
+    registered in `Ezagent.TemplateRegistry`.
+  - `{:error, reason}` — propagated from `Class.instantiate/3`.
+
+  ## V1 acceptance fix (2026-05-21)
+
+  `Workspace.add_template/3` previously only wrote DB + dispatched
+  the `add_template` mutation to the live Workspace Kind — but never
+  invoked the Template Class's `instantiate/3`. Operators creating
+  agents via UI then saw "Not running" until a phx restart triggered
+  `load_all/0`. This function is the missing single-template
+  instantiate path.
+  """
+  @spec invoke_template(URI.t(), String.t()) ::
+          {:ok, [URI.t()]} | {:error, term()}
+  def invoke_template(%URI{} = workspace_uri, tmpl_name)
+      when is_binary(tmpl_name) do
+    name = workspace_name(workspace_uri)
+
+    with %{session_templates: tmpls} <- Workspace.Store.get_by_name(name),
+         {:ok, tmpl_data} <- fetch_template(tmpls, tmpl_name),
+         class_name when is_binary(class_name) <- extract_class_name(tmpl_data) ||
+                                                  {:error, :missing_class_field},
+         {:ok, class_module} <- TemplateRegistry.lookup(class_name) do
+      do_invoke(class_module, tmpl_name, tmpl_data, workspace_uri)
+    else
+      nil ->
+        {:error, :workspace_not_found}
+
+      {:error, _} = err ->
+        err
+
+      :error ->
+        {:error, {:no_template_class, extract_class_name_safe(workspace_uri, tmpl_name)}}
+    end
+  end
+
+  defp workspace_name(%URI{scheme: "workspace", host: name}) when is_binary(name), do: name
+
+  defp workspace_name(%URI{} = uri) do
+    # Fall back to last path segment for any tolerated future shape.
+    case URI.to_string(uri) do
+      "workspace://" <> rest -> rest |> String.split("/") |> List.first()
+      _ -> raise ArgumentError, "not a workspace:// URI: #{inspect(uri)}"
+    end
+  end
+
+  defp fetch_template(tmpls, tmpl_name) do
+    case Map.fetch(tmpls, tmpl_name) do
+      {:ok, tmpl_data} -> {:ok, tmpl_data}
+      :error -> {:error, {:template_not_found, tmpl_name}}
+    end
+  end
+
+  defp extract_class_name_safe(workspace_uri, tmpl_name) do
+    case Workspace.Store.get_by_name(workspace_name(workspace_uri)) do
+      %{session_templates: tmpls} -> tmpls |> Map.get(tmpl_name) |> extract_class_name()
+      _ -> nil
+    end
+  end
+
+  defp do_invoke(class_module, tmpl_name, tmpl_data, workspace_uri) do
+    case class_module.instantiate(tmpl_name, tmpl_data, workspace_uri) do
+      {:ok, uris} when is_list(uris) ->
+        Enum.each(uris, fn uri ->
+          Ezagent.WorkspaceRegistry.bind(uri, workspace_uri)
+        end)
+
+        {:ok, uris}
+
+      {:error, {:already_started, _pid}} ->
+        # Idempotent: the Kind is already alive (template instantiate
+        # was already triggered, e.g. via a duplicate add_template
+        # call). Return the workspace's view of the URIs from the
+        # template data so callers see the same shape as a fresh
+        # spawn. cc.agent's own idempotent guard returns `{:ok,
+        # [agent_uri]}` for this case — most templates already do
+        # this themselves; the clause here is defensive.
+        {:ok, instantiate_idempotent_uris(tmpl_data_from_template_name(workspace_uri, tmpl_name))}
+
+      {:error, _} = err ->
+        err
+
+      other ->
+        {:error, {:bad_template_return, other}}
+    end
+  end
+
+  defp tmpl_data_from_template_name(workspace_uri, tmpl_name) do
+    case Workspace.Store.get_by_name(workspace_name(workspace_uri)) do
+      %{session_templates: tmpls} -> Map.get(tmpls, tmpl_name, %{})
+      _ -> %{}
+    end
+  end
+
+  defp instantiate_idempotent_uris(%{"agent_uri" => uri_str}) when is_binary(uri_str),
+    do: [URI.parse(uri_str)]
+
+  defp instantiate_idempotent_uris(_), do: []
+
   @spec load_all() :: [{String.t(), [{URI.t(), term()}]}]
   def load_all do
     # Phase 5 PR 6: defensive — when multiple plugin Applications all
