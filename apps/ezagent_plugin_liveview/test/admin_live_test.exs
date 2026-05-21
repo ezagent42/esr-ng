@@ -198,6 +198,119 @@ defmodule EzagentPluginLiveview.AdminLiveTest do
       # the fall-back ConversationView rendering. Either way no crash.
       assert is_binary(html)
     end
+
+    # V1 UI fix (Allen Feishu 2026-05-21) — terminal icon in MemberPanel
+    # was a phx-click that updated `:current_view = :pty` but NOT
+    # `:view_module`. Result: clicking the terminal icon next to cc_demo
+    # in /sessions appeared to do nothing — assigns flipped but
+    # `render_active_view` kept calling ConversationView's render.
+    #
+    # This test fails on the buggy code path (terminal click → view
+    # stays as ConversationView's empty/dot-grid state) and passes on
+    # the fix (terminal click → PtyView's "Terminal —" marker appears).
+    #
+    # We join cc_demo to the main session so PtyView's `applies_to?/1`
+    # returns true (it scans for any `entity://agent/<ws>/cc_*` member).
+    # Without this join the view-switcher falls back to ConversationView
+    # regardless of the bug, masking it.
+    test "terminal icon click flips the rendered view to PtyView (V1 UI fix)", %{conn: conn} do
+      session_uri = URI.new!("session://default/default/main")
+
+      # Spawn a real cc agent + join it as a member so PtyView applies.
+      name = "cc_demo-uifix-#{System.unique_integer([:positive])}"
+      agent_uri = URI.parse("entity://agent/default/#{name}")
+      {:ok, _kind_pid} = Ezagent.SpawnRegistry.spawn(agent_uri)
+
+      join_target = URI.new!("#{URI.to_string(session_uri)}?action=chat.join")
+
+      :ok =
+        Ezagent.Invocation.dispatch(%Ezagent.Invocation{
+          target: join_target,
+          mode: :call,
+          args: %{member: agent_uri},
+          ctx: %{
+            caller: Ezagent.Entity.User.admin_uri(),
+            caps: Ezagent.Entity.User.admin_caps(),
+            reply: :ignore
+          }
+        })
+        |> case do
+          :ok -> :ok
+          {:ok, _} -> :ok
+        end
+
+      {:ok, lv, html} = live(conn, "/sessions")
+
+      # Pre-click: rendering is ConversationView (default). No PtyView
+      # marker yet. Use the unique header text "Terminal —" PtyView
+      # emits inside its render.
+      refute html =~ "Terminal —"
+
+      # The terminal icon button is rendered next to cc_demo in the
+      # Members panel. Its phx-click is `switch_to_pty_for_agent` with
+      # phx-value-agent = the cc_demo URI.
+      assert html =~ ~s(phx-click="switch_to_pty_for_agent")
+      assert html =~ URI.to_string(agent_uri)
+
+      # Simulate the click.
+      render_hook(lv, "switch_to_pty_for_agent", %{
+        "agent" => URI.to_string(agent_uri)
+      })
+
+      html = render(lv)
+      # PtyView's render now drives Main Window. Before the fix, this
+      # assertion fails — `:current_view = :pty` but `:view_module`
+      # still points at ConversationView so PtyView never renders.
+      assert html =~ "Terminal —",
+             "expected PtyView's `Terminal —` header after switch_to_pty_for_agent, but render still shows the previous view (likely the bug: :view_module was not recomputed)"
+
+      # The selected agent URI is bound into the PTY chrome.
+      assert html =~ URI.to_string(agent_uri)
+    end
+
+    # Sibling invariant — `switch_view` (the header view-switcher
+    # buttons) has the same bug shape. Once the cc agent joins, the
+    # view-switcher gets a "Terminal" button alongside "Chat"; clicking
+    # it MUST also re-resolve `:view_module`, not just flip `:current_view`.
+    test "switch_view to :pty flips the rendered view to PtyView", %{conn: conn} do
+      session_uri = URI.new!("session://default/default/main")
+      name = "cc_demo-switchview-#{System.unique_integer([:positive])}"
+      agent_uri = URI.parse("entity://agent/default/#{name}")
+      {:ok, _kind_pid} = Ezagent.SpawnRegistry.spawn(agent_uri)
+
+      join_target = URI.new!("#{URI.to_string(session_uri)}?action=chat.join")
+
+      _ =
+        Ezagent.Invocation.dispatch(%Ezagent.Invocation{
+          target: join_target,
+          mode: :call,
+          args: %{member: agent_uri},
+          ctx: %{
+            caller: Ezagent.Entity.User.admin_uri(),
+            caps: Ezagent.Entity.User.admin_caps(),
+            reply: :ignore
+          }
+        })
+
+      {:ok, lv, _html} = live(conn, "/sessions")
+
+      # Set active_pty_agent_uri first (otherwise PtyView renders its
+      # "select a cc agent" empty state — still a PtyView render,
+      # which is what we want to detect, but be explicit).
+      render_hook(lv, "switch_to_pty_for_agent", %{
+        "agent" => URI.to_string(agent_uri)
+      })
+
+      # Now bounce back to Chat then back to Terminal via switch_view —
+      # the second switch_view exercises the assign(:view_module) path.
+      render_hook(lv, "switch_view", %{"view" => "conversation"})
+      html = render(lv)
+      refute html =~ "Terminal —"
+
+      render_hook(lv, "switch_view", %{"view" => "pty"})
+      html = render(lv)
+      assert html =~ "Terminal —"
+    end
   end
 
   describe "Phase 8b — setting dropdown" do

@@ -240,6 +240,132 @@ defmodule EzagentDomainUi.IdeShellTest do
     end
   end
 
+  describe "V1 UI fix (Allen 2026-05-21) — sidebar toggle is always recoverable" do
+    test "right sidebar toggle button renders when right_sidebar slot is given and is NOT lg:hidden" do
+      # Bug: Allen Feishu 2026-05-21 — right sidebar (Members) auto-hides
+      # on /sessions, no reopen button visible. Root cause: toggle button
+      # was `lg:hidden` so it disappeared on desktop, and `phx-click-away`
+      # on the sidebar set inline `display:none` that beat `lg:block`.
+      assigns = %{
+        current_entity_uri: "entity://user/system/admin",
+        current_path: "/sessions",
+        status: %{}
+      }
+
+      html =
+        rendered_to_string(~H"""
+        <IdeShell.ide_shell
+          current_entity_uri={@current_entity_uri}
+          current_path={@current_path}
+          status={@status}
+        >
+          <:main_window>main</:main_window>
+          <:right_sidebar>roster</:right_sidebar>
+        </IdeShell.ide_shell>
+        """)
+
+      # Toggle button is present and labeled.
+      assert html =~ ~s(aria-label="Toggle members panel")
+      # JS.toggle binds the right sidebar with display:"block" so the
+      # show side restores `display:block` (matching `lg:block` intent).
+      # HTML-encoded JSON in phx-click — order-of-keys not guaranteed.
+      assert html =~ ~s(&quot;to&quot;:&quot;#right-sidebar&quot;)
+      assert html =~ ~s(&quot;display&quot;:&quot;block&quot;)
+      assert html =~ ~s(&quot;toggle&quot;)
+
+      # The toggle button MUST NOT carry `lg:hidden` — that's the bug.
+      # Slice the HTML around the aria-label so we only check the button's
+      # class list (not the whole page).
+      [_, after_label] = String.split(html, ~s(aria-label="Toggle members panel"))
+      [button_attrs, _] = String.split(after_label, ">", parts: 2)
+      refute button_attrs =~ "lg:hidden",
+             "toggle button must not be lg:hidden — it's the only way to reopen the sidebar"
+    end
+
+    test "right sidebar element has NO phx-click-away (which would inline-hide and beat lg:block)" do
+      assigns = %{
+        current_entity_uri: "entity://user/system/admin",
+        current_path: "/sessions",
+        status: %{}
+      }
+
+      html =
+        rendered_to_string(~H"""
+        <IdeShell.ide_shell
+          current_entity_uri={@current_entity_uri}
+          current_path={@current_path}
+          status={@status}
+        >
+          <:main_window>main</:main_window>
+          <:right_sidebar>roster</:right_sidebar>
+        </IdeShell.ide_shell>
+        """)
+
+      # Slice the HTML around id="right-sidebar" so the assertion is
+      # scoped to the sidebar element's attributes only (workspace_dropdown
+      # and avatar_menu still use phx-click-away — they SHOULD; they're
+      # popovers, not always-visible chrome).
+      [_, after_id] = String.split(html, ~s(id="right-sidebar"))
+      [sidebar_attrs, _] = String.split(after_id, ">", parts: 2)
+      refute sidebar_attrs =~ "phx-click-away",
+             "right sidebar must not have phx-click-away — JS.hide inline style beats `lg:block` on desktop"
+    end
+
+    test "left resource panel toggle is also visible at all breakpoints (consistency)" do
+      assigns = %{
+        current_entity_uri: "entity://user/system/admin",
+        current_path: "/sessions",
+        status: %{}
+      }
+
+      html =
+        rendered_to_string(~H"""
+        <IdeShell.ide_shell
+          current_entity_uri={@current_entity_uri}
+          current_path={@current_path}
+          status={@status}
+        >
+          <:resource_panel>tree</:resource_panel>
+          <:main_window>main</:main_window>
+        </IdeShell.ide_shell>
+        """)
+
+      assert html =~ ~s(aria-label="Toggle resource panel")
+      assert html =~ ~s(&quot;to&quot;:&quot;#left-resource-panel&quot;)
+      assert html =~ ~s(&quot;display&quot;:&quot;block&quot;)
+
+      [_, after_label] = String.split(html, ~s(aria-label="Toggle resource panel"))
+      [button_attrs, _] = String.split(after_label, ">", parts: 2)
+      refute button_attrs =~ "lg:hidden"
+
+      [_, after_id] = String.split(html, ~s(id="left-resource-panel"))
+      [panel_attrs, _] = String.split(after_id, ">", parts: 2)
+      refute panel_attrs =~ "phx-click-away"
+    end
+
+    test "toggle buttons hidden when their slot is empty (no orphan buttons)" do
+      assigns = %{
+        current_entity_uri: "entity://user/system/admin",
+        current_path: "/sessions",
+        status: %{}
+      }
+
+      html =
+        rendered_to_string(~H"""
+        <IdeShell.ide_shell
+          current_entity_uri={@current_entity_uri}
+          current_path={@current_path}
+          status={@status}
+        >
+          <:main_window>main</:main_window>
+        </IdeShell.ide_shell>
+        """)
+
+      refute html =~ ~s(aria-label="Toggle members panel")
+      refute html =~ ~s(aria-label="Toggle resource panel")
+    end
+  end
+
   describe "activity_for_path/1" do
     # Phase 8 polish (Allen 2026-05-20) — IA refactor: /admin/X → /X promoted
     # to top-level Activity Bar destinations. /admin is now the management

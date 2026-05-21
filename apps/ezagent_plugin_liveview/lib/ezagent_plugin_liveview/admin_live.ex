@@ -282,19 +282,39 @@ defmodule EzagentPluginLiveview.AdminLive do
   # SessionEditor header). `view` is the SessionView id atom encoded
   # as a string in the phx-value attribute; convert via
   # String.to_existing_atom to keep the atom table bounded.
+  #
+  # V1 UI fix (Allen 2026-05-21): also recompute `:view_module` from
+  # the new `:current_view`. Without this update, `render_active_view`
+  # keeps using the previously-resolved module (set in
+  # `assign_session_context`) and the view-switch silently no-ops
+  # visually even though `:current_view` flips correctly.
   def handle_event("switch_view", %{"view" => view_str}, socket) do
     case safe_view_id(view_str) do
-      {:ok, id} -> {:noreply, assign(socket, :current_view, id)}
-      :error -> {:noreply, socket}
+      {:ok, id} ->
+        {:noreply,
+         socket
+         |> assign(:current_view, id)
+         |> assign(:view_module, view_module_for(socket.assigns.applicable_views, id))}
+
+      :error ->
+        {:noreply, socket}
     end
   end
 
   # Phase 8b §3 stage g — clicking the 🖥️ button in MemberPanel
   # switches the main view to :pty and binds xterm to the chosen agent.
+  #
+  # V1 UI fix (Allen 2026-05-21): also recompute `:view_module` so the
+  # terminal icon in the Members panel actually navigates to the PTY
+  # view. Same bug shape as `switch_view` above — assigning only
+  # `:current_view` flips state but `render_active_view` reads
+  # `@view_module` (the cached module from `assign_session_context`)
+  # so the view never updates.
   def handle_event("switch_to_pty_for_agent", %{"agent" => agent_uri_str}, socket) do
     {:noreply,
      socket
      |> assign(:current_view, :pty)
+     |> assign(:view_module, view_module_for(socket.assigns.applicable_views, :pty))
      |> assign(:active_pty_agent_uri, agent_uri_str)}
   end
 
