@@ -146,24 +146,36 @@ defmodule EzagentDomainUi.IdeShell do
       <div class="flex-1 flex min-h-0 relative">
         <.activity_bar current_path={@current_path} />
 
-        <%!-- Phase 8c follow-up (Allen 2026-05-20) — mobile-responsive
-              side panels.
+        <%!-- V1 UI fix (Allen 2026-05-21) — mobile-responsive side
+              panels with desktop-safe toggle behavior.
 
               On `lg+` (≥1024px): both panels render inline (`lg:static`
-              + `lg:block`) at their fixed widths, same as before.
+              + `lg:block`) at their fixed widths.
 
               Below `lg`: both panels default to `hidden`; toggle buttons
-              in `top_command_bar` (also `lg:hidden`) flip the `hidden`
-              class via JS.toggle. When shown on mobile, the panel
-              becomes a fixed-position overlay anchored to the viewport
-              edge (top: header height, bottom: status bar height). The
-              backdrop is a sibling that closes on click. Same pattern
-              for both panels so the toggle JS is symmetric. --%>
+              in `top_command_bar` flip visibility via `JS.toggle`. When
+              shown on mobile, the panel becomes a fixed-position overlay
+              anchored to the viewport edge (top: header height, bottom:
+              status bar height).
+
+              REMOVED `phx-click-away={JS.hide(...)}`:
+              - JS.hide writes inline `style="display:none"` which beats
+                `lg:block` CSS at any breakpoint. On desktop this caused
+                the sidebar to vanish on any outside-click with no way to
+                recover (the `lg:hidden` toggle button was invisible).
+              - Bug report: Allen Feishu 2026-05-21 — right sidebar
+                (Members) auto-hides on /sessions page, no reopen button.
+              - Toggle buttons in `top_command_bar` are now always visible
+                (not `lg:hidden`) so the user can intentionally toggle
+                either panel on desktop too.
+              - `display: "block"` option on JS.toggle ensures the show
+                side restores `display: block` (matches `lg:block` intent
+                so the panel reappears at its inline-on-desktop / overlay-
+                on-mobile state). --%>
 
         <div
           :if={@resource_panel != []}
           id="left-resource-panel"
-          phx-click-away={JS.hide(to: "#left-resource-panel")}
           class="hidden lg:block lg:static fixed top-10 bottom-6 left-12 z-40 w-56 max-w-[80vw] border-r border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 overflow-y-auto shadow-xl lg:shadow-none"
         >
           {render_slot(@resource_panel)}
@@ -176,7 +188,6 @@ defmodule EzagentDomainUi.IdeShell do
         <div
           :if={@right_sidebar != []}
           id="right-sidebar"
-          phx-click-away={JS.hide(to: "#right-sidebar")}
           class="hidden lg:block lg:static fixed top-10 bottom-6 right-0 z-40 w-72 max-w-[80vw] border-l border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 overflow-y-auto shadow-xl lg:shadow-none"
         >
           {render_slot(@right_sidebar)}
@@ -325,17 +336,20 @@ defmodule EzagentDomainUi.IdeShell do
   def top_command_bar(assigns) do
     ~H"""
     <header class="h-10 border-b border-zinc-200 dark:border-zinc-800 bg-white dark:bg-zinc-900 px-3 flex items-center gap-3 shrink-0">
-      <%!-- Phase 8c follow-up (Allen 2026-05-20) — mobile-only toggle
-            for the left resource panel. `lg:hidden` so the button
-            disappears on desktop (where the panel is always visible
-            inline). Toggles `hidden` on the panel element which
-            switches between the default "hidden" state and the
-            "fixed overlay" state via Tailwind responsive classes. --%>
+      <%!-- V1 UI fix (Allen 2026-05-21) — toggle button for the left
+            resource panel. Visible on BOTH mobile AND desktop so the
+            user can intentionally re-show the panel if it gets hidden
+            (the prior `lg:hidden` left desktop users stranded when the
+            panel went away — see ide_shell main layout comment).
+
+            `display: "block"` makes JS.toggle's show-side write
+            `display:block` (matches `lg:block` intent — panel reappears
+            at its inline-on-desktop / overlay-on-mobile state). --%>
       <button
         :if={@has_resource_panel}
         type="button"
-        phx-click={JS.toggle(to: "#left-resource-panel")}
-        class="lg:hidden p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-500"
+        phx-click={JS.toggle(to: "#left-resource-panel", display: "block")}
+        class="p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-500"
         title="Toggle resource panel"
         aria-label="Toggle resource panel"
       >
@@ -397,14 +411,17 @@ defmodule EzagentDomainUi.IdeShell do
       </div>
 
       <div class="flex items-center gap-2 shrink-0">
-        <%!-- Phase 8c follow-up — mobile-only toggle for the right
-              sidebar (Members panel etc). Same pattern as the left
-              panel button above. `lg:hidden`. --%>
+        <%!-- V1 UI fix (Allen 2026-05-21) — toggle button for the right
+              sidebar (Members panel). Visible on BOTH mobile AND desktop
+              so the sidebar is always recoverable (the prior `lg:hidden`
+              + `phx-click-away` combo could strand the sidebar in a
+              hidden state on desktop). Same pattern as the left panel
+              toggle above. `display: "block"` matches `lg:block`. --%>
         <button
           :if={@has_right_sidebar}
           type="button"
-          phx-click={JS.toggle(to: "#right-sidebar")}
-          class="lg:hidden p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-500"
+          phx-click={JS.toggle(to: "#right-sidebar", display: "block")}
+          class="p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-800 text-zinc-500"
           title="Toggle members panel"
           aria-label="Toggle members panel"
         >
